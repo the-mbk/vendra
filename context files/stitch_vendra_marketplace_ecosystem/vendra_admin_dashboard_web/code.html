@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Vendra Admin Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-container-highest": "#d3e4fe",
+                      "on-secondary": "#ffffff",
+                      "on-error": "#ffffff",
+                      "surface-tint": "#5257a5",
+                      "error-container": "#ffdad6",
+                      "on-primary-fixed-variant": "#3a3e8b",
+                      "inverse-primary": "#bfc1ff",
+                      "surface-container-high": "#dce9ff",
+                      "surface-bright": "#f8f9ff",
+                      "secondary": "#9d4300",
+                      "outline-variant": "#c7c5d3",
+                      "background": "#f8f9ff",
+                      "on-primary-container": "#acb0ff",
+                      "on-surface-variant": "#464651",
+                      "inverse-on-surface": "#eaf1ff",
+                      "tertiary-fixed": "#6bff8f",
+                      "primary-fixed-dim": "#bfc1ff",
+                      "surface-container-low": "#eff4ff",
+                      "primary": "#232774",
+                      "primary-fixed": "#e1e0ff",
+                      "on-tertiary-container": "#35d168",
+                      "on-tertiary": "#ffffff",
+                      "tertiary": "#003a16",
+                      "outline": "#777682",
+                      "on-surface": "#0b1c30",
+                      "surface": "#f8f9ff",
+                      "surface-container": "#e5eeff",
+                      "on-secondary-fixed-variant": "#783200",
+                      "tertiary-container": "#005422",
+                      "on-tertiary-fixed-variant": "#005321",
+                      "on-primary-fixed": "#0a0b5f",
+                      "error": "#ba1a1a",
+                      "secondary-container": "#fd761a",
+                      "on-primary": "#ffffff",
+                      "primary-container": "#3b3f8c",
+                      "on-tertiary-fixed": "#002109",
+                      "surface-container-lowest": "#ffffff",
+                      "inverse-surface": "#213145",
+                      "surface-dim": "#cbdbf5",
+                      "secondary-fixed": "#ffdbca",
+                      "tertiary-fixed-dim": "#4ae176",
+                      "on-background": "#0b1c30",
+                      "on-secondary-container": "#5c2400",
+                      "secondary-fixed-dim": "#ffb690",
+                      "on-secondary-fixed": "#341100",
+                      "surface-variant": "#d3e4fe",
+                      "on-error-container": "#93000a"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "gutter": "16px",
+                      "xs": "4px",
+                      "container-margin": "20px",
+                      "md": "16px",
+                      "xl": "32px",
+                      "sm": "8px",
+                      "lg": "24px",
+                      "base": "8px",
+                      "2xl": "48px"
+              },
+              "fontFamily": {
+                      "body-lg": ["Inter"],
+                      "body-md": ["Inter"],
+                      "h2": ["Inter"],
+                      "h1": ["Inter"],
+                      "label-md": ["Inter"],
+                      "h3": ["Inter"],
+                      "label-sm": ["Inter"],
+                      "body-sm": ["Inter"]
+              },
+              "fontSize": {
+                      "body-lg": ["18px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                      "body-md": ["16px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                      "h2": ["32px", {"lineHeight": "1.25", "letterSpacing": "-0.01em", "fontWeight": "700"}],
+                      "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                      "label-md": ["14px", {"lineHeight": "1.2", "fontWeight": "600"}],
+                      "h3": ["24px", {"lineHeight": "1.3", "fontWeight": "700"}],
+                      "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                      "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}]
+              }
+            }
+          }
+        }
+    </script>
+<style>
+        body {
+            background-color: theme('colors.background');
+            color: theme('colors.on-background');
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+        }
+        .shadow-ambient {
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+        }
+    </style>
+</head>
+<body class="font-body-md text-body-md antialiased overflow-hidden">
+<!-- Side NavBar -->
+<nav class="bg-primary text-on-primary docked left-0 h-screen w-64 border-r border-outline-variant dark:border-none shadow-sm flex flex-col h-full py-lg space-y-2 flex-shrink-0">
+<div class="px-md mb-lg">
+<h1 class="font-h3 text-h3 font-bold text-on-primary">Vendra</h1>
+<p class="font-body-sm text-body-sm text-on-primary/80">Super Admin</p>
+</div>
+<div class="flex-1 overflow-y-auto">
+<div class="px-md mb-sm text-label-sm font-label-sm text-on-primary/60 uppercase tracking-wider">Overview</div>
+<a class="bg-primary-container text-on-primary-container font-label-md text-label-md font-bold rounded-lg mx-2 px-md py-sm flex items-center mb-1" href="#">
+<span class="material-symbols-outlined mr-sm" data-icon="dashboard" data-weight="fill" style="font-variation-settings: 'FILL' 1;">dashboard</span>
+                Dashboard
+            </a>
+<div class="px-md mt-lg mb-sm text-label-sm font-label-sm text-on-primary/60 uppercase tracking-wider">Management</div>
+<a class="text-on-primary hover:bg-surface-container-high/20 font-label-md text-label-md mx-2 px-md py-sm rounded-lg flex items-center mb-1 transition-colors" href="#">
+<span class="material-symbols-outlined mr-sm" data-icon="storefront">storefront</span>
+                Vendors
+            </a>
+<a class="text-on-primary hover:bg-surface-container-high/20 font-label-md text-label-md mx-2 px-md py-sm rounded-lg flex items-center mb-1 transition-colors" href="#">
+<span class="material-symbols-outlined mr-sm" data-icon="two_wheeler">two_wheeler</span>
+                Riders
+            </a>
+<a class="text-on-primary hover:bg-surface-container-high/20 font-label-md text-label-md mx-2 px-md py-sm rounded-lg flex items-center mb-1 transition-colors" href="#">
+<span class="material-symbols-outlined mr-sm" data-icon="groups">groups</span>
+                Customers
+            </a>
+<div class="px-md mt-lg mb-sm text-label-sm font-label-sm text-on-primary/60 uppercase tracking-wider">Operations</div>
+<a class="text-on-primary hover:bg-surface-container-high/20 font-label-md text-label-md mx-2 px-md py-sm rounded-lg flex items-center mb-1 transition-colors" href="#">
+<span class="material-symbols-outlined mr-sm" data-icon="gavel">gavel</span>
+                Disputes
+                <span class="ml-auto bg-error text-on-error font-label-sm text-label-sm rounded-full px-2 py-0.5">5</span>
+</a>
+<div class="px-md mt-lg mb-sm text-label-sm font-label-sm text-on-primary/60 uppercase tracking-wider">System</div>
+<a class="text-on-primary hover:bg-surface-container-high/20 font-label-md text-label-md mx-2 px-md py-sm rounded-lg flex items-center mb-1 transition-colors" href="#">
+<span class="material-symbols-outlined mr-sm" data-icon="settings">settings</span>
+                Settings
+            </a>
+</div>
+<div class="px-md mt-auto">
+<div class="flex items-center p-sm bg-primary-container/20 rounded-lg">
+<img alt="Admin Avatar" class="w-10 h-10 rounded-full mr-sm object-cover" data-alt="A professional headshot of a Pakistani male administrator in his late 30s. He is wearing a crisp white collared shirt. The lighting is studio quality, soft and even, highlighting his features against a neutral grey background. The mood is confident and authoritative." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC5AYW-13ajSs7R3Iirhck8dyIrHDOZ_9o-Qd0i6u1F2X5_d-NYufN8zizHtW52xn9m0U4alIJtWM7ltPJDJWWM2e-tsowdxeD1nfO7tXHwyCtJFByTcnj8xcxUhosFgyy0zYPFeW184SebbQx1O85C-xJOLUQpJYu_t_5e5jg47l8WsSjvj8lWl5dBqTLUnh0pNjzvQ3bSsuBcg-dRnZCAJXDpNHN8z7n9ly4KXrYyEYru33PA-Deg6GOdBI8DxFnLIF36DLuHYjU"/>
+<div>
+<p class="font-label-md text-label-md text-on-primary">Admin User</p>
+<p class="font-label-sm text-label-sm text-on-primary/70">admin@vendra.pk</p>
+</div>
+</div>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col h-screen overflow-hidden bg-background">
+<!-- Top App Bar -->
+<header class="bg-surface-container-lowest flex justify-between items-center w-full px-container-margin py-md shadow-sm z-10 flex-shrink-0">
+<div class="flex items-center">
+<h2 class="font-h3 text-h3 font-bold text-on-surface mr-md">Platform Overview</h2>
+<div class="bg-error-container text-on-error-container font-label-sm text-label-sm px-3 py-1 rounded-full flex items-center">
+<span class="material-symbols-outlined text-[16px] mr-1" data-icon="warning">warning</span>
+                    5 open disputes
+                </div>
+</div>
+<div class="flex items-center space-x-sm text-on-surface-variant">
+<button class="p-2 hover:bg-surface-container-low rounded-full transition-colors relative">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-error rounded-full"></span>
+</button>
+<button class="p-2 hover:bg-surface-container-low rounded-full transition-colors">
+<span class="material-symbols-outlined" data-icon="account_circle">account_circle</span>
+</button>
+</div>
+</header>
+<!-- Scrollable Content -->
+<div class="flex-1 overflow-y-auto p-container-margin md:p-lg lg:p-xl space-y-lg">
+<!-- KPI Row -->
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-md">
+<div class="bg-surface-container-lowest p-md rounded-lg shadow-ambient border border-outline-variant/30 flex flex-col justify-between">
+<div class="flex justify-between items-start mb-sm">
+<p class="font-label-md text-label-md text-on-surface-variant">Active Vendors</p>
+<span class="material-symbols-outlined text-primary" data-icon="storefront">storefront</span>
+</div>
+<p class="font-h2 text-h2 text-on-surface">148</p>
+<p class="font-label-sm text-label-sm text-tertiary mt-xs flex items-center">
+<span class="material-symbols-outlined text-[14px] mr-1" data-icon="trending_up">trending_up</span> +12 this week
+                    </p>
+</div>
+<div class="bg-surface-container-lowest p-md rounded-lg shadow-ambient border border-outline-variant/30 flex flex-col justify-between">
+<div class="flex justify-between items-start mb-sm">
+<p class="font-label-md text-label-md text-on-surface-variant">Online Riders</p>
+<span class="material-symbols-outlined text-secondary" data-icon="two_wheeler">two_wheeler</span>
+</div>
+<p class="font-h2 text-h2 text-on-surface">34</p>
+<p class="font-label-sm text-label-sm text-on-surface-variant mt-xs">Out of 50 registered</p>
+</div>
+<div class="bg-surface-container-lowest p-md rounded-lg shadow-ambient border border-outline-variant/30 flex flex-col justify-between">
+<div class="flex justify-between items-start mb-sm">
+<p class="font-label-md text-label-md text-on-surface-variant">Orders Today</p>
+<span class="material-symbols-outlined text-tertiary-container" data-icon="shopping_bag">shopping_bag</span>
+</div>
+<p class="font-h2 text-h2 text-on-surface">1,284</p>
+<p class="font-label-sm text-label-sm text-tertiary mt-xs flex items-center">
+<span class="material-symbols-outlined text-[14px] mr-1" data-icon="trending_up">trending_up</span> +5% vs yesterday
+                    </p>
+</div>
+<div class="bg-surface-container-lowest p-md rounded-lg shadow-ambient border border-error/50 flex flex-col justify-between">
+<div class="flex justify-between items-start mb-sm">
+<p class="font-label-md text-label-md text-error">Open Disputes</p>
+<span class="material-symbols-outlined text-error" data-icon="gavel">gavel</span>
+</div>
+<p class="font-h2 text-h2 text-error">5</p>
+<p class="font-label-sm text-label-sm text-error mt-xs">Action required</p>
+</div>
+<div class="bg-surface-container-lowest p-md rounded-lg shadow-ambient border border-outline-variant/30 flex flex-col justify-between">
+<div class="flex justify-between items-start mb-sm">
+<p class="font-label-md text-label-md text-on-surface-variant">Pending Approvals</p>
+<span class="material-symbols-outlined text-secondary-container" data-icon="pending_actions">pending_actions</span>
+</div>
+<p class="font-h2 text-h2 text-on-surface">8</p>
+<p class="font-label-sm text-label-sm text-on-surface-variant mt-xs">Vendors waiting</p>
+</div>
+</div>
+<!-- Main Content Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-lg">
+<!-- Left Column (Wider) -->
+<div class="lg:col-span-2 space-y-lg">
+<!-- Chart Area Placeholder (Bento Style) -->
+<div class="bg-surface-container-lowest rounded-xl shadow-ambient border border-outline-variant/30 p-lg">
+<div class="flex justify-between items-center mb-md">
+<h3 class="font-h3 text-h3 text-on-surface">Daily Orders &amp; Revenue</h3>
+<button class="font-label-sm text-label-sm text-primary hover:underline">View Full Report</button>
+</div>
+<div class="h-64 bg-surface-container rounded-lg flex items-center justify-center border border-outline-variant/20 relative overflow-hidden">
+<!-- Faux Chart implementation for visual fidelity -->
+<div class="absolute inset-0 flex items-end px-md pb-md space-x-2">
+<div class="w-1/12 bg-primary/20 rounded-t h-[40%]"></div>
+<div class="w-1/12 bg-primary/40 rounded-t h-[55%]"></div>
+<div class="w-1/12 bg-primary/60 rounded-t h-[30%]"></div>
+<div class="w-1/12 bg-primary/80 rounded-t h-[70%]"></div>
+<div class="w-1/12 bg-primary rounded-t h-[85%]"></div>
+<div class="w-1/12 bg-primary/60 rounded-t h-[60%]"></div>
+<div class="w-1/12 bg-primary/40 rounded-t h-[45%]"></div>
+</div>
+<div class="absolute top-md right-md bg-surface-container-lowest px-sm py-xs rounded border border-outline-variant/30 shadow-sm">
+<p class="font-label-sm text-label-sm text-on-surface-variant">Revenue: <span class="text-on-surface font-bold">Rs. 450K</span></p>
+</div>
+</div>
+</div>
+<!-- Disputes Table -->
+<div class="bg-surface-container-lowest rounded-xl shadow-ambient border border-outline-variant/30 overflow-hidden">
+<div class="p-md border-b border-outline-variant/30 flex justify-between items-center bg-surface-container-low/50">
+<h3 class="font-h3 text-h3 text-on-surface">Recent Disputes</h3>
+<button class="text-primary font-label-md text-label-md flex items-center">
+                                View All <span class="material-symbols-outlined ml-1 text-[18px]" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low/30 border-b border-outline-variant/30">
+<th class="p-md font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">ID</th>
+<th class="p-md font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Customer</th>
+<th class="p-md font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Vendor</th>
+<th class="p-md font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Issue</th>
+<th class="p-md font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Status</th>
+<th class="p-md font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider text-right">Action</th>
+</tr>
+</thead>
+<tbody class="font-body-sm text-body-sm text-on-surface divide-y divide-outline-variant/20">
+<tr class="hover:bg-surface-container-low/50 transition-colors">
+<td class="p-md text-on-surface-variant font-mono">#D-4921</td>
+<td class="p-md font-medium">Ahmed Raza</td>
+<td class="p-md">Karachi Electronics</td>
+<td class="p-md">Missing Item in Order</td>
+<td class="p-md"><span class="bg-error-container text-on-error-container px-2 py-1 rounded-full text-xs font-bold">Open</span></td>
+<td class="p-md text-right"><button class="text-primary hover:underline">Review</button></td>
+</tr>
+<tr class="hover:bg-surface-container-low/50 transition-colors">
+<td class="p-md text-on-surface-variant font-mono">#D-4920</td>
+<td class="p-md font-medium">Fatima Ali</td>
+<td class="p-md">Lahore Lawn Hub</td>
+<td class="p-md">Wrong Size Delivered</td>
+<td class="p-md"><span class="bg-error-container text-on-error-container px-2 py-1 rounded-full text-xs font-bold">Open</span></td>
+<td class="p-md text-right"><button class="text-primary hover:underline">Review</button></td>
+</tr>
+<tr class="hover:bg-surface-container-low/50 transition-colors">
+<td class="p-md text-on-surface-variant font-mono">#D-4918</td>
+<td class="p-md font-medium">Usman Tariq</td>
+<td class="p-md">Peshawar Dry Fruits</td>
+<td class="p-md">Late Delivery &gt; 2h</td>
+<td class="p-md"><span class="bg-surface-container-highest text-on-surface px-2 py-1 rounded-full text-xs font-bold">In Progress</span></td>
+<td class="p-md text-right"><button class="text-primary hover:underline">Review</button></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<!-- Right Column (Narrower) -->
+<div class="space-y-lg">
+<!-- Vendor Approvals List -->
+<div class="bg-surface-container-lowest rounded-xl shadow-ambient border border-outline-variant/30 overflow-hidden">
+<div class="p-md border-b border-outline-variant/30 bg-surface-container-low/50">
+<h3 class="font-h3 text-h3 text-on-surface">Pending Approvals</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant">8 vendors awaiting review</p>
+</div>
+<div class="divide-y divide-outline-variant/20 p-sm">
+<div class="p-sm flex items-start space-x-md hover:bg-surface-container-low/50 rounded-lg transition-colors">
+<div class="w-10 h-10 bg-primary-container text-on-primary-container rounded-full flex items-center justify-center flex-shrink-0 font-bold">SB</div>
+<div class="flex-1 min-w-0">
+<p class="font-label-md text-label-md text-on-surface truncate">Sindh Bakers &amp; Sweets</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant truncate">Hyderabad • Food &amp; Bev</p>
+<div class="mt-sm flex space-x-sm">
+<button class="bg-primary text-on-primary font-label-sm text-label-sm px-3 py-1 rounded hover:bg-primary/90 transition-colors">Approve</button>
+<button class="bg-surface-container text-on-surface font-label-sm text-label-sm px-3 py-1 rounded border border-outline-variant/30 hover:bg-surface-container-high transition-colors">Review</button>
+</div>
+</div>
+</div>
+<div class="p-sm flex items-start space-x-md hover:bg-surface-container-low/50 rounded-lg transition-colors">
+<div class="w-10 h-10 bg-secondary-container text-on-secondary-container rounded-full flex items-center justify-center flex-shrink-0 font-bold">QG</div>
+<div class="flex-1 min-w-0">
+<p class="font-label-md text-label-md text-on-surface truncate">Quetta Garments Wholesale</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant truncate">Quetta • Apparel</p>
+<div class="mt-sm flex space-x-sm">
+<button class="bg-primary text-on-primary font-label-sm text-label-sm px-3 py-1 rounded hover:bg-primary/90 transition-colors">Approve</button>
+<button class="bg-surface-container text-on-surface font-label-sm text-label-sm px-3 py-1 rounded border border-outline-variant/30 hover:bg-surface-container-high transition-colors">Review</button>
+</div>
+</div>
+</div>
+<div class="p-sm text-center">
+<button class="text-primary font-label-sm text-label-sm hover:underline">View All 8 Requests</button>
+</div>
+</div>
+</div>
+<!-- Platform Health Metrics (Glassmorphism inspired card) -->
+<div class="bg-gradient-to-br from-surface-container-lowest to-surface-container-low rounded-xl shadow-ambient border border-outline-variant/30 p-md relative overflow-hidden">
+<div class="absolute -right-4 -top-4 w-24 h-24 bg-tertiary/10 rounded-full blur-xl"></div>
+<h3 class="font-h3 text-h3 text-on-surface mb-md relative z-10">Platform Health</h3>
+<div class="space-y-md relative z-10">
+<div>
+<div class="flex justify-between font-label-sm text-label-sm mb-xs">
+<span class="text-on-surface-variant">System Uptime</span>
+<span class="text-tertiary font-bold">99.98%</span>
+</div>
+<div class="w-full bg-surface-container rounded-full h-2">
+<div class="bg-tertiary h-2 rounded-full" style="width: 99.98%"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between font-label-sm text-label-sm mb-xs">
+<span class="text-on-surface-variant">API Response Time</span>
+<span class="text-on-surface font-bold">124ms</span>
+</div>
+<div class="w-full bg-surface-container rounded-full h-2">
+<div class="bg-primary h-2 rounded-full" style="width: 30%"></div>
+</div>
+</div>
+<div class="pt-sm border-t border-outline-variant/30 flex items-center text-on-surface-variant font-body-sm text-body-sm">
+<span class="material-symbols-outlined text-tertiary mr-sm text-[18px]" data-icon="check_circle">check_circle</span>
+                                All systems operational in PK regions.
+                            </div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>

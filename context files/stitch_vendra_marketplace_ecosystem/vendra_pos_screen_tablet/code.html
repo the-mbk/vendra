@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Fresh Mart - POS Mode</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container-highest": "#d3e4fe",
+                        "on-secondary": "#ffffff",
+                        "on-error": "#ffffff",
+                        "surface-tint": "#5257a5",
+                        "error-container": "#ffdad6",
+                        "on-primary-fixed-variant": "#3a3e8b",
+                        "inverse-primary": "#bfc1ff",
+                        "surface-container-high": "#dce9ff",
+                        "surface-bright": "#f8f9ff",
+                        "secondary": "#9d4300",
+                        "outline-variant": "#c7c5d3",
+                        "background": "#f8f9ff",
+                        "on-primary-container": "#acb0ff",
+                        "on-surface-variant": "#464651",
+                        "inverse-on-surface": "#eaf1ff",
+                        "tertiary-fixed": "#6bff8f",
+                        "primary-fixed-dim": "#bfc1ff",
+                        "surface-container-low": "#eff4ff",
+                        "primary": "#232774",
+                        "primary-fixed": "#e1e0ff",
+                        "on-tertiary-container": "#35d168",
+                        "on-tertiary": "#ffffff",
+                        "tertiary": "#003a16",
+                        "outline": "#777682",
+                        "on-surface": "#0b1c30",
+                        "surface": "#f8f9ff",
+                        "surface-container": "#e5eeff",
+                        "on-secondary-fixed-variant": "#783200",
+                        "tertiary-container": "#005422",
+                        "on-tertiary-fixed-variant": "#005321",
+                        "on-primary-fixed": "#0a0b5f",
+                        "error": "#ba1a1a",
+                        "secondary-container": "#fd761a",
+                        "on-primary": "#ffffff",
+                        "primary-container": "#3b3f8c",
+                        "on-tertiary-fixed": "#002109",
+                        "surface-container-lowest": "#ffffff",
+                        "inverse-surface": "#213145",
+                        "surface-dim": "#cbdbf5",
+                        "secondary-fixed": "#ffdbca",
+                        "tertiary-fixed-dim": "#4ae176",
+                        "on-background": "#0b1c30",
+                        "on-secondary-container": "#5c2400",
+                        "secondary-fixed-dim": "#ffb690",
+                        "on-secondary-fixed": "#341100",
+                        "surface-variant": "#d3e4fe",
+                        "on-error-container": "#93000a"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "gutter": "16px",
+                        "xs": "4px",
+                        "container-margin": "20px",
+                        "md": "16px",
+                        "xl": "32px",
+                        "sm": "8px",
+                        "lg": "24px",
+                        "base": "8px",
+                        "2xl": "48px"
+                    },
+                    "fontFamily": {
+                        "body-lg": ["Inter"],
+                        "body-md": ["Inter"],
+                        "h2": ["Inter"],
+                        "h1": ["Inter"],
+                        "label-md": ["Inter"],
+                        "h3": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "body-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-lg": ["18px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "body-md": ["16px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "h2": ["32px", { "lineHeight": "1.25", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+                        "h1": ["40px", { "lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "label-md": ["14px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "h3": ["24px", { "lineHeight": "1.3", "fontWeight": "700" }],
+                        "label-sm": ["12px", { "lineHeight": "1.2", "fontWeight": "500" }],
+                        "body-sm": ["14px", { "lineHeight": "1.5", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-on-background font-body-md min-h-screen flex flex-col h-screen overflow-hidden">
+<!-- POS Header -->
+<header class="bg-primary text-on-primary flex justify-between items-center px-container-margin py-md shadow-sm z-50 shrink-0">
+<div class="flex items-center gap-md">
+<span class="material-symbols-outlined text-h2" style="font-variation-settings: 'FILL' 1;">storefront</span>
+<div>
+<h1 class="font-h3 text-h3 m-0">Fresh Mart — POS Mode</h1>
+</div>
+</div>
+<div class="flex items-center gap-lg">
+<div class="flex items-center gap-sm bg-primary-container px-4 py-2 rounded-full">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">person</span>
+<span class="font-label-md text-label-md text-on-primary-container">Ahmad (Cashier)</span>
+</div>
+<button class="flex items-center justify-center p-2 rounded-full hover:bg-surface-tint transition-colors">
+<span class="material-symbols-outlined">menu</span>
+</button>
+</div>
+</header>
+<!-- Main POS Layout -->
+<main class="flex-1 flex overflow-hidden">
+<!-- Left Column: Product Selection -->
+<section class="w-[600px] flex flex-col border-r border-outline-variant bg-surface flex-shrink-0">
+<!-- Search & Barcode -->
+<div class="p-container-margin shrink-0">
+<div class="relative flex items-center w-full">
+<span class="material-symbols-outlined absolute left-4 text-outline">search</span>
+<input class="w-full pl-12 pr-12 py-3 bg-surface-container-lowest border border-outline-variant rounded-lg focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none font-body-md text-body-md shadow-sm placeholder:text-outline-variant" placeholder="Search products or scan barcode..." type="text"/>
+<button class="absolute right-4 text-primary hover:text-surface-tint">
+<span class="material-symbols-outlined">barcode_scanner</span>
+</button>
+</div>
+</div>
+<!-- Categories -->
+<div class="px-container-margin pb-sm shrink-0 overflow-x-auto no-scrollbar flex gap-sm">
+<button class="px-6 py-2 rounded-full bg-primary text-on-primary font-label-md text-label-md whitespace-nowrap shadow-sm">All</button>
+<button class="px-6 py-2 rounded-full bg-surface-container-lowest border border-outline-variant text-on-surface-variant hover:bg-surface-container-low font-label-md text-label-md whitespace-nowrap transition-colors">Groceries</button>
+<button class="px-6 py-2 rounded-full bg-surface-container-lowest border border-outline-variant text-on-surface-variant hover:bg-surface-container-low font-label-md text-label-md whitespace-nowrap transition-colors">Snacks</button>
+<button class="px-6 py-2 rounded-full bg-surface-container-lowest border border-outline-variant text-on-surface-variant hover:bg-surface-container-low font-label-md text-label-md whitespace-nowrap transition-colors">Beverages</button>
+<button class="px-6 py-2 rounded-full bg-surface-container-lowest border border-outline-variant text-on-surface-variant hover:bg-surface-container-low font-label-md text-label-md whitespace-nowrap transition-colors">Personal Care</button>
+</div>
+<!-- Product Grid -->
+<div class="flex-1 overflow-y-auto p-container-margin">
+<div class="grid grid-cols-3 gap-gutter">
+<!-- Product Card 1 -->
+<div class="bg-surface-container-lowest rounded-lg shadow-sm border border-outline-variant flex flex-col overflow-hidden group cursor-pointer hover:shadow-md transition-shadow">
+<div class="h-32 bg-surface-container flex items-center justify-center p-4">
+<img alt="Basmati Rice" class="h-full object-contain mix-blend-multiply" data-alt="A high-quality studio shot of a premium bag of basmati rice, isolated on a clean white background. The packaging is vibrant and detailed, reflecting a modern retail environment. The lighting is bright and even, typical of an e-commerce product photograph. The overall aesthetic is clean, professional, and consistent with a polished marketplace UI." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC3aNG1xid7GOBZOVT_Y9hSBNQRRdckZ_4h2ia0bFYcbl23s6s4KerKwrUxrrWn9lL4Icsi5IMH91Wao2IssAUk2dONCxUFCsn2MSu4FVmilyTvvlVGoGYXCRnZ9_YP63MJaTmp2NEDYG95luTY_shG723ukcj168R-bj8g6WhF8zyOQ7YOV-5cN7-bQBd-XBsbL1E9xG_JBUyY8PTqnRe0wOVlM1w7YQDTkRVRntr6EOO_HllT53UiEMaKACn68c4CerCxnGJu8Cg"/>
+</div>
+<div class="p-sm flex flex-col flex-1">
+<h3 class="font-label-md text-label-md text-on-surface line-clamp-2 mb-1">Premium Basmati Rice 5kg</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mb-2">Rs. 2,150</p>
+<div class="mt-auto flex justify-end">
+<button class="bg-primary text-on-primary w-8 h-8 rounded-full flex items-center justify-center hover:bg-surface-tint transition-colors shadow-sm">
+<span class="material-symbols-outlined text-sm">add</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Product Card 2 -->
+<div class="bg-surface-container-lowest rounded-lg shadow-sm border border-outline-variant flex flex-col overflow-hidden group cursor-pointer hover:shadow-md transition-shadow">
+<div class="h-32 bg-surface-container flex items-center justify-center p-4">
+<img alt="Cooking Oil" class="h-full object-contain mix-blend-multiply" data-alt="A studio-quality image of a bright yellow bottle of cooking oil, presented against a stark white backdrop. The bottle reflects soft, diffused lighting, emphasizing its clarity and purity. The label is visible but not distracting. The composition is simple, functional, and aligns with high-fidelity, modern e-commerce visual standards." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCA-_juPOuFOIxZpLoJJ6aK5CbbBKmdT0quBwnNj--_RmnmHg-2PJy8iAIj0G6x8eeY_YsdMog0nW30Paaoooh7_UO4rrhjdANVY3JyOoqSYNtiuZwQ91rspk6SpueuOHNTSYn8cvfxT771SJ4MNjxmI-vAPdyoi1-MBMHcz-37izzj8ypDoKhACPToHejKUv7jlfzMSHzYZJcMuKyqD9BCzhrglgEmeiKN84Ca1NVPp1BYo2h8S8eSuNep0lgc87nc0sUYTPCEN3Y"/>
+</div>
+<div class="p-sm flex flex-col flex-1">
+<h3 class="font-label-md text-label-md text-on-surface line-clamp-2 mb-1">Sunflower Cooking Oil 1L</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mb-2">Rs. 580</p>
+<div class="mt-auto flex justify-end">
+<button class="bg-primary text-on-primary w-8 h-8 rounded-full flex items-center justify-center hover:bg-surface-tint transition-colors shadow-sm">
+<span class="material-symbols-outlined text-sm">add</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Product Card 3 -->
+<div class="bg-surface-container-lowest rounded-lg shadow-sm border border-outline-variant flex flex-col overflow-hidden group cursor-pointer hover:shadow-md transition-shadow relative">
+<div class="absolute top-2 left-2 bg-secondary-container text-on-secondary-container px-2 py-1 rounded text-[10px] font-bold z-10">PROMO</div>
+<div class="h-32 bg-surface-container flex items-center justify-center p-4">
+<img alt="Milk Pack" class="h-full object-contain mix-blend-multiply" data-alt="A clean, isolated product shot of a carton of fresh milk. The carton features modern branding and is positioned perfectly center against a white background. The lighting highlights the crisp edges of the packaging. The image is designed to fit seamlessly into a clean, white-themed digital marketplace interface." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBcE9p8CbVzEyRjwf4vGzhoDH-8Z2b3Od1jQGHjBVfS139yQJ3wui2QMkRpQPi6W32iJoveZvOjCnJVSwQRac2fPSu0VGfMTDwvET2d6Y2GlQQSq15pgo8nhcgOFoxgSahSpxHXjTlpSnp3rL6PpHtNcD5aT1z2zXKl5OINCGX-kUKq5LS9ioKOonk6eQm2CDmcv4tP0IHc4wzYVe3fA9X89n3B7Jf34HEV2oF5pDsGgz249HIxP68L2XVOYyxqAwwhpPgEPcgr24Y"/>
+</div>
+<div class="p-sm flex flex-col flex-1">
+<h3 class="font-label-md text-label-md text-on-surface line-clamp-2 mb-1">Full Cream Milk 1L</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mb-2">Rs. 240</p>
+<div class="mt-auto flex justify-end">
+<button class="bg-primary text-on-primary w-8 h-8 rounded-full flex items-center justify-center hover:bg-surface-tint transition-colors shadow-sm">
+<span class="material-symbols-outlined text-sm">add</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Product Card 4 -->
+<div class="bg-surface-container-lowest rounded-lg shadow-sm border border-outline-variant flex flex-col overflow-hidden group cursor-pointer hover:shadow-md transition-shadow">
+<div class="h-32 bg-surface-container flex items-center justify-center p-4">
+<img alt="Tea" class="h-full object-contain mix-blend-multiply" data-alt="A high-resolution photograph of a branded box of black tea bags, placed on a pristine white surface. The red and gold packaging stands out vividly against the neutral background. The lighting is studio-quality, ensuring no harsh shadows are cast, making it ideal for a clean, grid-based online store layout." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAhhVRSqrmXGawRv4xoZGcfuZVszMI984BLGeMrP0uLcfk1R1Nhnb9tO8A6tB52j-MzzNonarJsDL6LPErxUgCXNdvhI_2lDx8RgKJ2vQ3KLiX0t9jdEujCGqutkFT1N6lh5X1N766QJIJ1Cs72HkJNrO9omxxDkKWyPu9cVsFUdv_OtVlSkMlG0EXnIqZoJ_QaztM-q6PgZWuH-huPAxTdNYi3Zv-uhB-DVZCuv6LEpVRxRurd8J1SiTwdX84ZRpKRcY40aOhNmvU"/>
+</div>
+<div class="p-sm flex flex-col flex-1">
+<h3 class="font-label-md text-label-md text-on-surface line-clamp-2 mb-1">Strong Black Tea 200g</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mb-2">Rs. 450</p>
+<div class="mt-auto flex justify-end">
+<button class="bg-primary text-on-primary w-8 h-8 rounded-full flex items-center justify-center hover:bg-surface-tint transition-colors shadow-sm">
+<span class="material-symbols-outlined text-sm">add</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Product Card 5 -->
+<div class="bg-surface-container-lowest rounded-lg shadow-sm border border-outline-variant flex flex-col overflow-hidden group cursor-pointer hover:shadow-md transition-shadow">
+<div class="h-32 bg-surface-container flex items-center justify-center p-4">
+<img alt="Cookies" class="h-full object-contain mix-blend-multiply" data-alt="A professional product image of a pack of chocolate chip cookies. The packaging is colorful and appealing, set against a completely white background. The image is brightly lit, showcasing the product details clearly. This composition is tailored for an e-commerce platform that values a clean, uniform presentation of diverse products." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBlbLtD8tdtUPv8pBazGqQo9ZHXUoM1a_jKlSBMhiml0v87ICuX4qC9fVZJzaE_DuZpgeD9swielTAXm7LDSRGm4q323qqlFjhNiwfl3zpAMiTIm5sYefuJiEuI0A7ximzgYouwEAZ1pceKKjlcAV6zU73VMmMNHGhvz8rm7OSeYn57i9iS0Ya1wRPTkIVRL0lBhhxLUsPApyIy8lpwO0Tojc2Tv2BeGUU-7s_QlbGsRf_V_cnHDA2cMnmHuLOEzrdmMml-Ds-5KRY"/>
+</div>
+<div class="p-sm flex flex-col flex-1">
+<h3 class="font-label-md text-label-md text-on-surface line-clamp-2 mb-1">Choco Chip Cookies Family Pack</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mb-2">Rs. 150</p>
+<div class="mt-auto flex justify-end">
+<button class="bg-primary text-on-primary w-8 h-8 rounded-full flex items-center justify-center hover:bg-surface-tint transition-colors shadow-sm">
+<span class="material-symbols-outlined text-sm">add</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Right Column: Current Sale -->
+<section class="flex-1 bg-surface-container-lowest flex flex-col shadow-[-4px_0_12px_rgba(0,0,0,0.05)] z-10">
+<!-- Sale Header -->
+<div class="p-container-margin border-b border-outline-variant flex justify-between items-center bg-surface-container-lowest shrink-0">
+<h2 class="font-h3 text-h3 text-on-surface m-0">Current Sale</h2>
+<div class="flex gap-sm">
+<button class="p-2 text-outline hover:text-error transition-colors rounded-full hover:bg-error-container">
+<span class="material-symbols-outlined">delete</span>
+</button>
+<button class="p-2 text-outline hover:text-primary transition-colors rounded-full hover:bg-surface-container">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Item List -->
+<div class="flex-1 overflow-y-auto p-container-margin space-y-md">
+<!-- Bill Item 1 -->
+<div class="flex items-center justify-between p-sm hover:bg-surface-container-lowest rounded-lg group">
+<div class="flex-1">
+<h4 class="font-label-md text-label-md text-on-surface">Full Cream Milk 1L</h4>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Rs. 240</p>
+</div>
+<div class="flex items-center gap-sm mx-md">
+<button class="w-8 h-8 flex items-center justify-center rounded-full border border-outline-variant text-on-surface-variant hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-sm">remove</span>
+</button>
+<span class="font-label-md text-label-md w-6 text-center">2</span>
+<button class="w-8 h-8 flex items-center justify-center rounded-full border border-outline-variant text-on-surface-variant hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-sm">add</span>
+</button>
+</div>
+<div class="text-right w-20">
+<span class="font-label-md text-label-md text-on-surface">Rs. 480</span>
+</div>
+</div>
+<!-- Bill Item 2 -->
+<div class="flex items-center justify-between p-sm hover:bg-surface-container-lowest rounded-lg group">
+<div class="flex-1">
+<h4 class="font-label-md text-label-md text-on-surface">Sunflower Cooking Oil 1L</h4>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Rs. 580</p>
+</div>
+<div class="flex items-center gap-sm mx-md">
+<button class="w-8 h-8 flex items-center justify-center rounded-full border border-outline-variant text-on-surface-variant hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-sm">remove</span>
+</button>
+<span class="font-label-md text-label-md w-6 text-center">1</span>
+<button class="w-8 h-8 flex items-center justify-center rounded-full border border-outline-variant text-on-surface-variant hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-sm">add</span>
+</button>
+</div>
+<div class="text-right w-20">
+<span class="font-label-md text-label-md text-on-surface">Rs. 580</span>
+</div>
+</div>
+</div>
+<!-- Totals & Payment -->
+<div class="bg-surface-container-low border-t border-outline-variant shrink-0">
+<div class="p-container-margin space-y-2 border-b border-outline-variant">
+<div class="flex justify-between items-center text-on-surface-variant">
+<span class="font-body-sm text-body-sm">Subtotal</span>
+<span class="font-body-sm text-body-sm">Rs. 1,060</span>
+</div>
+<div class="flex justify-between items-center text-secondary">
+<span class="font-body-sm text-body-sm">Discount (Promo)</span>
+<span class="font-body-sm text-body-sm">- Rs. 70</span>
+</div>
+<div class="flex justify-between items-center pt-2">
+<span class="font-h3 text-h3 text-on-surface">Total</span>
+<span class="font-h2 text-h2 text-primary">Rs. 990</span>
+</div>
+</div>
+<div class="p-container-margin grid grid-cols-2 gap-md">
+<button class="flex flex-col items-center justify-center py-4 bg-tertiary-container text-on-tertiary-container rounded-lg hover:bg-tertiary hover:text-on-tertiary transition-colors shadow-sm">
+<span class="material-symbols-outlined text-h3 mb-1">payments</span>
+<span class="font-label-md text-label-md">Cash Payment</span>
+</button>
+<button class="flex flex-col items-center justify-center py-4 bg-primary text-on-primary rounded-lg hover:bg-surface-tint transition-colors shadow-sm">
+<span class="material-symbols-outlined text-h3 mb-1">credit_card</span>
+<span class="font-label-md text-label-md">Card Payment</span>
+</button>
+</div>
+</div>
+</section>
+</main>
+</body></html>

@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.*
+
+# Builds & Outputs
+.next/
+/build/
+/dist/
+.dart_tool/
+.pub-cache/
+.pub/
+
+# IDE & OS
+.DS_Store
+.idea/
+*.swp
+*.tsbuildinfo
+
+# Keep .env files for team development
+!.env
+!.env.example
+!.env.local

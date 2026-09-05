@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Vendra - Pakistan ka Digital Bazaar</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container-highest": "#d3e4fe",
+                        "on-secondary": "#ffffff",
+                        "on-error": "#ffffff",
+                        "surface-tint": "#5257a5",
+                        "error-container": "#ffdad6",
+                        "on-primary-fixed-variant": "#3a3e8b",
+                        "inverse-primary": "#bfc1ff",
+                        "surface-container-high": "#dce9ff",
+                        "surface-bright": "#f8f9ff",
+                        "secondary": "#9d4300",
+                        "outline-variant": "#c7c5d3",
+                        "background": "#f8f9ff",
+                        "on-primary-container": "#acb0ff",
+                        "on-surface-variant": "#464651",
+                        "inverse-on-surface": "#eaf1ff",
+                        "tertiary-fixed": "#6bff8f",
+                        "primary-fixed-dim": "#bfc1ff",
+                        "surface-container-low": "#eff4ff",
+                        "primary": "#232774",
+                        "primary-fixed": "#e1e0ff",
+                        "on-tertiary-container": "#35d168",
+                        "on-tertiary": "#ffffff",
+                        "tertiary": "#003a16",
+                        "outline": "#777682",
+                        "on-surface": "#0b1c30",
+                        "surface": "#f8f9ff",
+                        "surface-container": "#e5eeff",
+                        "on-secondary-fixed-variant": "#783200",
+                        "tertiary-container": "#005422",
+                        "on-tertiary-fixed-variant": "#005321",
+                        "on-primary-fixed": "#0a0b5f",
+                        "error": "#ba1a1a",
+                        "secondary-container": "#fd761a",
+                        "on-primary": "#ffffff",
+                        "primary-container": "#3b3f8c",
+                        "on-tertiary-fixed": "#002109",
+                        "surface-container-lowest": "#ffffff",
+                        "inverse-surface": "#213145",
+                        "surface-dim": "#cbdbf5",
+                        "secondary-fixed": "#ffdbca",
+                        "tertiary-fixed-dim": "#4ae176",
+                        "on-background": "#0b1c30",
+                        "on-secondary-container": "#5c2400",
+                        "secondary-fixed-dim": "#ffb690",
+                        "on-secondary-fixed": "#341100",
+                        "surface-variant": "#d3e4fe",
+                        "on-error-container": "#93000a"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "gutter": "16px",
+                        "xs": "4px",
+                        "container-margin": "20px",
+                        "md": "16px",
+                        "xl": "32px",
+                        "sm": "8px",
+                        "lg": "24px",
+                        "base": "8px",
+                        "2xl": "48px"
+                    },
+                    "fontFamily": {
+                        "body-lg": ["Inter"],
+                        "body-md": ["Inter"],
+                        "h2": ["Inter"],
+                        "h1": ["Inter"],
+                        "label-md": ["Inter"],
+                        "h3": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "body-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-lg": ["18px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "body-md": ["16px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "h2": ["32px", {"lineHeight": "1.25", "letterSpacing": "-0.01em", "fontWeight": "700"}],
+                        "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "label-md": ["14px", {"lineHeight": "1.2", "fontWeight": "600"}],
+                        "h3": ["24px", {"lineHeight": "1.3", "fontWeight": "700"}],
+                        "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-surface text-on-surface">
+<!-- TopNavBar -->
+<nav class="bg-surface-container-lowest dark:bg-inverse-surface docked full-width top-0 sticky z-50 shadow-sm dark:border-b dark:border-outline-variant">
+<div class="flex justify-between items-center w-full px-container-margin py-md max-w-7xl mx-auto">
+<!-- Brand & Tagline -->
+<div class="flex items-center gap-sm">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-3xl" style="font-variation-settings: 'FILL' 1;">storefront</span>
+<span class="text-h3 font-h3 font-bold text-primary dark:text-primary-fixed">Vendra</span>
+</div>
+<div class="hidden lg:block ml-4 pl-4 border-l border-outline-variant">
+<span class="font-label-md text-label-md text-on-surface-variant">Pakistan ka Digital Bazaar</span>
+</div>
+</div>
+<!-- Search -->
+<div class="hidden md:flex flex-1 max-w-[480px] mx-xl relative">
+<input class="w-full h-12 pl-4 pr-12 rounded-lg border border-outline-variant bg-surface focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none font-body-sm text-body-sm text-on-surface transition-colors" placeholder="Search for products, brands and more..." type="text"/>
+<button class="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">search</span>
+</button>
+</div>
+<!-- Actions -->
+<div class="flex items-center gap-lg">
+<!-- Location -->
+<button class="hidden lg:flex items-center gap-xs text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">location_on</span>
+<span class="font-label-sm text-label-sm">Lahore</span>
+</button>
+<!-- Navigation Links -->
+<div class="hidden md:flex items-center gap-md">
+<a class="font-label-md text-label-md text-on-surface-variant dark:text-outline hover:text-primary hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors px-2 py-1 rounded" href="#">Categories</a>
+<a class="font-label-md text-label-md text-on-surface-variant dark:text-outline hover:text-primary hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors px-2 py-1 rounded" href="#">Deals</a>
+<a class="font-label-md text-label-md text-on-surface-variant dark:text-outline hover:text-primary hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors px-2 py-1 rounded" href="#">Sell</a>
+<a class="font-label-md text-label-md text-on-surface-variant dark:text-outline hover:text-primary hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors px-2 py-1 rounded" href="#">Help</a>
+</div>
+<!-- Icons -->
+<div class="flex items-center gap-md">
+<button class="relative text-on-surface-variant hover:text-primary transition-colors p-2 rounded-full hover:bg-surface-container-low">
+<span class="material-symbols-outlined">shopping_cart</span>
+<span class="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-secondary-container text-[10px] font-bold text-on-secondary-container">3</span>
+</button>
+<button class="text-on-surface-variant hover:text-primary transition-colors p-2 rounded-full hover:bg-surface-container-low hidden md:block">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<div class="flex items-center gap-2 pl-4 border-l border-outline-variant ml-2">
+<button class="font-label-md text-label-md text-primary hover:underline">Login</button>
+<span class="text-outline-variant">/</span>
+<button class="font-label-md text-label-md text-primary hover:underline">Sign Up</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Mobile Search (Visible only on small screens) -->
+<div class="md:hidden px-container-margin pb-md">
+<div class="relative w-full">
+<input class="w-full h-10 pl-10 pr-4 rounded-full border border-outline-variant bg-surface focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none font-body-sm text-body-sm text-on-surface" placeholder="Search Vendra..." type="text"/>
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm">search</span>
+</div>
+</div>
+</nav>
+<!-- Main Content -->
+<main class="w-full max-w-7xl mx-auto pb-2xl">
+<!-- Hero Section -->
+<section class="w-full h-[540px] bg-surface-container-low mt-lg rounded-xl overflow-hidden relative flex items-center px-container-margin md:px-xl lg:px-2xl" style="background-color: #F0EFFE;">
+<div class="absolute inset-0 z-0">
+<img alt="A bustling outdoor marketplace in Pakistan bathed in golden hour sunlight. Stalls display colorful fabrics and brass goods, while shoppers weave through the narrow lanes. The atmosphere is vibrant and energetic, capturing the essence of traditional commerce merging with modern life. The lighting creates deep, rich shadows and warm highlights, emphasizing the textures of the goods on display." class="w-full h-full object-cover opacity-20 mix-blend-multiply" data-alt="A bustling outdoor marketplace in Pakistan bathed in golden hour sunlight. Stalls display colorful fabrics and brass goods, while shoppers weave through the narrow lanes. The atmosphere is vibrant and energetic, capturing the essence of traditional commerce merging with modern life. The lighting creates deep, rich shadows and warm highlights, emphasizing the textures of the goods on display." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCBuYkon-1mvPgWZhcO00CIXx_O5eIaxtB1wObJXZFgJsEsNfTc7GjEPrHJzjXxBKPmZJG9BzldY6cAbZWckLsOiU31QQAUIInmB9ZeOZ0dtSd-WHUR0Y4lLph0LFQh8DT0jDe9silxdZsTYJF9EUxtsxy6K5X1uIbhOw3yoAcIOlmtkvWMsihEbjuIaWNFcn_SAy5aOwf20-4wAIu10orDmJeknxA-Oa9f0cHDaCJw1cGA0VidWAXb4raDMwr1v1loS8y4A9HDWec"/>
+<div class="absolute inset-0 bg-gradient-to-r from-[#F0EFFE] via-[#F0EFFE]/90 to-transparent"></div>
+</div>
+<div class="relative z-10 w-full max-w-2xl flex flex-col gap-lg">
+<div class="inline-flex items-center px-4 py-2 rounded-full bg-secondary-container text-on-secondary-container font-label-sm text-label-sm w-fit gap-2">
+<span class="material-symbols-outlined text-[16px]">campaign</span>
+<span>Made for Pakistani Markets</span>
+</div>
+<h1 class="font-h1 text-h1 text-primary">Apni Pasand, Apki Dukan</h1>
+<p class="font-body-lg text-body-lg text-on-surface-variant max-w-xl">
+                    Discover thousands of verified local sellers offering everything from fresh groceries to the latest electronics. Safe, secure, and fast delivery across Pakistan.
+                </p>
+<div class="flex flex-wrap items-center gap-md pt-sm">
+<button class="px-6 py-3 rounded-lg bg-primary text-on-primary font-label-md text-label-md hover:bg-primary/90 transition-colors shadow-md flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">shopping_bag</span>
+                        Shop Now
+                    </button>
+<button class="px-6 py-3 rounded-lg bg-surface text-primary border border-primary font-label-md text-label-md hover:bg-surface-container transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">storefront</span>
+                        Sell on Vendra
+                    </button>
+</div>
+<!-- Trust Row -->
+<div class="flex items-center gap-lg mt-xl pt-lg border-t border-outline-variant/30">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-tertiary-fixed-dim" style="font-variation-settings: 'FILL' 1;">shield</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Escrow Protection</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary-container" style="font-variation-settings: 'FILL' 1;">verified</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Verified Vendors</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">local_shipping</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Live Tracking</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Footer -->
+<footer class="w-full py-xl px-container-margin grid grid-cols-1 md:grid-cols-4 gap-lg max-w-7xl mx-auto border-t border-outline-variant mt-2xl" style="background-color: #1E2057; border-radius: 0.75rem;">
+<div class="col-span-1 md:col-span-1 flex flex-col gap-4">
+<span class="text-h3 font-h3 text-on-primary">Vendra</span>
+<p class="font-body-sm text-body-sm text-on-primary/80">Pakistan ka Digital Bazaar. Connecting local sellers with millions of buyers nationwide.</p>
+</div>
+<div class="col-span-1 md:col-span-3 flex flex-wrap gap-lg justify-end items-center">
+<a class="font-label-md text-label-md text-on-primary/80 hover:text-on-primary hover:underline transition-opacity" href="#">Privacy Policy</a>
+<a class="font-label-md text-label-md text-on-primary/80 hover:text-on-primary hover:underline transition-opacity" href="#">Terms of Use</a>
+<a class="font-label-md text-label-md text-on-primary/80 hover:text-on-primary hover:underline transition-opacity" href="#">Refund Policy</a>
+<a class="font-label-md text-label-md text-on-primary/80 hover:text-on-primary hover:underline transition-opacity" href="#">Contact Us</a>
+</div>
+<div class="col-span-1 md:col-span-4 mt-lg pt-lg border-t border-on-primary/20 text-center">
+<p class="font-body-sm text-body-sm text-on-primary/60">© 2024 Vendra. All rights reserved. Pakistan's Leading Marketplace.</p>
+</div>
+</footer>
+</main>
+</body></html>

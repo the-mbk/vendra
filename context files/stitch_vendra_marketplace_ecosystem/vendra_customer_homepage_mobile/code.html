@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Vendra - Customer Homepage</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container-highest": "#d3e4fe",
+                        "on-secondary": "#ffffff",
+                        "on-error": "#ffffff",
+                        "surface-tint": "#5257a5",
+                        "error-container": "#ffdad6",
+                        "on-primary-fixed-variant": "#3a3e8b",
+                        "inverse-primary": "#bfc1ff",
+                        "surface-container-high": "#dce9ff",
+                        "surface-bright": "#f8f9ff",
+                        "secondary": "#9d4300",
+                        "outline-variant": "#c7c5d3",
+                        "background": "#f8f9ff",
+                        "on-primary-container": "#acb0ff",
+                        "on-surface-variant": "#464651",
+                        "inverse-on-surface": "#eaf1ff",
+                        "tertiary-fixed": "#6bff8f",
+                        "primary-fixed-dim": "#bfc1ff",
+                        "surface-container-low": "#eff4ff",
+                        "primary": "#232774",
+                        "primary-fixed": "#e1e0ff",
+                        "on-tertiary-container": "#35d168",
+                        "on-tertiary": "#ffffff",
+                        "tertiary": "#003a16",
+                        "outline": "#777682",
+                        "on-surface": "#0b1c30",
+                        "surface": "#f8f9ff",
+                        "surface-container": "#e5eeff",
+                        "on-secondary-fixed-variant": "#783200",
+                        "tertiary-container": "#005422",
+                        "on-tertiary-fixed-variant": "#005321",
+                        "on-primary-fixed": "#0a0b5f",
+                        "error": "#ba1a1a",
+                        "secondary-container": "#fd761a",
+                        "on-primary": "#ffffff",
+                        "primary-container": "#3b3f8c",
+                        "on-tertiary-fixed": "#002109",
+                        "surface-container-lowest": "#ffffff",
+                        "inverse-surface": "#213145",
+                        "surface-dim": "#cbdbf5",
+                        "secondary-fixed": "#ffdbca",
+                        "tertiary-fixed-dim": "#4ae176",
+                        "on-background": "#0b1c30",
+                        "on-secondary-container": "#5c2400",
+                        "secondary-fixed-dim": "#ffb690",
+                        "on-secondary-fixed": "#341100",
+                        "surface-variant": "#d3e4fe",
+                        "on-error-container": "#93000a"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "gutter": "16px",
+                        "xs": "4px",
+                        "container-margin": "20px",
+                        "md": "16px",
+                        "xl": "32px",
+                        "sm": "8px",
+                        "lg": "24px",
+                        "base": "8px",
+                        "2xl": "48px"
+                    },
+                    "fontFamily": {
+                        "body-lg": ["Inter"],
+                        "body-md": ["Inter"],
+                        "h2": ["Inter"],
+                        "h1": ["Inter"],
+                        "label-md": ["Inter"],
+                        "h3": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "body-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-lg": ["18px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "body-md": ["16px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "h2": ["32px", { "lineHeight": "1.25", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+                        "h1": ["40px", { "lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "label-md": ["14px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "h3": ["24px", { "lineHeight": "1.3", "fontWeight": "700" }],
+                        "label-sm": ["12px", { "lineHeight": "1.2", "fontWeight": "500" }],
+                        "body-sm": ["14px", { "lineHeight": "1.5", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background font-body-md min-h-screen pb-20">
+<!-- Top Navigation Area -->
+<header class="bg-surface-container-lowest sticky top-0 z-50 shadow-sm px-container-margin py-sm">
+<div class="flex justify-between items-center w-full max-w-7xl mx-auto">
+<div class="flex items-center gap-md">
+<button aria-label="Menu" class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">menu</span>
+</button>
+<div class="text-h3 font-h3 font-bold text-primary">Vendra</div>
+</div>
+<div class="flex items-center gap-md text-on-surface-variant">
+<button aria-label="Notifications" class="hover:text-primary transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button aria-label="Cart" class="hover:text-primary transition-colors relative">
+<span class="material-symbols-outlined">shopping_cart</span>
+<span class="absolute -top-1 -right-1 bg-secondary-container text-on-secondary-container text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">2</span>
+</button>
+</div>
+</div>
+</header>
+<main class="max-w-md mx-auto">
+<!-- Location Row -->
+<div class="px-container-margin py-sm bg-surface-container-low flex items-center gap-sm">
+<span class="material-symbols-outlined text-primary text-sm">location_on</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant truncate">Delivering to: <span class="font-semibold text-on-surface">Gulshan Iqbal, Lahore</span></span>
+<span class="material-symbols-outlined text-on-surface-variant text-sm ml-auto">expand_more</span>
+</div>
+<!-- Search Bar -->
+<div class="px-container-margin py-md">
+<div class="relative w-full">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline">search</span>
+<input class="w-full bg-surface-container-lowest border border-outline-variant text-on-surface font-body-sm rounded-full py-2 pl-10 pr-10 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm" placeholder="Search for groceries, clothing..." type="text"/>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-primary">mic</span>
+</div>
+</div>
+<!-- Promotional Banner -->
+<div class="px-container-margin pb-lg">
+<div class="bg-primary rounded-xl p-md flex items-center justify-between shadow-lg relative overflow-hidden h-32">
+<div class="absolute inset-0 z-0">
+<img alt="Promotional banner background" class="w-full h-full object-cover opacity-20" data-alt="A subtle, slightly blurred background image of a vibrant marketplace scene with fresh produce and colorful textiles, dimly lit to allow white text to pop. The overall tone is energetic but subdued, fitting an e-commerce promotional banner." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD1NvINGPvbbYDbrJL4wes_oITDzpsN1OhsfNs-mpAunD0UL64oga6vW01rXiG-IesBFkZo0I-i9LR6CmID6IuoNjW7XxsDjPSljGoyB_YTq8zKNdNkNTaZCeyfgkbExmATdlTKwkTGj0AG8sH6j-dp61lE8hH5K4w0bJh-XFq--mfQSDNP64DV6kJxEMSNrbqIHCn6EDXCkOPA5btPBVZDHZbhb0Vsgbq9y7yMd3Zd4ASc05Z0kk4KxnVOxTZ-ugVIAw_pbMxsGxY"/>
+</div>
+<div class="relative z-10 text-on-primary">
+<h2 class="font-h3 text-h3 mb-1">Free Delivery!</h2>
+<p class="font-body-sm text-body-sm mb-2 opacity-90">On your first 3 orders</p>
+<div class="bg-primary-container text-on-primary-container font-label-md text-label-md px-3 py-1 rounded-full inline-block">
+                        Code: VENDRA1
+                    </div>
+</div>
+<div class="relative z-10">
+<span class="material-symbols-outlined text-5xl text-on-primary opacity-80">local_shipping</span>
+</div>
+</div>
+</div>
+<!-- Categories Scroll -->
+<div class="pl-container-margin pb-lg">
+<h3 class="font-label-md text-label-md text-on-surface mb-sm px-container-margin -ml-container-margin">Categories</h3>
+<div class="flex overflow-x-auto hide-scrollbar gap-md pr-container-margin">
+<!-- Category Item -->
+<div class="flex flex-col items-center gap-xs min-w-[72px]">
+<div class="w-16 h-16 rounded-full bg-surface-container-highest flex items-center justify-center shadow-sm border border-outline-variant/30">
+<img alt="Groceries" class="w-full h-full object-cover rounded-full p-1" data-alt="A close-up, brightly lit photo of fresh, vibrant vegetables in a woven basket, set against a clean white background. High resolution, appetizing, modern e-commerce aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCKdg8353g0F26hJOV-lTDRz9qAKNXSg60PInhwbR-5zrWHnR33rW6XSjpy-DTJQdpL41OycWiEFOgwQhaNxN-6ovjW1IX1bmUl9JAGcaufE9z1EhYTiVJZK6M1GWepq0OlKQmx90G2mGo2rZzNGZ3_23GabWtKmDW8a9_WNxVzDP_mJZ4ziOwK9Ymp8CmrV77q8afTr-Z6Zu7A50szQBwwq5Mp30jJz__ocRhOyQ_qvNxzspds-J2wsM0FTKUV0VRsVCtLQoKxDTk"/>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Groceries</span>
+</div>
+<!-- Category Item -->
+<div class="flex flex-col items-center gap-xs min-w-[72px]">
+<div class="w-16 h-16 rounded-full bg-surface-container-highest flex items-center justify-center shadow-sm border border-outline-variant/30">
+<img alt="Clothing" class="w-full h-full object-cover rounded-full p-1" data-alt="A neatly folded stack of colorful, stylish shirts on a pristine white surface. Soft, natural lighting highlighting the fabric textures. Clean, modern, retail photography style." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAKiLMaDKqCRcExB--4pt7VfezZvpEX_3Agl89-Nd0BCdzkT4g3n3LTN2_QMIcayaviLj68NBEnXcUVUWkR9hCSd2xSlZl7zO9aAvZZMPIunJprhVqQHt2_lpVhXSkBeMiPCKbtxhfnU0q-jair7QCHS4bSIgGqKxZrmIdpXthzCTezDFiSfrNFPfcFiosF9rwTWklMQ7NTRey95_JTJFTrVGYQscrENtWiKlPdjOgH2v3_I7FfgkjdtXxKJVqpL2aaFCMGT3cGHLU"/>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Clothing</span>
+</div>
+<!-- Category Item -->
+<div class="flex flex-col items-center gap-xs min-w-[72px]">
+<div class="w-16 h-16 rounded-full bg-surface-container-highest flex items-center justify-center shadow-sm border border-outline-variant/30">
+<img alt="Food" class="w-full h-full object-cover rounded-full p-1" data-alt="A delicious, perfectly plated slice of pizza with melted cheese and fresh basil, shot from directly above on a light background. Bright, appetizing, professional food photography." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB2g704F7iUZgLoXRILX7sbWVySueNwhZ1sKP3duTfODRQGixVxqVVFCQZQTlHCsH9BLeQHTiPkJhRjKKOksdmlQYJ1DFlzv4Kc_BCOIgxQWaYQWEikjSCeg2LHWPSAGKGjLZ8_Q_i5sEygMAQlN2UrTRdXT6pJCKxSVPz99z7eR9JI9Kz97_a50Ki0bOqVSHYmMR4RiLGboxsgZZeII_RpiXg0n-PUx2dcmSufcHFRES1YcxcniAXSm_r31wt_gRn90Wl_66G8j4E"/>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Food</span>
+</div>
+<!-- Category Item -->
+<div class="flex flex-col items-center gap-xs min-w-[72px]">
+<div class="w-16 h-16 rounded-full bg-surface-container-highest flex items-center justify-center shadow-sm border border-outline-variant/30">
+<img alt="Electronics" class="w-full h-full object-cover rounded-full p-1" data-alt="A sleek, modern smartphone and wireless earbuds placed on a clean, light gray desk surface. Professional, top-down product shot with crisp lighting and sharp details." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDQ-YWCGDwgZ9jtlH17t2vMkPuJ2wIzNbiaA4iIitdqHrhQeP6ty316ZEYujcjAFZ-LhNIOzPJrLJDYpsQ4iPuDb_egLysCdQiEFYy0Bx-H4y9vzP0NI10ODJT1zdtVJ9a_0srgkxXNV0XDDrFw7B69MmuGjZvvaltyKDsLWAqhLibibtcb8svw_FbQX_Q9hCF7QXja5jmipSHF6SG8gggMk3Iz90tVwNJsknAltiIj6rHyay-YVx-rB9c5neBoPYCGexN9fMV-CzY"/>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Electronics</span>
+</div>
+<!-- Category Item -->
+<div class="flex flex-col items-center gap-xs min-w-[72px]">
+<div class="w-16 h-16 rounded-full bg-surface-container-highest flex items-center justify-center shadow-sm border border-outline-variant/30">
+<img alt="Beauty" class="w-full h-full object-cover rounded-full p-1" data-alt="An arrangement of premium skincare bottles and jars on a minimalist marble surface, accented with a small green leaf. Soft, luxurious lighting conveying purity and elegance." src="https://lh3.googleusercontent.com/aida-public/AB6AXuARsAWfI2VPws_CouTY7A85EOd2QuEM_9kPo36N1f3I8ybJdHhEsmVPOsT4nV_2n7gYRc6TgjGGtujmzlBoGBujKyjLO8p96YdN6ohQ9gOyEJj7kGlxKYxMQI3o7YE75DYezEhmzYrHnq3rFI8eitdbkaLi-Wu1703IxBzkAjIpSZnMiXc1tm7XVS_GfrrSDg2r4_g14eXZOOszD5DL0gSDtuEdXCJBkzSQTAc-zo3Sk2f3fQpBOc4FibIiJZ-m4wAdsrI5_NOKaSA"/>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Beauty</span>
+</div>
+<!-- Category Item -->
+<div class="flex flex-col items-center gap-xs min-w-[72px]">
+<div class="w-16 h-16 rounded-full bg-surface-container-highest flex items-center justify-center shadow-sm border border-outline-variant/30">
+<span class="material-symbols-outlined text-primary text-2xl">apps</span>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant">All</span>
+</div>
+</div>
+</div>
+<!-- Nearby Stores Scroll -->
+<div class="pl-container-margin pb-lg">
+<div class="flex justify-between items-center pr-container-margin mb-sm">
+<h3 class="font-label-md text-label-md text-on-surface">Nearby Stores</h3>
+<button class="font-label-sm text-label-sm text-primary">See All</button>
+</div>
+<div class="flex overflow-x-auto hide-scrollbar gap-md pr-container-margin pb-2">
+<!-- Store Card -->
+<div class="min-w-[200px] bg-surface-container-lowest rounded-lg shadow-[0_2px_12px_rgba(0,0,0,0.08)] border border-outline-variant/20 overflow-hidden flex flex-col">
+<div class="h-24 w-full relative">
+<img alt="Al-Fatah Supermarket" class="w-full h-full object-cover" data-alt="A bright, clean storefront of a modern supermarket in Pakistan, featuring organized shelves visible through large glass windows. Daylight, welcoming atmosphere, professional retail exterior shot." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC4BcphcD4k_Mdn_fFj_-2KPUFpZlqI47D2-ytjRLRsD8CQqFWGhyZLvlwv1r-8ne8kCxBq7gtDzqxR0YSUjqStJ4tVwTO5KcOF-zqT8Snobytl7bpVGeY9eHZUNXJfUFe9Lnoi-izWw-EwtBEV0FyXRaGrK9hasX1PkGhyBZzsdh36I2dBkRG4ur3J9ari_jPzNmtKQQVtUTyXoRnHzKguuAK7c-FMMTYu1OO3XN-2jjL4sCd8bx0tIfE30KM3CH8IeNP3wUEBCrc"/>
+</div>
+<div class="p-sm flex flex-col flex-1">
+<div class="flex justify-between items-start mb-1">
+<h4 class="font-label-md text-label-md text-on-surface truncate pr-2">Al-Fatah Supermarket</h4>
+<div class="flex items-center text-secondary-container bg-surface-container-highest px-1 rounded">
+<span class="material-symbols-outlined text-[12px]">star</span>
+<span class="font-label-sm text-[10px] ml-0.5">4.8</span>
+</div>
+</div>
+<p class="font-body-sm text-[11px] text-on-surface-variant mb-2">Groceries • 1.2 km</p>
+<div class="mt-auto flex items-center gap-1 text-[10px] text-on-surface-variant bg-surface-container py-1 px-2 rounded w-fit">
+<span class="material-symbols-outlined text-[12px] text-primary">schedule</span>
+                            15-20 mins
+                        </div>
+</div>
+</div>
+<!-- Store Card -->
+<div class="min-w-[200px] bg-surface-container-lowest rounded-lg shadow-[0_2px_12px_rgba(0,0,0,0.08)] border border-outline-variant/20 overflow-hidden flex flex-col">
+<div class="h-24 w-full relative">
+<img alt="Savour Foods" class="w-full h-full object-cover" data-alt="A bustling but clean fast-food restaurant interior in Pakistan, showing a counter with warm lighting and a menu board. Energetic, welcoming, modern dining setting." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDqk_Kg0KO6_10eStj1hUe1BEeuOlDUn-bHrXGpR3wU4mv_yMrkTUQwWAWa5nzu3pzT-DGRvHzOEhkfYOprfXDpO2S59GM3IWvbLLcyVAp9ImrvdgUv5-Op6XD1ZGJBECnTDAPU3aVKSLiCEJ-a_Aa851WiunnQj3B0-FcZIpwPSBggApghaMyT8hPMoiQ1da2lzDbg3I8yo2Zqb2TUnSK39v4P3knrlT4dtpy7JErBOdfUdvGUoQVjsV0IdbL9cux2KtSBr8BPNpw"/>
+</div>
+<div class="p-sm flex flex-col flex-1">
+<div class="flex justify-between items-start mb-1">
+<h4 class="font-label-md text-label-md text-on-surface truncate pr-2">Savour Foods</h4>
+<div class="flex items-center text-secondary-container bg-surface-container-highest px-1 rounded">
+<span class="material-symbols-outlined text-[12px]">star</span>
+<span class="font-label-sm text-[10px] ml-0.5">4.9</span>
+</div>
+</div>
+<p class="font-body-sm text-[11px] text-on-surface-variant mb-2">Pakistani • 2.5 km</p>
+<div class="mt-auto flex items-center gap-1 text-[10px] text-on-surface-variant bg-surface-container py-1 px-2 rounded w-fit">
+<span class="material-symbols-outlined text-[12px] text-primary">schedule</span>
+                            30-40 mins
+                        </div>
+</div>
+</div>
+</div>
+</div>
+<!-- Today's Picks Grid -->
+<div class="px-container-margin pb-lg">
+<h3 class="font-label-md text-label-md text-on-surface mb-sm">Today's Picks</h3>
+<div class="grid grid-cols-2 gap-gutter">
+<!-- Product Card -->
+<div class="bg-surface-container-lowest rounded-xl shadow-[0_2px_12px_rgba(0,0,0,0.08)] border border-outline-variant/20 p-sm relative flex flex-col">
+<div class="aspect-square w-full bg-surface-container rounded-lg mb-2 overflow-hidden border border-outline-variant/10">
+<img alt="Tapal Danedar Tea" class="w-full h-full object-cover" data-alt="A crisp, studio-lit photo of a box of premium black tea on a bright white background, casting a soft shadow. The packaging is rich red and gold. High-end e-commerce product photography." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD8pyW2qjf9SfTr8vNzfde7bvQylZRwAZEzhAw9Z8Nb9FJT5yNRKdy6SLpPH2So0wVzZ7b-YdQzxl_pZs8LUAXU4gtjMunJAVOQOY3EjSF21ENB-yWp5Vha4w_eHV4vaSn2B6Z0JAYQUht9yxvKFa4XfFArbRUJVM36Z4YmTDL5-z8vwhezCrshP28Ds_kEMwIUXAqpPn7f-g_AnHfihllI8YiSenG_N6vmdjWT-OIEIDYVErjDOxe7EkCn7MMAVeQ-lCDr_SgD-HY"/>
+</div>
+<h4 class="font-body-sm text-body-sm text-on-surface leading-tight mb-1 line-clamp-2 flex-1">Tapal Danedar Black Tea 800g</h4>
+<div class="flex justify-between items-end mt-2">
+<div>
+<p class="font-label-sm text-[10px] text-outline line-through">Rs. 1,250</p>
+<p class="font-label-md text-label-md text-primary">Rs. 1,180</p>
+</div>
+<button aria-label="Add to cart" class="bg-secondary-container text-on-secondary-container w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary hover:text-on-secondary transition-colors">
+<span class="material-symbols-outlined text-sm">add</span>
+</button>
+</div>
+</div>
+<!-- Product Card -->
+<div class="bg-surface-container-lowest rounded-xl shadow-[0_2px_12px_rgba(0,0,0,0.08)] border border-outline-variant/20 p-sm relative flex flex-col">
+<div class="aspect-square w-full bg-surface-container rounded-lg mb-2 overflow-hidden border border-outline-variant/10">
+<img alt="National Ketchup" class="w-full h-full object-cover" data-alt="A clean, professional product shot of a bright red bottle of tomato ketchup standing upright against a pristine white backdrop. Sharp focus, vibrant color, standard retail e-commerce style." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBberZRtggzZHaECdpR21pbEsefcCI2GLNcrEwZ-q5GTr3AmcQmmKcLsjIZHJUHmCk92ScRKIP-0PT5wC2q4Ura8_VQz4Tox_gGpyCeLbL9rX4KG59GaNAAb6Lc1aktyJ6rQSnKwnLfrXsSyn4djMwBX4qrSbejjtsWbpyNJmNxcKtHxYtwFqvVKYHp1zG1YKkDwurK6J3YAeOpHhmFCQmVqxrUaUBjdyxlMdhWbW1bimwUc4N19cT5OnRz7pfcpBOd-PZ5tWa0d10"/>
+</div>
+<h4 class="font-body-sm text-body-sm text-on-surface leading-tight mb-1 line-clamp-2 flex-1">National Tomato Ketchup 800g</h4>
+<div class="flex justify-between items-end mt-2">
+<div>
+<p class="font-label-sm text-[10px] text-outline line-through">Rs. 450</p>
+<p class="font-label-md text-label-md text-primary">Rs. 420</p>
+</div>
+<button aria-label="Add to cart" class="bg-secondary-container text-on-secondary-container w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary hover:text-on-secondary transition-colors">
+<span class="material-symbols-outlined text-sm">add</span>
+</button>
+</div>
+</div>
+<!-- Product Card -->
+<div class="bg-surface-container-lowest rounded-xl shadow-[0_2px_12px_rgba(0,0,0,0.08)] border border-outline-variant/20 p-sm relative flex flex-col">
+<div class="absolute top-2 left-2 z-10 bg-error text-on-error text-[10px] font-bold px-2 py-0.5 rounded-sm">15% OFF</div>
+<div class="aspect-square w-full bg-surface-container rounded-lg mb-2 overflow-hidden border border-outline-variant/10">
+<img alt="Basmati Rice" class="w-full h-full object-cover" data-alt="A high-quality image of premium long-grain Basmati rice in a stylized burlap sack, set against a clean, light surface. Soft, natural lighting highlighting the texture of the grains. E-commerce ready." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBy38lweHnvWOLm0rpG35Eb2PTvo8GDeJgRmWeAEoTKw_xTrvCr-Whz1gh3rvlBhevXGJ5Xr_cWrZZc-o0Gd_WUANCNCc4pQcN6EGWma2RhqEfoa_pjeQZ6OBBJPbZSQ0vunsqKzx-tDwCKDi5uh3YbJObgRTTPN4R2UOj5N14TtgsIjR17sBAI1Bn7mtC0bNMJh8PwGI7b7bpX5y-RCrRQzey0_SHVYxZx1EPiQ_AICAme-PF5jtHzP3jlKNp7pywAfXQH1joP-uU"/>
+</div>
+<h4 class="font-body-sm text-body-sm text-on-surface leading-tight mb-1 line-clamp-2 flex-1">Premium Basmati Rice 5kg</h4>
+<div class="flex justify-between items-end mt-2">
+<div>
+<p class="font-label-sm text-[10px] text-outline line-through">Rs. 2,500</p>
+<p class="font-label-md text-label-md text-primary">Rs. 2,125</p>
+</div>
+<button aria-label="Add to cart" class="bg-secondary-container text-on-secondary-container w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary hover:text-on-secondary transition-colors">
+<span class="material-symbols-outlined text-sm">add</span>
+</button>
+</div>
+</div>
+<!-- Product Card -->
+<div class="bg-surface-container-lowest rounded-xl shadow-[0_2px_12px_rgba(0,0,0,0.08)] border border-outline-variant/20 p-sm relative flex flex-col">
+<div class="aspect-square w-full bg-surface-container rounded-lg mb-2 overflow-hidden border border-outline-variant/10">
+<img alt="Cooking Oil" class="w-full h-full object-cover" data-alt="A clear, plastic bottle of golden cooking oil captured in a professional studio setting with a white background. Bright, clean lighting reflecting off the bottle, showcasing the product's purity." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBzbQ0XfEdMhjlQViRnw0hOB9W-jrAaFMGCge4r5dDWCH5lZMtwveRPnJfl5hb9n0zIPcI3c1MBQVAcpGiw7E_MxobUYbdzclwLGQXPTSv2Qj_jXcAJuMY2DYlV9S9VvnVJSvhkEPCL_Vdf-KJzw3X_CpS0bEYk8bq8JWXPlOQjTlNvZOISSucuRAHiTJKhoY3JzqJwQLxK__FFUouAAdR2IaJXhCHwvBrEd-lFknxZzFUYnm0LjcmidmpmSJ4t7sSd5f7XfK5C3N4"/>
+</div>
+<h4 class="font-body-sm text-body-sm text-on-surface leading-tight mb-1 line-clamp-2 flex-1">Dalda Cooking Oil Pouch 1L</h4>
+<div class="flex justify-between items-end mt-2">
+<div>
+<p class="font-label-md text-label-md text-primary">Rs. 580</p>
+</div>
+<button aria-label="Add to cart" class="bg-secondary-container text-on-secondary-container w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary hover:text-on-secondary transition-colors">
+<span class="material-symbols-outlined text-sm">add</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- BottomNavBar -->
+<nav class="md:hidden bg-surface-container-lowest dark:bg-inverse-surface fixed bottom-0 left-0 w-full flex justify-around items-center px-2 py-3 shadow-lg border-t border-outline-variant dark:border-none z-50 rounded-t-xl">
+<a class="flex flex-col items-center justify-center bg-secondary-container dark:bg-secondary text-on-secondary-container dark:text-on-secondary rounded-xl px-4 py-1 Active: scale-110 duration-150 ease-in-out" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">home</span>
+<span class="font-label-sm text-label-sm mt-1">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-outline px-4 py-1 hover:bg-surface-container dark:hover:bg-primary-container" href="#">
+<span class="material-symbols-outlined">search</span>
+<span class="font-label-sm text-label-sm mt-1">Explore</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-outline px-4 py-1 hover:bg-surface-container dark:hover:bg-primary-container" href="#">
+<span class="material-symbols-outlined">receipt_long</span>
+<span class="font-label-sm text-label-sm mt-1">Orders</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-outline px-4 py-1 hover:bg-surface-container dark:hover:bg-primary-container" href="#">
+<span class="material-symbols-outlined">favorite</span>
+<span class="font-label-sm text-label-sm mt-1">Saved</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-outline px-4 py-1 hover:bg-surface-container dark:hover:bg-primary-container" href="#">
+<span class="material-symbols-outlined">person</span>
+<span class="font-label-sm text-label-sm mt-1">Profile</span>
+</a>
+</nav>
+</body></html>
