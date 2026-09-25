@@ -1,0 +1,26 @@
+# Local Postgres for development.
+#   docker compose up -d        start (data persists in the vendra-pgdata volume)
+#   docker compose down         stop (data kept)
+#   docker compose down -v      stop and wipe the data
+# Matches DATABASE_URL=postgresql://postgres:vendra_dev@localhost:5433/vendra_db
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: vendra-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vendra_dev}
+      POSTGRES_DB: vendra_db
+    ports:
+      - "5433:5432"   # host port 5433, so it doesn't clash with other local Postgres servers
+    volumes:
+      - vendra-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vendra_db"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  vendra-pgdata:

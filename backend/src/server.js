@@ -1,84 +1,31 @@
 // ══════════════════════════════════════════════════════════════
-// Vendra Backend - Express Server Entry Point
+// Vendra Backend - Server Entry Point
 // ══════════════════════════════════════════════════════════════
 
 require('dotenv').config();
 
-const express = require('express');
-const cors = require('cors');
+const { createServer } = require('./app');
+const { releaseDueEscrows } = require('./services/orderSettlement.service');
 
-// Import route modules
-const authRoutes = require('./routes/auth.routes');
-const vendorRoutes = require('./routes/vendor.routes');
-const customerRoutes = require('./routes/customer.routes');
-const adminRoutes = require('./routes/admin.routes');
-
-const app = express();
 const PORT = process.env.PORT || 3000;
+const ESCROW_SWEEP_MS = 30 * 1000;
 
-// ──────────────────────────────────────
-// Middleware
-// ──────────────────────────────────────
-// CORS Configuration — allow all localhost ports in dev (Flutter uses random ports)
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
-app.use(express.json());
+const { server } = createServer();
 
-// Request logging (dev)
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} | ${req.method} ${req.url}`);
-  next();
-});
-
-// ──────────────────────────────────────
-// Routes
-// ──────────────────────────────────────
-app.use('/api/auth', authRoutes);
-app.use('/api/vendor', vendorRoutes);
-app.use('/api', customerRoutes);
-app.use('/api/admin', adminRoutes);
-
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({ success: true, message: 'Vendra API is running 🚀', timestamp: new Date().toISOString() });
-});
-
-// ──────────────────────────────────────
-// Global Error Handler
-// ──────────────────────────────────────
-app.use((err, req, res, next) => {
-  console.error('🔥 Unhandled Error:', err.stack);
-  res.status(500).json({
-    success: false,
-    message: 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && { error: err.message }),
-  });
-});
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ success: false, message: 'Route not found' });
-});
-
-// ──────────────────────────────────────
-// Start Server
-// ──────────────────────────────────────
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`\n══════════════════════════════════════`);
   console.log(`  🏪 Vendra API Server`);
   console.log(`  📍 Running on http://localhost:${PORT}`);
+  console.log(`  🔌 Realtime (Socket.IO) on the same port`);
   console.log(`  🕐 Started at ${new Date().toLocaleString()}`);
   console.log(`══════════════════════════════════════\n`);
 });
 
-module.exports = app;
+// Release escrow for delivered orders whose dispute window has passed
+setInterval(() => {
+  releaseDueEscrows()
+    .then((n) => n > 0 && console.log(`💸 Released escrow for ${n} order(s)`))
+    .catch((err) => console.error('Escrow sweep failed:', err.message));
+}, ESCROW_SWEEP_MS).unref();
+
+module.exports = server;

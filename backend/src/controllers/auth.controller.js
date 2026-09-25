@@ -20,7 +20,7 @@ const signup = async (req, res) => {
   const client = await pool.connect();
 
   try {
-    const { fullName, email, password, role, storeName, cnic, phone } = req.body;
+    const { fullName, email, password, role, storeName, cnic, phone, vehicleType } = req.body;
 
     // Validate required fields
     if (!fullName || !email || !password || !role) {
@@ -103,8 +103,8 @@ const signup = async (req, res) => {
     // If rider, create rider record
     if (role === 'rider') {
       await client.query(
-        'INSERT INTO riders (user_id) VALUES ($1)',
-        [user.id]
+        'INSERT INTO riders (user_id, vehicle_type) VALUES ($1, $2)',
+        [user.id, vehicleType || 'motorbike']
       );
     }
 
@@ -152,14 +152,22 @@ const signup = async (req, res) => {
   }
 };
 
+const APP_NAMES = {
+  customer: 'Vendra',
+  vendor: 'Vendra Vendor',
+  rider: 'Vendra Rider',
+  admin: 'Vendra Admin dashboard',
+};
+
 /**
  * POST /api/auth/login
  * Authenticate user and return JWT token.
- * Body: { email, password }
+ * Body: { email, password, role? } — each app sends its role so a vendor
+ * can't sign in to the rider app (and so on).
  */
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, role: expectedRole } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({
@@ -171,7 +179,7 @@ const login = async (req, res) => {
     // Find user by email
     const result = await pool.query(
       `SELECT u.id, u.full_name, u.email, u.phone, u.password_hash, u.role, u.vendor_id, u.wallet_balance,
-              v.store_name, v.is_approved, v.cnic
+              u.must_change_password, v.store_name, v.is_approved, v.cnic
        FROM users u
        LEFT JOIN vendors v ON u.vendor_id = v.id
        WHERE u.email = $1`,
@@ -193,6 +201,14 @@ const login = async (req, res) => {
       return res.status(401).json({
         success: false,
         message: 'Invalid email or password.',
+      });
+    }
+
+    if (expectedRole && expectedRole !== user.role) {
+      return res.status(403).json({
+        success: false,
+        code: 'WRONG_APP',
+        message: `This is a ${user.role} account. Please sign in with the ${APP_NAMES[user.role] || user.role} app.`,
       });
     }
 
@@ -225,6 +241,7 @@ const login = async (req, res) => {
           storeName: user.store_name || null,
           isApproved: user.is_approved,
           cnic: user.cnic || null,
+          mustChangePassword: user.must_change_password,
           platformEscrowBalance,
         },
       },
@@ -245,10 +262,12 @@ const login = async (req, res) => {
 const getMe = async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT u.id, u.full_name, u.email, u.phone, u.role, u.vendor_id, u.wallet_balance, u.created_at,
-              v.store_name, v.store_address, v.is_approved, v.cnic
+      `SELECT u.id, u.full_name, u.email, u.phone, u.role, u.vendor_id, u.wallet_balance, u.created_at, u.must_change_password,
+              v.store_name, v.store_address, v.is_approved, v.cnic, v.latitude AS store_lat, v.longitude AS store_lng,
+              r.vehicle_type, r.is_online
        FROM users u
        LEFT JOIN vendors v ON u.vendor_id = v.id
+       LEFT JOIN riders r ON r.user_id = u.id
        WHERE u.id = $1`,
       [req.user.userId]
     );
@@ -278,6 +297,11 @@ const getMe = async (req, res) => {
         storeAddress: user.store_address || null,
         isApproved: user.is_approved,
         cnic: user.cnic || null,
+        storeLat: user.store_lat != null ? Number(user.store_lat) : null,
+        storeLng: user.store_lng != null ? Number(user.store_lng) : null,
+        vehicleType: user.vehicle_type || null,
+        isOnline: user.is_online ?? null,
+        mustChangePassword: user.must_change_password,
         createdAt: user.created_at,
         platformEscrowBalance,
       },
@@ -291,4 +315,41 @@ const getMe = async (req, res) => {
   }
 };
 
-module.exports = { signup, login, getMe };
+const MIN_PASSWORD_LENGTH = 8;
+
+/**
+ * POST /api/auth/change-password
+ * Body: { currentPassword, newPassword } — also clears a temporary password set by an admin.
+ */
+const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: 'Current and new password are required.' });
+    }
+    if (String(newPassword).length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({ success: false, message: `New password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
+    }
+    if (newPassword === currentPassword) {
+      return res.status(400).json({ success: false, message: 'Choose a password different from the current one.' });
+    }
+
+    const r = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.user.userId]);
+    if (r.rows.length === 0) return res.status(404).json({ success: false, message: 'User not found.' });
+    if (!(await bcrypt.compare(currentPassword, r.rows[0].password_hash))) {
+      return res.status(401).json({ success: false, code: 'WRONG_PASSWORD', message: 'Current password is incorrect.' });
+    }
+
+    const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    await pool.query(
+      `UPDATE users SET password_hash = $1, must_change_password = false, password_changed_at = NOW() WHERE id = $2`,
+      [hash, req.user.userId]
+    );
+    res.json({ success: true, message: 'Password changed.' });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ success: false, message: 'Failed to change password.' });
+  }
+};
+
+module.exports = { signup, login, getMe, changePassword, SALT_ROUNDS, MIN_PASSWORD_LENGTH };

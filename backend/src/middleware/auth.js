@@ -17,6 +17,7 @@ const authenticate = (req, res, next) => {
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
         success: false,
+        code: 'NO_TOKEN',
         message: 'Access denied. No token provided.',
       });
     }
@@ -36,12 +37,14 @@ const authenticate = (req, res, next) => {
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({
         success: false,
-        message: 'Token expired. Please login again.',
+        code: 'TOKEN_EXPIRED',
+        message: 'Your session has expired. Please sign in again.',
       });
     }
     return res.status(401).json({
       success: false,
-      message: 'Invalid token.',
+      code: 'INVALID_TOKEN',
+      message: 'Invalid session. Please sign in again.',
     });
   }
 };

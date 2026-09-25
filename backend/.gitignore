@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Environment (commit .env.example only)
+.env
+.env.*
+!.env.example
+
+# Logs
+npm-debug.log*
+*.log
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Uploaded dispute evidence
+uploads/
