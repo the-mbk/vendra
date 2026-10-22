@@ -12,6 +12,8 @@ const {
   getAllVendors,
   approveVendor,
   disapproveVendor,
+  approveVendorLocation,
+  rejectVendorLocation,
   getProducts,
   approveProduct,
   hideProduct,
@@ -23,6 +25,7 @@ const {
   getAllUsers,
 } = require('../controllers/admin.controller');
 const { adminListDisputes, adminResolveDispute } = require('../controllers/dispute.controller');
+const { adminReconciliation, adminListPayments, adminListWithdrawals } = require('../controllers/payment.controller');
 
 // All admin routes require authentication + admin role
 router.use(authenticate);
@@ -35,6 +38,8 @@ router.get('/stats', getDashboardStats);
 router.get('/vendors', getAllVendors);
 router.put('/vendors/:id/approve', approveVendor);
 router.put('/vendors/:id/disapprove', disapproveVendor);
+router.put('/vendors/:id/location/approve', approveVendorLocation);
+router.put('/vendors/:id/location/reject', rejectVendorLocation);
 
 // Product catalog approval
 router.get('/products', getProducts);
@@ -52,6 +57,9 @@ router.put('/disputes/:id/resolve', adminResolveDispute);
 // Riders + finance
 router.get('/riders', getRiders);
 router.get('/finance', getFinance);
+router.get('/finance/reconciliation', adminReconciliation);
+router.get('/payments', adminListPayments);
+router.get('/withdrawals', adminListWithdrawals);
 
 // Order monitoring
 router.get('/orders', getAllOrders);

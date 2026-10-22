@@ -27,7 +27,7 @@ Future<void> showPayoutSummary(BuildContext context, DeliveryResult result) {
             child: const Icon(Icons.check_circle, color: AppColors.success, size: 40),
           ),
           const SizedBox(height: 12),
-          Text('Delivery confirmed', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700)),
+          Text('Delivery confirmed', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
           Text('Order #${result.orderId}', style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
           const SizedBox(height: 16),
           Text(rs(result.payout),

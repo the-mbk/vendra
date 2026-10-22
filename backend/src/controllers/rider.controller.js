@@ -9,18 +9,26 @@ const { payRider, scheduleEscrowRelease } = require('../services/orderSettlement
 const { announceOrder } = require('../services/notification.service');
 const { getPolicies } = require('../services/policy.service');
 const { computeTrip, estimatePayoutPaisa } = require('../services/riderPayout.service');
-const { emitToRiders, emitToUser } = require('../realtime');
+const { emitToRiders, emitToTrackers } = require('../realtime');
 const { httpError, asyncHandler, withTransaction, intParam, paging, pageOf } = require('../utils/http');
+const { FEATURES } = require('../config/mode');
 const { haversineKm, isValidCoordinate } = require('../utils/geo');
 const { toPaisa, paisaToNumber } = require('../utils/money');
 
 const ACTIVE_STATUSES = ['ready_for_pickup', 'picked', 'on_the_way'];
 const num = (v) => (v == null ? null : Number(v));
 
+/**
+ * A position from the rider app. source: 'gps' (device) or 'manual' (set by hand or a
+ * simulated drive). Manual positions are accepted only while FEATURES.manualLocation is on.
+ */
 function readPoint(body) {
   const lat = Number(body.lat ?? body.latitude);
   const lng = Number(body.lng ?? body.longitude);
   if (!isValidCoordinate(lat, lng)) throw httpError(400, 'A valid lat and lng are required.');
+  if (body.source === 'manual' && !FEATURES.manualLocation) {
+    throw httpError(403, 'Manual locations are turned off. Allow location access so the app can use GPS.', { code: 'MANUAL_LOCATION_DISABLED' });
+  }
   return { lat, lng };
 }
 
@@ -111,7 +119,8 @@ const setStatus = asyncHandler(async (req, res) => {
 /**
  * POST /api/rider/location  Body: { lat, lng }
  * Sent every 10 s while online (PR 03). During a delivery the point is stored
- * against the order (payout distance) and pushed to the customer's map.
+ * against the order (payout distance) and pushed to whoever is watching that
+ * order's map right now (track:<orderId>); nobody watching, nothing is sent.
  */
 const postLocation = asyncHandler(async (req, res) => {
   const point = readPoint(req.body);
@@ -122,7 +131,7 @@ const postLocation = asyncHandler(async (req, res) => {
        UPDATE riders SET current_lat = $1, current_lng = $2, last_location_at = NOW()
        WHERE user_id = $3 RETURNING user_id
      ), active AS (
-       SELECT id, customer_id FROM orders
+       SELECT id FROM orders
        WHERE rider_user_id = $3 AND status = ANY($4::order_status[])
        ORDER BY assigned_at DESC LIMIT 1
      ), ping AS (
@@ -130,7 +139,7 @@ const postLocation = asyncHandler(async (req, res) => {
        SELECT $3, active.id, $1, $2 FROM active
        RETURNING order_id, recorded_at
      )
-     SELECT (SELECT COUNT(*) FROM moved) AS moved, active.id AS order_id, active.customer_id, ping.recorded_at
+     SELECT (SELECT COUNT(*) FROM moved) AS moved, active.id AS order_id, ping.recorded_at
      FROM (SELECT 1) one
      LEFT JOIN active ON true
      LEFT JOIN ping ON ping.order_id = active.id`,
@@ -140,7 +149,7 @@ const postLocation = asyncHandler(async (req, res) => {
   if (Number(row.moved) === 0) throw httpError(404, 'Rider profile not found.');
 
   if (row.order_id) {
-    emitToUser(row.customer_id, 'rider:location', {
+    emitToTrackers(row.order_id, 'rider:location', {
       orderId: row.order_id, lat: point.lat, lng: point.lng, at: row.recorded_at,
     });
   }
@@ -230,12 +239,28 @@ async function lockOwnOrder(client, orderId, riderUserId, allowed) {
   return r.rows[0];
 }
 
-/** POST /api/rider/orders/:id/arrived — at the store; waiting time starts */
+/** Pickup geofence: the rider must be within `pickup_geofence_m` of the store to say they're there */
+async function assertAtStore(client, order, point) {
+  const store = (await client.query('SELECT latitude, longitude FROM vendors WHERE id = $1', [order.vendor_id])).rows[0];
+  if (!store || store.latitude == null) throw httpError(409, 'This store has no location to verify against.');
+  const policies = await getPolicies(client);
+  const limit = policies.pickup_geofence_m ?? policies.geofence_m;
+  const distanceM = haversineKm(point.lat, point.lng, store.latitude, store.longitude) * 1000;
+  if (distanceM > limit) {
+    throw httpError(422,
+      `You are ${Math.round(distanceM)} m from the store. Move within ${limit} m to continue.`,
+      { code: 'OUTSIDE_PICKUP_GEOFENCE', distanceMeters: Math.round(distanceM), geofenceMeters: limit });
+  }
+}
+
+/** POST /api/rider/orders/:id/arrived  Body: { lat, lng } — at the store (geofenced); waiting time starts */
 const arrivedAtStore = asyncHandler(async (req, res) => {
   const orderId = intParam(req.params.id);
+  const point = readPoint(req.body);
   await withTransaction(async (client, afterCommit) => {
     const o = await lockOwnOrder(client, orderId, req.user.userId, ['ready_for_pickup']);
     if (o.rider_arrived_at) return;
+    await assertAtStore(client, o, point);
     await client.query('UPDATE orders SET rider_arrived_at = NOW(), updated_at = NOW() WHERE id = $1', [orderId]);
     await announceOrder(client, afterCommit, orderId, 'rider_arrived', {
       vendor: { title: `Rider arrived for #${orderId}`, body: 'Hand the order over to the rider.' },
@@ -244,11 +269,13 @@ const arrivedAtStore = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Arrival recorded.' });
 });
 
-/** POST /api/rider/orders/:id/picked — ready_for_pickup → picked */
+/** POST /api/rider/orders/:id/picked  Body: { lat, lng } — ready_for_pickup → picked (geofenced at the store) */
 const markPicked = asyncHandler(async (req, res) => {
   const orderId = intParam(req.params.id);
+  const point = readPoint(req.body);
   await withTransaction(async (client, afterCommit) => {
-    await lockOwnOrder(client, orderId, req.user.userId, ['ready_for_pickup']);
+    const o = await lockOwnOrder(client, orderId, req.user.userId, ['ready_for_pickup']);
+    await assertAtStore(client, o, point);
     await client.query(
       `UPDATE orders SET status = 'picked', picked_at = NOW(),
               rider_arrived_at = COALESCE(rider_arrived_at, NOW()), updated_at = NOW()

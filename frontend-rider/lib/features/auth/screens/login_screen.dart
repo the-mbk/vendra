@@ -1,7 +1,8 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Rider App - Login Screen (FR05)
 // Email/password login sent with role: 'rider'. A non-rider account
-// gets 403 WRONG_APP and the server's message is shown.
+// gets 403 WRONG_APP and the server's message is shown. In development
+// the seeded rider accounts are offered as one-tap logins (DemoLoginPanel).
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -129,17 +130,17 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 8),
                           VendraButton(text: 'Login', icon: Icons.arrow_forward, isLoading: isLoading, onPressed: _submit),
-                          const SizedBox(height: 20),
-                          Text('Quick demo login',
-                              style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-                          const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              _demoChip(label: 'Bilal (Karachi)', email: 'bilal@rider.pk', enabled: !isLoading),
-                              _demoChip(label: 'Hamza (Lahore)', email: 'hamza@rider.pk', enabled: !isLoading),
-                            ],
+                          // Development only — renders nothing in production
+                          Padding(
+                            padding: const EdgeInsets.only(top: 20),
+                            child: DemoLoginPanel(
+                              role: 'rider',
+                              enabled: !isLoading,
+                              emailController: _emailController,
+                              passwordController: _passwordController,
+                              onLogin: (email, password) =>
+                                  context.read<AuthBloc>().add(LoginRequested(email: email, password: password)),
+                            ),
                           ),
                         ],
                       ),
@@ -164,21 +165,6 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
       },
-    );
-  }
-
-  Widget _demoChip({required String label, required String email, required bool enabled}) {
-    return ActionChip(
-      label: Text(label, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500)),
-      onPressed: enabled
-          ? () {
-              _emailController.text = email;
-              _passwordController.text = 'password123';
-              context.read<AuthBloc>().add(LoginRequested(email: email, password: 'password123'));
-            }
-          : null,
-      backgroundColor: AppColors.secondary.withValues(alpha: 0.08),
-      side: BorderSide(color: AppColors.secondary.withValues(alpha: 0.35)),
     );
   }
 }

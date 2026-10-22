@@ -1,6 +1,7 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Customer App - Main Entry Point
-// Initializes BLoC providers, theme, and routes, and signs the user out
+// Loads the platform config (mode, features, card gateway) first, then
+// initializes BLoC providers, theme, and routes, and signs the user out
 // when the server reports the stored session expired/invalid.
 // ══════════════════════════════════════════════════════════════
 
@@ -27,7 +28,7 @@ import 'features/customer/bloc/order_bloc.dart';
 import 'features/customer/bloc/category_bloc.dart';
 import 'features/customer/screens/customer_home_screen.dart';
 import 'features/customer/screens/product_detail_screen.dart';
-import 'features/customer/screens/cart_screen.dart';
+import 'features/customer/screens/carts_screen.dart';
 import 'features/customer/screens/order_confirmation_screen.dart';
 import 'features/customer/screens/customer_orders_screen.dart';
 import 'features/customer/screens/order_tracking_screen.dart';
@@ -35,8 +36,12 @@ import 'features/customer/screens/store_screen.dart';
 import 'features/customer/screens/wallet_screen.dart';
 import 'features/customer/screens/my_disputes_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Never throws and gives up after a few seconds: if the backend is down the
+  // app starts on production-safe defaults and retries when a value is needed
+  await AppConfig.load(role: 'customer');
+  AppConfig.startLiveUpdates(); // admin policy changes reach the app straight away
   runApp(const VendraCustomerApp());
 }
 
@@ -108,9 +113,11 @@ class _VendraCustomerAppState extends State<VendraCustomerApp> {
         title: 'Vendra',
         navigatorKey: _navigatorKey,
         debugShowCheckedModeBanner: false,
-        theme: AppTheme.lightTheme,
+        theme: _customerTheme(),
         // FR09: lets NotificationCenter show a banner for each new notification
         scaffoldMessengerKey: NotificationCenter.messengerKey,
+        // Small "DEVELOPMENT" badge while the backend runs in development mode
+        builder: (context, child) => DevBanner(child: child ?? const SizedBox.shrink()),
 
         initialRoute: AppRoutes.splash,
 
@@ -118,7 +125,7 @@ class _VendraCustomerAppState extends State<VendraCustomerApp> {
           AppRoutes.splash: (context) => const SplashScreen(),
           AppRoutes.login: (context) => const LoginScreen(),
           AppRoutes.customerHome: (context) => const CustomerHomeScreen(),
-          AppRoutes.cart: (context) => const CartScreen(),
+          AppRoutes.cart: (context) => const CartsScreen(), // one cart per store
           AppRoutes.customerOrders: (context) => const CustomerOrdersScreen(),
           AppRoutes.wallet: (context) => const WalletScreen(),
           AppRoutes.myDisputes: (context) => const MyDisputesScreen(),
@@ -159,4 +166,31 @@ class _VendraCustomerAppState extends State<VendraCustomerApp> {
       ),
     );
   }
+}
+
+/// The shared theme with a few customer-app refinements: neutral (not
+/// orange-tinted) surfaces for sheets, drawers, dialogs and dividers, and
+/// dark default body text so headings without an explicit colour stay readable.
+ThemeData _customerTheme() {
+  final base = AppTheme.lightTheme;
+  const hairline = Color(0xFFE6E8EB);
+  return base.copyWith(
+    colorScheme: base.colorScheme.copyWith(
+      surfaceTint: Colors.transparent,
+      surfaceContainerLowest: Colors.white,
+      surfaceContainerLow: Colors.white,
+      surfaceContainer: Colors.white,
+      surfaceContainerHigh: Colors.white,
+      outlineVariant: hairline,
+    ),
+    dividerColor: hairline,
+    dividerTheme: const DividerThemeData(color: hairline, thickness: 1),
+    textTheme: base.textTheme.copyWith(
+      bodyMedium: base.textTheme.bodyMedium?.copyWith(color: AppColors.textPrimary),
+    ),
+    appBarTheme: base.appBarTheme.copyWith(surfaceTintColor: Colors.transparent),
+    bottomSheetTheme: const BottomSheetThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
+    drawerTheme: const DrawerThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
+    dialogTheme: const DialogThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
+  );
 }

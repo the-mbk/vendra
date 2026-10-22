@@ -3,6 +3,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { login, saveToken, wasSessionExpired, clearSessionExpired, SESSION_EXPIRED_MESSAGE } from "./lib/api";
+import { usePublicConfig } from "./lib/hooks";
 
 // The "session expired" flag lives in sessionStorage; read it without a hydration mismatch
 const noopSubscribe = () => () => {};
@@ -15,16 +16,31 @@ export default function LoginPage() {
   const [noticeDismissed, setNoticeDismissed] = useState(false);
   const sessionExpired = useSyncExternalStore(noopSubscribe, wasSessionExpired, () => false);
   const router = useRouter();
+  const publicConfig = usePublicConfig();
+  // Demo sign-in is only offered when the backend runs in development mode
+  const demoAccounts = publicConfig?.features?.demoLogin
+    ? (publicConfig.demoAccounts || []).filter((a) => a.role === "admin")
+    : [];
 
-  async function handleSubmit(e) {
+  function handleSubmit(e) {
     e.preventDefault();
+    signIn(email, password);
+  }
+
+  function handleDemoLogin(account) {
+    setEmail(account.email);
+    setPassword(account.password);
+    signIn(account.email, account.password);
+  }
+
+  async function signIn(signInEmail, signInPassword) {
     setError("");
     setLoading(true);
     setNoticeDismissed(true);
     clearSessionExpired();
 
     try {
-      const res = await login(email, password);
+      const res = await login(signInEmail, signInPassword);
 
       if (res.success && res.data.user.role === "admin") {
         saveToken(res.data.token);
@@ -119,11 +135,39 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-6 pt-4 border-t border-outline-variant/30 text-center">
-            <p className="text-xs text-outline">
-              Test credentials: <span className="font-medium text-on-surface-variant">admin@vendra.pk</span> / <span className="font-medium text-on-surface-variant">password123</span>
-            </p>
-          </div>
+          {demoAccounts.length > 0 && (
+            <div className="mt-6 pt-4 border-t border-outline-variant/30">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800">
+                  Development
+                </span>
+                <p className="text-xs text-outline">Demo accounts: click to sign in</p>
+              </div>
+              <div className="space-y-2">
+                {demoAccounts.map((account) => (
+                  <button
+                    key={account.email}
+                    type="button"
+                    disabled={loading}
+                    onClick={() => handleDemoLogin(account)}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border border-outline-variant/40 bg-surface-container-low/50 hover:bg-surface-container-low hover:border-primary/40 transition-colors text-left disabled:opacity-50"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                      <span className="material-symbols-outlined text-primary text-[18px]">admin_panel_settings</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-on-surface truncate">{account.name}</p>
+                      <p className="text-xs text-outline truncate">
+                        {account.email}
+                        {account.note ? ` · ${account.note}` : ""}
+                      </p>
+                    </div>
+                    <span className="material-symbols-outlined text-outline text-[18px]">login</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <p className="text-center text-xs text-outline mt-6">

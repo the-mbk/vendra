@@ -10,7 +10,8 @@ const cors = require('cors');
 
 const { corsOrigin } = require('./utils/cors');
 const { initRealtime } = require('./realtime');
-const { PRODUCTS_DIR, PRODUCTS_PUBLIC_PATH, resolveSignedEvidence } = require('./services/storage.service');
+const { PRODUCTS_PUBLIC_PATH, sendStoredFile, verifyEvidenceLink } = require('./services/storage.service');
+const { asyncHandler } = require('./utils/http');
 
 const authRoutes = require('./routes/auth.routes');
 const vendorRoutes = require('./routes/vendor.routes');
@@ -18,6 +19,8 @@ const customerRoutes = require('./routes/customer.routes');
 const riderRoutes = require('./routes/rider.routes');
 const accountRoutes = require('./routes/account.routes');
 const adminRoutes = require('./routes/admin.routes');
+const paymentRoutes = require('./routes/payment.routes');
+const { gatewayWebhook } = require('./controllers/payment.controller');
 
 function createServer({ logRequests = true } = {}) {
   const app = express();
@@ -29,6 +32,8 @@ function createServer({ logRequests = true } = {}) {
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   }));
+  // Gateway webhooks are verified against the exact bytes sent, so they skip the JSON parser
+  app.post('/api/payments/webhook', express.raw({ type: 'application/json', limit: '256kb' }), gatewayWebhook);
   app.use(express.json());
 
   if (logRequests) {
@@ -39,19 +44,23 @@ function createServer({ logRequests = true } = {}) {
   }
 
   // Product photos are public; dispute evidence only through signed, expiring links
-  app.use(PRODUCTS_PUBLIC_PATH, express.static(PRODUCTS_DIR, { maxAge: '7d', index: false }));
-  app.get('/api/files/evidence/:name', (req, res) => {
-    const file = resolveSignedEvidence(req.params.name, req.query.exp, req.query.sig);
-    if (!file) return res.status(403).json({ success: false, message: 'This link is invalid or has expired.' });
-    res.set('Cache-Control', 'private, max-age=600');
-    res.sendFile(file);
-  });
+  app.get(`${PRODUCTS_PUBLIC_PATH}/:name`, asyncHandler(async (req, res) => {
+    const sent = await sendStoredFile(res, 'products', req.params.name, 'public, max-age=604800');
+    if (!sent) res.status(404).json({ success: false, message: 'Photo not found.' });
+  }));
+  app.get('/api/files/evidence/:name', asyncHandler(async (req, res) => {
+    const valid = verifyEvidenceLink(req.params.name, req.query.exp, req.query.sig);
+    if (!valid || !(await sendStoredFile(res, 'evidence', req.params.name, 'private, max-age=600'))) {
+      res.status(403).json({ success: false, message: 'This link is invalid or has expired.' });
+    }
+  }));
 
   // Routes
   app.use('/api/auth', authRoutes);
   app.use('/api/vendor', vendorRoutes);
   app.use('/api/rider', riderRoutes);
   app.use('/api/admin', adminRoutes);
+  app.use('/api', paymentRoutes);
   app.use('/api', customerRoutes);
   app.use('/api', accountRoutes);
 

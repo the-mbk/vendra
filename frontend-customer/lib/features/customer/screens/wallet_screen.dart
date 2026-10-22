@@ -1,10 +1,14 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Customer App - Wallet
-// Balance + transaction history from GET /api/wallet:
-// top-ups, escrow holds at checkout, and refunds (cancel / dispute).
+// Balance + transaction history from GET /api/wallet: card top-ups,
+// escrow holds at checkout, refunds (cancel / dispute) and withdrawals.
+// - Add money: amount → card → one-time password if the bank asks
+// - Withdraw: send wallet money back to a card (history below)
+// - Card payment / payout references (pi_… / po_…) can be copied
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -14,12 +18,10 @@ import '../../../config/app_routes.dart';
 import '../../auth/bloc/auth_bloc.dart';
 import '../../auth/bloc/auth_event.dart';
 import '../bloc/wallet_bloc.dart';
+import '../widgets/wallet_actions.dart';
 
 class WalletScreen extends StatelessWidget {
   const WalletScreen({super.key});
-
-  /// Same simulated deposit as the profile card
-  static const double topUpAmount = 5000;
 
   @override
   Widget build(BuildContext context) {
@@ -38,11 +40,13 @@ class WalletScreen extends StatelessWidget {
               context.read<AuthBloc>().add(AuthWalletBalanceUpdated(walletBalance: balance));
             }
             if (state.feedback != null) {
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text(state.feedback!),
-                backgroundColor: state.feedbackIsError ? AppColors.error : AppColors.stockGreen,
-                behavior: SnackBarBehavior.floating,
-              ));
+              ScaffoldMessenger.of(context)
+                ..hideCurrentSnackBar()
+                ..showSnackBar(SnackBar(
+                  content: Text(state.feedback!),
+                  backgroundColor: state.feedbackIsError ? AppColors.error : AppColors.stockGreen,
+                  behavior: SnackBarBehavior.floating,
+                ));
             }
           },
           builder: (context, state) {
@@ -71,7 +75,11 @@ class WalletScreen extends StatelessWidget {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  _balanceCard(context, state),
+                  _balanceCard(context, summary.balance),
+                  const SizedBox(height: 20),
+                  Text('Withdrawals', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  WithdrawalHistoryList(refreshKey: state.revision, pageSize: 5),
                   const SizedBox(height: 20),
                   Text('Transactions', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
@@ -102,7 +110,21 @@ class WalletScreen extends StatelessWidget {
     );
   }
 
-  Widget _balanceCard(BuildContext context, WalletState state) {
+  Future<void> _addMoney(BuildContext context) async {
+    final bloc = context.read<WalletBloc>();
+    final result = await startCardTopUp(context);
+    if (result == null) return;
+    bloc.add(WalletChanged(feedback: result.message, isError: !result.success));
+  }
+
+  Future<void> _withdraw(BuildContext context, double balance) async {
+    final bloc = context.read<WalletBloc>();
+    // The shared sheet already showed the outcome; just reload
+    if (await startWithdrawal(context, balance: balance)) bloc.add(const WalletChanged());
+  }
+
+  Widget _balanceCard(BuildContext context, double balance) {
+    final buttonShape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(10));
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -119,7 +141,7 @@ class WalletScreen extends StatelessWidget {
           Text('Available balance', style: GoogleFonts.poppins(color: Colors.green.shade100, fontSize: 14)),
           const SizedBox(height: 6),
           Text(
-            'Rs. ${state.summary!.balance.toStringAsFixed(2)}',
+            formatRupees(balance),
             style: GoogleFonts.poppins(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 4),
@@ -128,23 +150,36 @@ class WalletScreen extends StatelessWidget {
             style: GoogleFonts.poppins(color: Colors.white70, fontSize: 11),
           ),
           const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.green.shade800,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.green.shade800,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: buttonShape,
+                  ),
+                  icon: const Icon(Icons.add_card),
+                  label: const Text('Add money'),
+                  onPressed: () => _addMoney(context),
+                ),
               ),
-              icon: state.toppingUp
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.add_circle_outline),
-              label: Text('Top Up (Rs. ${topUpAmount.toStringAsFixed(0)})'),
-              onPressed: state.toppingUp
-                  ? null
-                  : () => context.read<WalletBloc>().add(const WalletTopUpRequested(topUpAmount)),
-            ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: buttonShape,
+                  ),
+                  icon: const Icon(Icons.north_east),
+                  label: const Text('Withdraw'),
+                  onPressed: () => _withdraw(context, balance),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -156,59 +191,72 @@ class _TransactionTile extends StatelessWidget {
   final WalletTransaction tx;
   const _TransactionTile({required this.tx});
 
-  String get _title {
-    switch (tx.type) {
-      case 'escrow_hold':
-        return tx.orderId != null ? 'Paid into escrow · Order #${tx.orderId}' : tx.label;
-      case 'escrow_refund':
-        return tx.orderId != null ? 'Refund · Order #${tx.orderId}' : tx.label;
-      default:
-        return tx.label;
-    }
-  }
-
-  IconData get _icon {
-    switch (tx.type) {
-      case 'deposit':
-        return Icons.add_card;
-      case 'escrow_hold':
-        return Icons.lock_outline;
-      case 'escrow_refund':
-        return Icons.replay;
-      default:
-        return Icons.swap_vert;
-    }
+  void _copyReference(BuildContext context) {
+    Clipboard.setData(ClipboardData(text: tx.reference!));
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text('Copied ${tx.reference}'),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ));
   }
 
   @override
   Widget build(BuildContext context) {
     final color = tx.isDebit ? AppColors.stockRed : AppColors.stockGreen;
+    final details = [
+      if (tx.description != null && tx.description!.isNotEmpty) tx.description!,
+      if (tx.createdAt != null) DateFormat('d MMM yyyy, h:mm a').format(tx.createdAt!),
+    ];
     return ListTile(
       onTap: tx.orderId != null
           ? () => Navigator.pushNamed(context, AppRoutes.orderTracking, arguments: tx.orderId)
           : null,
       leading: CircleAvatar(
         backgroundColor: color.withValues(alpha: 0.1),
-        child: Icon(_icon, color: color, size: 20),
+        child: Icon(tx.icon, color: color, size: 20),
       ),
-      title: Text(_title, style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
-      subtitle: Text(
-        [
-          if (tx.description != null && tx.description!.isNotEmpty) tx.description!,
-          if (tx.createdAt != null) DateFormat('d MMM yyyy, h:mm a').format(tx.createdAt!),
-        ].join('\n'),
-        style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary),
+      title: Text(tx.title, style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (details.isNotEmpty)
+            Text(details.join('\n'), style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary)),
+          if (tx.reference != null)
+            InkWell(
+              onTap: () => _copyReference(context),
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        'Ref. ${tx.reference}',
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.robotoMono(fontSize: 10, color: AppColors.textLight),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.copy, size: 11, color: AppColors.textLight),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
-      isThreeLine: tx.description != null && tx.description!.isNotEmpty && tx.createdAt != null,
+      isThreeLine: details.length + (tx.reference != null ? 1 : 0) > 1,
       trailing: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Text(
-            '${tx.isDebit ? '−' : '+'} Rs. ${tx.amount.toStringAsFixed(0)}',
+            tx.amountText,
             style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w700, color: color),
           ),
-          Text('Bal. ${tx.balanceAfter.toStringAsFixed(0)}',
+          Text('Bal. ${formatRupees(tx.balanceAfter)}',
               style: GoogleFonts.poppins(fontSize: 10, color: AppColors.textLight)),
         ],
       ),

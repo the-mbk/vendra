@@ -10,8 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:vendra_customer/vendra_core.dart';
-import '../../../config/app_routes.dart';
 import '../bloc/cart_bloc.dart';
+import 'cart_screen.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final ProductModel product;
@@ -166,7 +166,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
-                        'Rs.${product.price.toStringAsFixed(0)}',
+                        formatRupees(product.price),
                         style: GoogleFonts.poppins(fontSize: 28, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
                       ),
                     ],
@@ -235,7 +235,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             style: GoogleFonts.poppins(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              color: product.publicStock <= 10 ? AppColors.stockRed : AppColors.primary,
+                              color: product.publicStock <= 10 ? AppColors.stockRed : AppColors.stockGreen,
                             ),
                           ),
                         ],
@@ -305,7 +305,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       : () {
                           final inCart = context.read<CartBloc>().state.quantityOf(product.id);
                           if (inCart == 0) _addToCart(context);
-                          Navigator.pushNamed(context, AppRoutes.cart);
+                          openStoreCart(context, product.vendorId);
                         },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,

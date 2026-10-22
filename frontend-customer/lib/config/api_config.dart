@@ -65,18 +65,34 @@ class ApiConfig {
   // ──────────────────────────────────────
   // Customer Endpoints
   // ──────────────────────────────────────
-  static const String publicConfig = '/api/public-config';
+  static const String publicConfig = '/api/public-config'; // ?role=customer|vendor|rider
   static const String categories = '/api/categories';
   static const String products = '/api/products'; // paged: ?limit=&offset=
   static String vendorDetails(int id) => '/api/vendors/$id';
+  static const String stores = '/api/stores'; // every open store for the map: ?lat=&lng= sorts nearest first
   static const String checkout = '/api/customer/checkout';
+  static const String checkoutQuote = '/api/customer/checkout/quote'; // the cart's total with the distance-based delivery fee
   static const String customerOrders = '/api/customer/orders'; // paged
   static String customerOrder(int id) => '/api/customer/orders/$id';
   static String orderTracking(int id) => '/api/customer/orders/$id/tracking';
   static String cancelOrder(int id) => '/api/customer/orders/$id/cancel';
   static String customerMarkPickedUp(int id) => '/api/customer/orders/$id/picked-up';
   static String customerConfirmReceived(int id) => '/api/customer/orders/$id/confirm-received';
-  static const String walletTopup = '/api/customer/wallet/topup';
+
+  // ──────────────────────────────────────
+  // Card Payments (money in) — the card is tokenized at the gateway first,
+  // these endpoints only ever receive the single-use token
+  // ──────────────────────────────────────
+  static const String payments = '/api/payments'; // paged
+  static const String paymentsTopup = '/api/payments/topup'; // customer: { amount, token }
+  static const String paymentsCheckout = '/api/payments/checkout'; // customer: checkout body + token
+  static String payment(int id) => '/api/payments/$id';
+  static String paymentRefresh(int id) => '/api/payments/$id/refresh'; // after the OTP step
+
+  // ──────────────────────────────────────
+  // Withdrawals (money out, every role)
+  // ──────────────────────────────────────
+  static const String withdrawals = '/api/withdrawals'; // POST { amount, token } · GET paged
 
   // ──────────────────────────────────────
   // Rider Endpoints

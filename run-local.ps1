@@ -1,24 +1,46 @@
-# ══════════════════════════════════════════════════════════════
+﻿# ══════════════════════════════════════════════════════════════
 # Vendra — run everything locally (Windows PowerShell)
 #
 #   .\run-local.ps1            database + backend + admin + the three apps
 #   .\run-local.ps1 -NoApps    database + backend + admin only
-#   .\run-local.ps1 -Reset     wipe the local database and reload the demo data first
+#   .\run-local.ps1 -Reset     wipe the database, stored files and payment gateway, then reload the demo data
+#   .\run-local.ps1 -Production  run the backend with APP_MODE=production (no test-card hints,
+#                               manual GPS, fast timers or demo logins; demo data is not loaded)
 #
 # Each service opens in its own window; close a window to stop that service.
-# The database keeps running in Docker: stop it with
+# The database and file storage keep running in Docker: stop them with
 #   docker compose -f backend\docker-compose.yml down
+#
+# Docker also runs:
+#   SeaweedFS   S3-compatible file storage standing in for Cloudflare R2 — http://localhost:8888/buckets/
+#   Vendra Pay  the card payment gateway sandbox — dashboard and test cards at http://localhost:4242
 # ══════════════════════════════════════════════════════════════
 
 param(
     [switch]$NoApps,
-    [switch]$Reset
+    [switch]$Reset,
+    [switch]$Production
 )
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $backend = Join-Path $root 'backend'
 $dbUrl = 'postgresql://postgres:vendra_dev@localhost:5433/vendra_db'
+# Matches backend\docker-compose.yml and backend\docker\seaweedfs-s3.json
+$storageEnv = "`$env:S3_ENDPOINT='http://localhost:8333'; `$env:S3_REGION='us-east-1'; `$env:S3_BUCKET='vendra-files'; " +
+              "`$env:S3_ACCESS_KEY_ID='vendra'; `$env:S3_SECRET_ACCESS_KEY='vendra_dev_secret'"
+# Matches the gateway service in backend\docker-compose.yml
+$gatewayEnv = "`$env:GATEWAY_URL='http://localhost:4242'; `$env:GATEWAY_PUBLISHABLE_KEY='pk_test_vendra'; " +
+              "`$env:GATEWAY_SECRET_KEY='sk_test_vendra'; `$env:GATEWAY_WEBHOOK_SECRET='whsec_vendra'"
+$mode = if ($Production) { 'production' } else { 'development' }
+$modeEnv = "`$env:APP_MODE='$mode'"
+if ($Production) {
+    # Production mode refuses development secrets and needs the allowed origins spelled out.
+    # A fresh secret each run: everyone signs in again after a restart.
+    $secret = -join ((1..48) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
+    $origins = 'http://localhost:3001,http://localhost:5001,http://localhost:5002,http://localhost:5003'
+    $modeEnv += "; `$env:JWT_SECRET='$secret'; `$env:ALLOWED_ORIGINS='$origins'"
+}
 
 $flutter = 'C:\fltr\flutter\bin\flutter.bat'
 if (-not (Test-Path $flutter)) { $flutter = 'flutter' }
@@ -48,9 +70,9 @@ try {
         Step 'Wiping the local database'
         docker compose down -v
     }
-    Step 'Starting Postgres (vendra-db)'
-    docker compose up -d --wait
-    if ($LASTEXITCODE -ne 0) { throw 'Postgres failed to start (is something else using port 5433?).' }
+    Step 'Starting Postgres (vendra-db), file storage (vendra-storage) and the payment gateway (vendra-pay)'
+    docker compose up -d --build --wait
+    if ($LASTEXITCODE -ne 0) { throw 'Docker services failed to start (is something else using port 5433, 8333, 8888 or 4242?).' }
 
     if (-not (Test-Path (Join-Path $backend 'node_modules'))) {
         Step 'Installing backend packages'
@@ -63,9 +85,17 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Migrations failed.' }
 
     # Loads demo data only into an empty database (the seed script refuses otherwise)
-    node src/seed.js 2>$null
-    if ($LASTEXITCODE -eq 0) { Write-Host 'Demo data loaded (all accounts use password123).' }
-    else { Write-Host 'Existing data kept.' }
+    if ($Production) {
+        Write-Host 'Production mode: demo data is not loaded.'
+    } else {
+        # ~1,000 users, ~2,000 products and 90 days of orders in Islamabad and Rawalpindi.
+        # The first run downloads the product catalogue and photos (cached in backend\.cache).
+        $env:APP_MODE = 'development'
+        $out = cmd /c "node src/seed.js 2>&1"
+        if ($LASTEXITCODE -eq 0) { $out | ForEach-Object { Write-Host $_ } }
+        elseif ("$out" -match 'already has users') { Write-Host 'Existing data kept.' }
+        else { $out | ForEach-Object { Write-Host $_ }; Write-Warning 'Demo data was not loaded (see above).' }
+    }
 }
 finally {
     Pop-Location
@@ -77,8 +107,8 @@ function Start-Window($title, $dir, $command) {
     Start-Process powershell -ArgumentList '-NoExit', '-Command', $full | Out-Null
 }
 
-Step 'Starting backend on http://localhost:3000'
-Start-Window 'Vendra backend' $backend "`$env:DATABASE_URL='$dbUrl'; npm run dev"
+Step "Starting backend on http://localhost:3000 ($mode mode)"
+Start-Window "Vendra backend ($mode)" $backend "`$env:DATABASE_URL='$dbUrl'; $storageEnv; $gatewayEnv; $modeEnv; npm run dev"
 
 Step 'Starting admin dashboard on http://localhost:3001'
 $admin = Join-Path $root 'frontend-admin'
@@ -102,4 +132,9 @@ if (-not $NoApps) {
     }
 }
 
-Write-Host "`n✓ Started. Logins are in backend\README.md (password123 for every demo account)." -ForegroundColor Green
+Write-Host "`n✓ Started in $mode mode." -ForegroundColor Green
+Write-Host '  Admin dashboard                  http://localhost:3001'
+Write-Host '  Customer / vendor / rider apps   http://localhost:5001 / 5002 / 5003'
+Write-Host '  Vendra Pay dashboard             http://localhost:4242  (test cards listed there)'
+Write-Host '  Stored files                     http://localhost:8888/buckets/'
+if (-not $Production) { Write-Host '  Demo logins are listed on each login screen (password123).' }

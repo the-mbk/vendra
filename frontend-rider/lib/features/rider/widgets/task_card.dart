@@ -68,22 +68,24 @@ class TaskCard extends StatelessWidget {
               color: AppColors.secondary,
               label: 'PICKUP',
               title: task.storeName ?? 'Store',
-              subtitle: [
-                if (task.storeAddress != null) task.storeAddress!,
-                '${km(task.distanceToStoreKm)} away',
-              ].join(' • '),
+              subtitle: task.storeAddress,
+              distance: '${km(task.distanceToStoreKm)} away',
               showLine: true,
             ),
             _RouteStop(
               color: AppColors.primary,
               label: 'DROP-OFF',
               title: task.deliveryAddress ?? 'Customer location',
-              subtitle: '${km(task.tripDistanceKm)} trip',
+              distance: '${km(task.tripDistanceKm)} trip',
             ),
             const SizedBox(height: 12),
             Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              decoration: BoxDecoration(
+                color: AppColors.success.withValues(alpha: 0.07),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.success.withValues(alpha: 0.18)),
+              ),
               child: Row(
                 children: [
                   Expanded(
@@ -93,7 +95,7 @@ class TaskCard extends StatelessWidget {
                         Text('Estimated payout', style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
                         Text(
                           task.estimatedPayout != null ? rs(task.estimatedPayout!) : '—',
-                          style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.w700, color: AppColors.success),
+                          style: GoogleFonts.poppins(fontSize: 26, fontWeight: FontWeight.w700, color: AppColors.success, height: 1.2),
                         ),
                       ],
                     ),
@@ -106,7 +108,9 @@ class TaskCard extends StatelessWidget {
                         children: [
                           const Icon(Icons.account_balance_wallet_outlined, size: 16, color: AppColors.secondary),
                           const SizedBox(width: 4),
-                          Text('To wallet', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600)),
+                          Text('To wallet',
+                              style: GoogleFonts.poppins(
+                                  fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                         ],
                       ),
                     ],
@@ -125,9 +129,10 @@ class TaskCard extends StatelessWidget {
                       onPressed: accepting || disabled ? null : onDecline,
                       style: OutlinedButton.styleFrom(
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        foregroundColor: AppColors.textSecondary,
+                        foregroundColor: AppColors.textPrimary,
+                        side: BorderSide(color: Colors.grey.shade400, width: 1.5),
                       ),
-                      child: Text('Decline', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                      child: Text('Decline', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)),
                     ),
                   ),
                 ),
@@ -154,14 +159,16 @@ class _RouteStop extends StatelessWidget {
   final Color color;
   final String label;
   final String title;
-  final String subtitle;
+  final String? subtitle;
+  final String distance;
   final bool showLine;
 
   const _RouteStop({
     required this.color,
     required this.label,
     required this.title,
-    required this.subtitle,
+    required this.distance,
+    this.subtitle,
     this.showLine = false,
   });
 
@@ -192,12 +199,36 @@ class _RouteStop extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(label,
-                      style: GoogleFonts.poppins(
-                          fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8, color: AppColors.textLight)),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(label,
+                            style: GoogleFonts.poppins(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.8,
+                                color: AppColors.textSecondary)),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(distance,
+                            style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+                      ),
+                    ],
+                  ),
                   Text(title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                  Text(subtitle, style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                  if (subtitle != null)
+                    Text(subtitle!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
                 ],
               ),
             ),

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { clearToken, getDashboardStats, SESSION_EXPIRED_EVENT } from "../lib/api";
 import { COUNTS_EVENT } from "../lib/ui";
+import { usePublicConfig } from "../lib/hooks";
 
 const navSections = [
   {
@@ -24,7 +25,14 @@ const navSections = [
     items: [
       { label: "Orders", icon: "receipt_long", href: "/dashboard/orders" },
       { label: "Disputes", icon: "gavel", href: "/dashboard/disputes", badge: "openDisputes", urgent: true },
+    ],
+  },
+  {
+    title: "Money",
+    items: [
       { label: "Finance", icon: "account_balance", href: "/dashboard/finance" },
+      { label: "Card Payments", icon: "credit_card", href: "/dashboard/payments" },
+      { label: "Withdrawals", icon: "output", href: "/dashboard/withdrawals" },
     ],
   },
   {
@@ -49,6 +57,8 @@ export default function DashboardLayout({ children }) {
   const router = useRouter();
   const pathname = usePathname();
   const [counts, setCounts] = useState({});
+  const publicConfig = usePublicConfig();
+  const isDevelopment = publicConfig?.mode === "development";
 
   // Badge counts: refreshed on navigation and after admin actions
   useEffect(() => {
@@ -61,7 +71,9 @@ export default function DashboardLayout({ children }) {
         setCounts({
           openDisputes: Number(res.data?.openDisputes) || 0,
           pendingProducts: Number(res.data?.pendingProducts) || 0,
-          pendingVendors: Number(res.data?.vendors?.pending) || 0,
+          // Vendors needing a decision: new sign-ups + store location change requests
+          pendingVendors:
+            (Number(res.data?.vendors?.pending) || 0) + (Number(res.data?.vendors?.location_requests) || 0),
         });
       } catch {
         // Badges are optional; pages handle auth errors themselves
@@ -96,25 +108,36 @@ export default function DashboardLayout({ children }) {
       {/* Sidebar */}
       <aside className="w-[260px] bg-white border-r border-outline-variant/30 flex flex-col fixed h-screen">
         {/* Logo */}
-        <div className="p-5 border-b border-outline-variant/20">
+        <div className="px-5 py-4 border-b border-outline-variant/20">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shrink-0">
               <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             </div>
-            <div>
+            <div className="min-w-0">
               <h1 className="text-lg font-bold text-primary leading-tight">Vendra</h1>
-              <p className="text-[11px] text-outline font-medium">Admin Panel</p>
+              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 mt-0.5">
+                <p className="text-[11px] text-outline font-medium whitespace-nowrap">Admin Panel</p>
+                {isDevelopment && (
+                  <span
+                    title="Development mode: test cards, fast timers and demo sign-in are on"
+                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[9px] font-semibold uppercase tracking-wide leading-none"
+                  >
+                    <span className="material-symbols-outlined text-[11px]">construction</span>
+                    Development
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 min-h-0 py-4 px-3 overflow-y-auto">
+        <nav className="flex-1 min-h-0 py-3 px-3 overflow-y-auto">
           {navSections.map((section) => (
-            <div key={section.title} className="mb-4">
-              <p className="text-[11px] font-semibold text-outline uppercase tracking-wider px-3 mb-2">{section.title}</p>
+            <div key={section.title} className="mb-3 last:mb-0">
+              <p className="text-[11px] font-semibold text-outline uppercase tracking-wider px-3 mb-1">{section.title}</p>
               {section.items.map((item) => {
                 const isActive = isActivePath(pathname, item.href);
                 const count = item.badge ? counts[item.badge] || 0 : 0;
@@ -122,7 +145,7 @@ export default function DashboardLayout({ children }) {
                   <button
                     key={item.href}
                     onClick={() => router.push(item.href)}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-all ${
+                    className={`w-full flex items-center gap-3 px-3 py-1.5 rounded-xl mb-0.5 text-sm font-medium transition-all ${
                       isActive
                         ? "bg-primary text-white shadow-md shadow-primary/20"
                         : "text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface"
@@ -151,9 +174,9 @@ export default function DashboardLayout({ children }) {
         </nav>
 
         {/* Admin Info & Logout */}
-        <div className="p-4 border-t border-outline-variant/20">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-9 h-9 bg-primary/10 rounded-full flex items-center justify-center">
+        <div className="px-4 py-3 border-t border-outline-variant/20">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-primary/10 rounded-full flex items-center justify-center shrink-0">
               <span className="text-primary font-bold text-sm">VA</span>
             </div>
             <div className="flex-1 min-w-0">
@@ -163,7 +186,7 @@ export default function DashboardLayout({ children }) {
           </div>
           <button
             onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-medium text-error border border-error/20 hover:bg-red-50 transition-colors"
+            className="w-full mt-2 flex items-center justify-center gap-2 px-3 py-1.5 rounded-xl text-sm font-medium text-error border border-error/20 hover:bg-red-50 transition-colors"
           >
             <span className="material-symbols-outlined text-[18px]">logout</span>
             Logout
@@ -172,7 +195,8 @@ export default function DashboardLayout({ children }) {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 ml-[260px]">
+      {/* min-w-0 lets wide tables scroll inside their card instead of widening the page */}
+      <main className="flex-1 min-w-0 ml-[260px]">
         {/* Top header */}
         <header className="h-16 bg-white/80 backdrop-blur-md border-b border-outline-variant/20 flex items-center justify-between px-8 sticky top-0 z-10">
           <div>

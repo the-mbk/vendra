@@ -17,6 +17,9 @@ function KPICard({ title, value, subtitle, icon, color, trend, href, alert }) {
     cyan: "bg-cyan-100 text-cyan-700",
   };
 
+  // Plain counts get thousands separators ("3,631"); money values arrive already formatted
+  const displayValue = /^\d+$/.test(String(value)) ? Number(value).toLocaleString("en-PK") : value;
+
   const content = (
     <>
       <div className="flex items-start justify-between mb-4">
@@ -25,19 +28,29 @@ function KPICard({ title, value, subtitle, icon, color, trend, href, alert }) {
         </div>
         {trend && (
           <span
-            className={`text-xs font-semibold px-2 py-1 rounded-full ${
-              alert ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"
+            className={`text-xs font-semibold px-2 py-1 rounded-full whitespace-nowrap ${
+              alert
+                ? "bg-red-50 text-red-700"
+                : String(trend).startsWith("+")
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "bg-amber-50 text-amber-700"
             }`}
           >
             {trend}
           </span>
         )}
       </div>
-      <p className={`text-2xl font-bold mb-1 ${alert ? "text-error" : "text-on-surface"}`}>{value}</p>
+      <p
+        className={`${String(displayValue).length > 14 ? "text-xl" : "text-2xl"} font-bold mb-1 whitespace-nowrap ${
+          alert ? "text-error" : "text-on-surface"
+        }`}
+      >
+        {displayValue}
+      </p>
       <p className="text-sm text-on-surface-variant">{title}</p>
       {subtitle && <p className="text-xs text-outline mt-1">{subtitle}</p>}
       {href && (
-        <p className="text-xs font-semibold text-primary mt-3 flex items-center gap-1">
+        <p className="text-xs font-semibold text-primary mt-auto pt-3 flex items-center gap-1">
           View details
           <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
         </p>
@@ -49,7 +62,7 @@ function KPICard({ title, value, subtitle, icon, color, trend, href, alert }) {
     alert ? "border-error/40" : "border-outline-variant/20"
   }`;
 
-  if (!href) return <div className={baseClass}>{content}</div>;
+  if (!href) return <div className={`${baseClass} flex flex-col`}>{content}</div>;
 
   return (
     <button onClick={() => router.push(href)} className={`${baseClass} text-left w-full flex flex-col justify-start`}>
@@ -112,6 +125,9 @@ export default function DashboardPage() {
 
   const openDisputes = Number(stats?.openDisputes) || 0;
   const pendingProducts = Number(stats?.pendingProducts) || 0;
+  const pendingVendors = Number(stats?.vendors?.pending) || 0;
+  const locationRequests = Number(stats?.vendors?.location_requests) || 0;
+  const locationRequestsText = `${locationRequests} store location change${locationRequests > 1 ? "s" : ""}`;
 
   return (
     <div>
@@ -126,7 +142,7 @@ export default function DashboardPage() {
         <KPICard
           title="Total Vendors"
           value={stats?.vendors?.total || 0}
-          subtitle={`${stats?.vendors?.pending || 0} pending approval`}
+          subtitle={`${pendingVendors} pending approval${locationRequests > 0 ? ` • ${locationRequestsText}` : ""}`}
           icon="storefront"
           color="primary"
           href="/dashboard/vendors"
@@ -134,6 +150,7 @@ export default function DashboardPage() {
         <KPICard
           title="Total Customers"
           value={stats?.customers || 0}
+          subtitle="Registered shopper accounts"
           icon="group"
           color="info"
           href="/dashboard/users"
@@ -141,7 +158,7 @@ export default function DashboardPage() {
         <KPICard
           title="Total Orders"
           value={stats?.orders?.total || 0}
-          subtitle={`${stats?.orders?.today || 0} orders today`}
+          subtitle={`${stats?.orders?.today || 0} order${Number(stats?.orders?.today) === 1 ? "" : "s"} today`}
           icon="receipt_long"
           color="secondary"
           trend={stats?.orders?.today > 0 ? `+${stats.orders.today} today` : undefined}
@@ -155,6 +172,23 @@ export default function DashboardPage() {
           color="success"
         />
       </div>
+
+      {/* Store location change requests */}
+      {locationRequests > 0 && (
+        <button
+          onClick={() => router.push("/dashboard/vendors?filter=location")}
+          className="w-full bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5 flex items-center gap-3 text-left hover:bg-blue-100/60 transition-colors"
+        >
+          <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
+            <span className="material-symbols-outlined text-blue-700 text-[22px]">edit_location_alt</span>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-blue-900">{locationRequestsText} awaiting review</p>
+            <p className="text-xs text-blue-700">Vendors asked to move their store pin. Approve or reject each request.</p>
+          </div>
+          <span className="ml-auto text-sm font-semibold text-blue-700">Review →</span>
+        </button>
+      )}
 
       {/* Operations: items that need admin attention */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-5">
@@ -222,11 +256,12 @@ export default function DashboardPage() {
         />
         <KPICard
           title="Pending Vendor Approvals"
-          value={stats?.vendors?.pending || 0}
+          value={pendingVendors}
+          subtitle={locationRequests > 0 ? `+ ${locationRequestsText} to review` : undefined}
           icon="pending_actions"
           color="primary"
-          trend={parseInt(stats?.vendors?.pending) > 0 ? "Needs attention" : undefined}
-          href="/dashboard/vendors"
+          trend={pendingVendors > 0 || locationRequests > 0 ? "Needs attention" : undefined}
+          href={pendingVendors === 0 && locationRequests > 0 ? "/dashboard/vendors?filter=location" : "/dashboard/vendors"}
         />
       </div>
 

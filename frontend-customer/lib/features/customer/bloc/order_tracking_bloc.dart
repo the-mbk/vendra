@@ -4,6 +4,10 @@
 // Live updates:
 //   rider:location (this order) → move the rider marker, extend the path
 //   order:update   (this order) → reload (status, rider, escrow changed)
+// One order at a time: while this bloc is open it asks the server for this
+// order's rider pings only (RealtimeService.trackOrder). Other active orders
+// send nothing. Tracking pauses while the app is in the background and
+// catches up (silent reload) when it comes back.
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -25,6 +29,15 @@ class LoadOrderTracking extends OrderTrackingEvent {
   const LoadOrderTracking({this.silent = false});
   @override
   List<Object?> get props => [silent];
+}
+
+/// The app went to the background (stop pings) or came back (resume and catch up)
+class TrackingPaused extends OrderTrackingEvent {
+  const TrackingPaused();
+}
+
+class TrackingResumed extends OrderTrackingEvent {
+  const TrackingResumed();
 }
 
 class _RiderMoved extends OrderTrackingEvent {
@@ -96,7 +109,13 @@ class OrderTrackingBloc extends Bloc<OrderTrackingEvent, OrderTrackingState> {
       : super(OrderTrackingState(order: initialOrder, loading: true)) {
     on<LoadOrderTracking>(_onLoad);
     on<_RiderMoved>(_onRiderMoved);
+    on<TrackingPaused>((_, __) => RealtimeService().untrackOrder(orderId));
+    on<TrackingResumed>((_, __) {
+      RealtimeService().trackOrder(orderId);
+      add(const LoadOrderTracking(silent: true));
+    });
 
+    RealtimeService().trackOrder(orderId);
     _riderSub = RealtimeService()
         .riderLocations
         .where((e) => e.orderId == orderId)
@@ -148,6 +167,7 @@ class OrderTrackingBloc extends Bloc<OrderTrackingEvent, OrderTrackingState> {
 
   @override
   Future<void> close() {
+    RealtimeService().untrackOrder(orderId);
     _riderSub?.cancel();
     _orderSub?.cancel();
     return super.close();

@@ -45,7 +45,7 @@ const getWallet = asyncHandler(async (req, res) => {
   const [user, ledger] = await Promise.all([
     pool.query('SELECT wallet_balance FROM users WHERE id = $1', [req.user.userId]),
     pool.query(
-      `SELECT id, order_id, transaction_type, amount, balance_after, description, created_at
+      `SELECT id, order_id, transaction_type, amount, balance_after, description, reference, created_at
        FROM wallet_ledger WHERE user_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2`,
       [req.user.userId, limit]
     ),
@@ -62,6 +62,7 @@ const getWallet = asyncHandler(async (req, res) => {
         amount: Number(t.amount),
         balanceAfter: Number(t.balance_after),
         description: t.description,
+        reference: t.reference,
         createdAt: t.created_at,
       })),
     },

@@ -1,9 +1,12 @@
 // ══════════════════════════════════════════════════════════════
 // Customer orders list — used on Orders tab and full "My Orders" route
-// Shows live status (incl. rider assignment / picked / on the way),
-// rider contact, escrow state and dispute status. Updates in place
-// when the server pushes order:update (OrderBloc listens). Pages load
-// with infinite scroll as the list nears its end.
+// Two tabs: Active (on their way, each with "Track live") and Past
+// (delivered or cancelled). Shows live status (incl. rider assignment /
+// picked / on the way), rider contact, escrow state and dispute status.
+// Updates in place when the server pushes order:update (OrderBloc
+// listens). Pages load with infinite scroll as the list nears its end.
+// Tracking opens one order at a time; only that order's rider pings
+// reach the app (see OrderTrackingBloc).
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -35,6 +38,8 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
     _scroll.addListener(_maybeLoadMore);
     context.read<OrderBloc>().add(const FetchCustomerOrders());
   }
+
+  void _showScope(OrderScope scope) => context.read<OrderBloc>().add(FetchCustomerOrders(scope: scope));
 
   @override
   void dispose() {
@@ -97,16 +102,16 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
                         Text('${item.quantity}×', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.secondary)),
                         const SizedBox(width: 8),
                         Expanded(child: Text(item.productName ?? 'Item', style: GoogleFonts.poppins(fontSize: 13))),
-                        Text('Rs. ${item.total.toStringAsFixed(0)}', style: GoogleFonts.poppins(fontSize: 13)),
+                        Text(formatRupees(item.total), style: GoogleFonts.poppins(fontSize: 13)),
                       ],
                     ),
                   )),
               const Divider(height: 16),
-              line('Subtotal', 'Rs. ${order.subtotal.toStringAsFixed(0)}'),
+              line('Subtotal', formatRupees(order.subtotal)),
               const SizedBox(height: 4),
-              line('Delivery fee', order.isDelivery ? 'Rs. ${order.deliveryFee.toStringAsFixed(0)}' : 'Free'),
+              line('Delivery fee', order.isDelivery ? formatRupees(order.deliveryFee) : 'Free'),
               const Divider(height: 16),
-              line('Total', 'Rs. ${order.totalAmount.toStringAsFixed(0)}', bold: true),
+              line('Total', formatRupees(order.totalAmount), bold: true),
               const SizedBox(height: 8),
               Text(order.deliveryTypeText, style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
               const SizedBox(height: 4),
@@ -159,18 +164,7 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
           );
         }
         if (state is OrdersLoaded) {
-          if (state.orders.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey.shade300),
-                  const SizedBox(height: 16),
-                  Text('No orders yet', style: GoogleFonts.poppins(color: AppColors.textSecondary)),
-                ],
-              ),
-            );
-          }
+          final orders = state.visible;
 
           // A short first page may not fill the screen, so nothing would scroll
           if (state.hasMore && !state.loadingMore) {
@@ -187,9 +181,11 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
               controller: _scroll,
               physics: const AlwaysScrollableScrollPhysics(),
               padding: EdgeInsets.fromLTRB(16, widget.showTopPadding ? 12 : 0, 16, 24),
-              itemCount: state.orders.length + 1 + (state.hasMore ? 1 : 0),
+              itemCount: orders.length + 1 + (orders.isEmpty ? 1 : 0) + (state.hasMore ? 1 : 0),
               itemBuilder: (context, index) {
-                if (index == state.orders.length + 1) {
+                if (index == 0) return _tabs(context, state);
+                if (orders.isEmpty) return _emptyTab(state);
+                if (index == orders.length + 1) {
                   // Next page on its way
                   return const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16),
@@ -198,23 +194,88 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
                     ),
                   );
                 }
-                if (index == 0) {
-                  return Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      onPressed: () => Navigator.pushNamed(context, AppRoutes.myDisputes),
-                      icon: const Icon(Icons.gavel_outlined, size: 18),
-                      label: const Text('My disputes'),
-                    ),
-                  );
-                }
-                return _orderCard(context, state.orders[index - 1]);
+                return _orderCard(context, orders[index - 1]);
               },
             ),
           );
         }
         return const SizedBox.shrink();
       },
+    );
+  }
+
+  /// Active / Past switch, plus the disputes link
+  Widget _tabs(BuildContext context, OrdersLoaded state) {
+    Widget tab(OrderScope scope, String label) {
+      final selected = state.scope == scope;
+      return Expanded(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: selected ? null : () => _showScope(scope),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              color: selected ? Colors.white : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: selected ? [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 6)] : null,
+            ),
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                color: selected ? AppColors.secondary : AppColors.textSecondary,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(12)),
+            child: Row(
+              children: [
+                tab(OrderScope.active, state.activeCount > 0 ? 'Active (${state.activeCount})' : 'Active'),
+                tab(OrderScope.past, 'Past'),
+              ],
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () => Navigator.pushNamed(context, AppRoutes.myDisputes),
+              icon: const Icon(Icons.gavel_outlined, size: 18),
+              label: const Text('My disputes'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyTab(OrdersLoaded state) {
+    final active = state.scope == OrderScope.active;
+    return Padding(
+      padding: const EdgeInsets.only(top: 48),
+      child: Column(
+        children: [
+          Icon(active ? Icons.local_shipping_outlined : Icons.receipt_long_outlined, size: 64, color: Colors.grey.shade300),
+          const SizedBox(height: 16),
+          Text(active ? 'Nothing on its way right now' : 'No past orders yet',
+              style: GoogleFonts.poppins(color: AppColors.textSecondary)),
+          if (active)
+            TextButton(onPressed: () => _showScope(OrderScope.past), child: const Text('See past orders')),
+        ],
+      ),
     );
   }
 
@@ -234,21 +295,25 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
           childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
           title: Row(
             children: [
+              Text('#VDR-${order.id.toString().padLeft(5, '0')}',
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14, color: AppColors.textPrimary)),
+              const SizedBox(width: 10),
               Expanded(
-                child: Text('#VDR-${order.id.toString().padLeft(5, '0')}',
-                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14)),
-              ),
-              Flexible(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    order.statusText,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: color),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      order.statusText,
+                      maxLines: 2,
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: color),
+                    ),
                   ),
                 ),
               ),
@@ -283,7 +348,7 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    Text('Rs. ${order.totalAmount.toStringAsFixed(0)}',
+                    Text(formatRupees(order.totalAmount),
                         style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.primary)),
                     const Spacer(),
                     if (order.createdAt != null)
@@ -295,6 +360,22 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
                 ),
                 const SizedBox(height: 4),
                 EscrowStatusLine(order: order),
+                if (isActiveOrder(order)) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _openTracking(order),
+                      icon: Icon(order.isDelivery ? Icons.my_location : Icons.timeline, size: 18),
+                      label: Text(order.isDelivery && rider != null ? 'Track live' : 'Track order'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.secondary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -311,7 +392,7 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
                       Text('${item.quantity}×', style: GoogleFonts.poppins(fontSize: 12, color: AppColors.secondary)),
                       const SizedBox(width: 6),
                       Expanded(child: Text(item.productName ?? '', style: GoogleFonts.poppins(fontSize: 12))),
-                      Text('Rs. ${item.total.toStringAsFixed(0)}', style: GoogleFonts.poppins(fontSize: 12)),
+                      Text(formatRupees(item.total), style: GoogleFonts.poppins(fontSize: 12)),
                     ],
                   ),
                 )),
@@ -321,7 +402,7 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
                 child: Row(
                   children: [
                     Expanded(child: Text('Delivery fee', style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary))),
-                    Text('Rs. ${order.deliveryFee.toStringAsFixed(0)}', style: GoogleFonts.poppins(fontSize: 12)),
+                    Text(formatRupees(order.deliveryFee), style: GoogleFonts.poppins(fontSize: 12)),
                   ],
                 ),
               ),

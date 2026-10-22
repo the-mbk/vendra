@@ -17,3 +17,6 @@ npm-debug.log*
 
 # Uploaded dispute evidence
 uploads/
+
+# Demo catalogue + photos downloaded by npm run seed
+.cache/

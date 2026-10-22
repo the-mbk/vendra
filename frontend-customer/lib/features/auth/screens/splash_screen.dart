@@ -90,7 +90,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                   ],
                 ),
                 const SizedBox(height: 8),
-                Text("Pakistan's Leading Marketplace", style: GoogleFonts.poppins(fontSize: 14, color: Colors.white70)),
+                Text("Your hyperlocal marketplace", style: GoogleFonts.poppins(fontSize: 14, color: Colors.white70)),
                 const SizedBox(height: 48),
                 const SizedBox(
                   width: 28,

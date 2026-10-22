@@ -1,18 +1,21 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Backend - Customer Controller
-// Product browsing, atomic checkout with escrow, orders, tracking
+// Product browsing, checkout from the wallet, orders, tracking
 // ══════════════════════════════════════════════════════════════
 
 const pool = require('../db');
-const { lockEscrowRow, creditEscrowPool } = require('../services/escrowPool.service');
-const { lockProducts, applyStockChange, releaseOrderLocks, consumeOrderLocks } = require('../services/inventory.service');
-const { debitWallet, creditWallet } = require('../services/wallet.service');
+const { releaseOrderLocks, consumeOrderLocks } = require('../services/inventory.service');
 const { refundEscrow, scheduleEscrowRelease } = require('../services/orderSettlement.service');
 const { announceOrder } = require('../services/notification.service');
 const { getPolicies } = require('../services/policy.service');
-const { httpError, asyncHandler, withTransaction, intParam, paging, pageOf } = require('../utils/http');
+const { httpError, asyncHandler, withTransaction, intParam, paging, pageOf, searchPattern } = require('../utils/http');
+const { readCheckoutInput, quoteCheckout, placeOrder } = require('../services/checkout.service');
 const { haversineKm, isValidCoordinate } = require('../utils/geo');
-const { toPaisa, paisaToString, paisaToNumber } = require('../utils/money');
+const { paisaToNumber } = require('../utils/money');
+const { publicGatewayConfig } = require('../services/gateway.client');
+const { TOPUP_MIN_RS, TOPUP_MAX_RS } = require('../services/payments.service');
+const { APP_MODE, FEATURES } = require('../config/mode');
+const { DEMO_ACCOUNTS } = require('../config/demoAccounts');
 
 const num = (v) => (v == null ? null : Number(v));
 
@@ -49,14 +52,29 @@ const PRODUCT_SELECT = `
  */
 const getPublicConfig = asyncHandler(async (req, res) => {
   const p = await getPolicies();
+  // ?role=customer|vendor|rider|admin narrows the demo accounts to that app's role
+  const role = typeof req.query.role === 'string' ? req.query.role : null;
   res.json({
     success: true,
     data: {
-      deliveryFee: p.delivery_fee,
+      mode: APP_MODE,
+      features: FEATURES,
+      deliveryFee: p.delivery_fee, // base; the fee for a cart comes from POST /api/customer/checkout/quote
+      deliveryFeePerKm: p.delivery_fee_per_km,
+      maxDeliveryKm: p.max_delivery_km, // 0 = no limit
       disputeWindowMinutes: p.dispute_window_min,
       geofenceMeters: p.geofence_m,
       taskRadiusKm: p.task_radius_km,
       defaultBuffer: p.default_buffer,
+      vendorAcceptTimeoutMinutes: p.vendor_accept_timeout_min,
+      riderAssignTimeoutMinutes: p.rider_assign_timeout_min,
+      payments: {
+        ...publicGatewayConfig(),
+        minTopup: TOPUP_MIN_RS,
+        maxTopup: TOPUP_MAX_RS,
+        minWithdrawal: p.min_withdrawal,
+      },
+      demoAccounts: FEATURES.demoLogin ? DEMO_ACCOUNTS.filter((a) => !role || a.role === role) : [],
     },
   });
 });
@@ -72,15 +90,18 @@ const getCategories = asyncHandler(async (req, res) => {
 /**
  * GET /api/products?search=&vendor_id=&category_id=&limit=20&offset=0
  * Only approved, in-stock products from approved vendors. Paginated (max 100 per page).
+ * search matches the product name, description or store name.
  */
 const getProducts = asyncHandler(async (req, res) => {
   const { search, vendor_id: vendorId, category_id: categoryId } = req.query;
   let query = PRODUCT_SELECT;
   const params = [];
 
-  if (search) {
-    params.push(`%${search}%`);
-    query += ` AND (p.name ILIKE $${params.length} OR p.description ILIKE $${params.length})`;
+  const pattern = searchPattern(search);
+  if (pattern) {
+    params.push(pattern);
+    const n = params.length;
+    query += ` AND (p.name ILIKE $${n} OR p.description ILIKE $${n} OR v.store_name ILIKE $${n})`;
   }
   if (vendorId) {
     params.push(intParam(vendorId, 'vendor_id'));
@@ -130,146 +151,70 @@ const getVendorDetails = asyncHandler(async (req, res) => {
   });
 });
 
-function parseCheckoutItems(items) {
-  if (!Array.isArray(items) || items.length === 0) {
-    throw httpError(400, 'Items array is required and must not be empty.');
-  }
-  const merged = new Map();
-  for (const item of items) {
-    const productId = Number(item?.productId);
-    const quantity = Number(item?.quantity);
-    if (!Number.isInteger(productId) || productId <= 0 || !Number.isInteger(quantity) || quantity <= 0) {
-      throw httpError(400, 'Each item needs a valid productId and a whole-number quantity above 0.');
-    }
-    merged.set(productId, (merged.get(productId) || 0) + quantity);
-  }
-  return [...merged].map(([productId, quantity]) => ({ productId, quantity }));
-}
+/**
+ * POST /api/customer/checkout/quote — what this cart costs right now, with the
+ * distance-based delivery fee. Same body as checkout; same errors (409 stock etc.).
+ */
+const quoteCart = asyncHandler(async (req, res) => {
+  const q = await quoteCheckout(pool, readCheckoutInput(req.body));
+  res.json({
+    success: true,
+    data: {
+      subtotal: paisaToNumber(q.subtotalPaisa),
+      deliveryFee: paisaToNumber(q.deliveryFeePaisa),
+      total: paisaToNumber(q.totalPaisa),
+      distanceKm: Number(q.distanceKm.toFixed(2)),
+      vendorId: q.vendorId,
+    },
+  });
+});
 
 /**
- * POST /api/customer/checkout — ATOMIC ORDER RESERVATION (FR02) + ESCROW HOLD (FR03)
+ * GET /api/stores?lat&lng&search — every approved store with a location and something on sale
+ * (for the map). search matches the store name or address. With lat/lng they're sorted nearest first and carry distanceKm and
+ * deliversToYou (within the max_delivery_km policy).
+ */
+const getStores = asyncHandler(async (req, res) => {
+  const lat = Number(req.query.lat);
+  const lng = Number(req.query.lng);
+  const near = isValidCoordinate(lat, lng);
+  const { max_delivery_km: maxKm } = await getPolicies();
+  const r = await pool.query(
+    `SELECT v.id, v.store_name, v.store_address, v.latitude, v.longitude, COUNT(p.id)::int AS product_count
+     FROM vendors v
+     JOIN products p ON p.vendor_id = v.id AND p.is_active AND p.is_approved AND p.public_stock > 0
+     WHERE v.is_approved AND v.latitude IS NOT NULL AND v.longitude IS NOT NULL
+       AND ($1::text IS NULL OR v.store_name ILIKE $1 OR v.store_address ILIKE $1)
+     GROUP BY v.id
+     ORDER BY v.store_name`,
+    [searchPattern(req.query.search)]
+  );
+  const stores = r.rows.map((v) => ({
+    id: v.id,
+    storeName: v.store_name,
+    storeAddress: v.store_address,
+    latitude: Number(v.latitude),
+    longitude: Number(v.longitude),
+    productCount: v.product_count,
+    distanceKm: near ? Number(haversineKm(lat, lng, Number(v.latitude), Number(v.longitude)).toFixed(2)) : null,
+  }));
+  if (near) {
+    for (const st of stores) st.deliversToYou = !(maxKm > 0) || st.distanceKm <= maxKm;
+    stores.sort((a, b) => a.distanceKm - b.distanceKm);
+  }
+  res.json({ success: true, data: stores });
+});
+
+/**
+ * POST /api/customer/checkout — pay from the wallet
  * Body: { items: [{ productId, quantity }], deliveryType: 'delivery'|'self_pickup',
  *         deliveryAddress, customerLat, customerLng }
  * Delivery orders must include the customer's pin: the rider's 200 m geofence checks against it.
+ * Paying by card: POST /api/payments/checkout (same body plus a card token).
  */
 const checkout = asyncHandler(async (req, res) => {
-  const { deliveryType = 'delivery', deliveryAddress } = req.body;
-  const customerLat = num(req.body.customerLat);
-  const customerLng = num(req.body.customerLng);
-  const customerId = req.user.userId;
-  const items = parseCheckoutItems(req.body.items);
-
-  if (!['delivery', 'self_pickup'].includes(deliveryType)) {
-    throw httpError(400, "deliveryType must be 'delivery' or 'self_pickup'.");
-  }
-  if (deliveryType === 'delivery' && !isValidCoordinate(customerLat, customerLng)) {
-    throw httpError(400, 'Set your delivery location on the map before placing a delivery order.');
-  }
-
-  const data = await withTransaction(async (client, afterCommit) => {
-    const policies = await getPolicies(client);
-
-    // Step 1: lock every product row (id order → no deadlocks between concurrent checkouts)
-    const products = await lockProducts(client, items.map((i) => i.productId));
-
-    // Step 2: validate stock and single-vendor rule
-    let vendorId = null;
-    let subtotal = 0;
-    const lines = [];
-    for (const item of items) {
-      const p = products.get(item.productId);
-      if (!p) throw httpError(404, `Product ${item.productId} not found.`);
-      if (!p.is_active || !p.is_approved) throw httpError(400, `"${p.name}" is no longer available.`);
-      if (p.public_stock < item.quantity) {
-        throw httpError(409, `Insufficient stock for "${p.name}". Available: ${p.public_stock}, requested: ${item.quantity}.`, {
-          code: 'INSUFFICIENT_STOCK', productId: p.id, available: p.public_stock,
-        });
-      }
-      if (vendorId === null) vendorId = p.vendor_id;
-      else if (p.vendor_id !== vendorId) throw httpError(400, 'All items must be from the same vendor.');
-
-      const unit = toPaisa(p.price);
-      subtotal += unit * item.quantity;
-      lines.push({ product: p, quantity: item.quantity, unitPaisa: unit });
-    }
-
-    const vendor = (await client.query('SELECT latitude, longitude, is_approved FROM vendors WHERE id = $1', [vendorId])).rows[0];
-    if (!vendor?.is_approved) throw httpError(400, 'This store is not accepting orders right now.');
-
-    const deliveryFee = deliveryType === 'delivery' ? toPaisa(policies.delivery_fee) : 0;
-    const total = subtotal + deliveryFee;
-
-    let estimatedMinutes = null;
-    if (deliveryType === 'delivery' && vendor.latitude != null) {
-      const km = haversineKm(customerLat, customerLng, Number(vendor.latitude), Number(vendor.longitude));
-      estimatedMinutes = Math.max(15, Math.round(km * 3));
-    }
-
-    // Step 3: create the order (pending vendor approval)
-    const order = (await client.query(
-      `INSERT INTO orders (customer_id, vendor_id, status, subtotal, delivery_fee, total_amount,
-                           delivery_type, delivery_address, customer_lat, customer_lng, estimated_minutes, escrow_status)
-       VALUES ($1, $2, 'pending', $3, $4, $5, $6, $7, $8, $9, $10, 'held')
-       RETURNING *`,
-      [customerId, vendorId, paisaToString(subtotal), paisaToString(deliveryFee), paisaToString(total),
-        deliveryType, deliveryAddress || null, customerLat, customerLng, estimatedMinutes]
-    )).rows[0];
-
-    // Step 4: escrow hold — customer wallet → platform pool.
-    // Lock order everywhere is products → escrow pool → wallets, so the pool row is locked first.
-    await lockEscrowRow(client);
-    const walletAfter = await debitWallet(client, {
-      userId: customerId,
-      amountPaisa: total,
-      type: 'escrow_hold',
-      orderId: order.id,
-      description: `Escrow hold for Order #${order.id}`,
-    });
-    await creditEscrowPool(client, paisaToString(total));
-
-    // Step 5: reserve stock + lock rows + ledger
-    for (const line of lines) {
-      await client.query(
-        `INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal) VALUES ($1, $2, $3, $4, $5)`,
-        [order.id, line.product.id, line.quantity, paisaToString(line.unitPaisa), paisaToString(line.unitPaisa * line.quantity)]
-      );
-      await applyStockChange(client, afterCommit, line.product, {
-        reservedQuantity: line.product.reserved_quantity + line.quantity,
-        ledger: { type: 'reserve', quantityChange: -line.quantity, referenceId: order.id, notes: 'Online order reserved' },
-      });
-      await client.query(
-        `INSERT INTO inventory_locks (product_id, order_id, quantity, status) VALUES ($1, $2, $3, 'active')`,
-        [line.product.id, order.id, line.quantity]
-      );
-    }
-
-    await announceOrder(client, afterCommit, order.id, 'order_placed', {
-      vendor: { title: `New order #${order.id}`, body: `Rs. ${paisaToString(total)} · ${lines.length} item(s). Approve it to start packing.` },
-      customer: { title: `Order #${order.id} placed`, body: 'Payment is held in escrow until delivery. Waiting for the store to accept.' },
-    });
-
-    return {
-      id: order.id,
-      customerId: order.customer_id,
-      vendorId: order.vendor_id,
-      status: order.status,
-      deliveryType: order.delivery_type,
-      estimatedMinutes: order.estimated_minutes,
-      subtotal: paisaToNumber(subtotal),
-      deliveryFee: paisaToNumber(deliveryFee),
-      totalAmount: paisaToNumber(total),
-      createdAt: order.created_at,
-      escrowStatus: 'held',
-      walletBalance: paisaToNumber(walletAfter),
-      items: lines.map((l) => ({
-        productId: l.product.id,
-        productName: l.product.name,
-        quantity: l.quantity,
-        unitPrice: paisaToNumber(l.unitPaisa),
-      })),
-    };
-  });
-
+  const input = readCheckoutInput(req.body);
+  const data = await withTransaction((client, afterCommit) => placeOrder(client, afterCommit, req.user.userId, input));
   res.status(201).json({ success: true, message: 'Order placed successfully! Waiting for vendor approval.', data });
 });
 
@@ -318,16 +263,25 @@ function formatCustomerOrder(o) {
 }
 
 /**
- * GET /api/customer/orders?limit=20&offset=0 — newest first
+ * GET /api/customer/orders?scope=active|past&limit=20&offset=0 — newest first.
+ * active = not yet delivered or cancelled. meta.activeCount is always the number of active orders.
  */
 const getCustomerOrders = asyncHandler(async (req, res) => {
   const page = paging(req.query);
-  const r = await pool.query(
-    `${ORDER_SELECT} WHERE o.customer_id = $1 ORDER BY o.created_at DESC, o.id DESC LIMIT $2 OFFSET $3`,
-    [req.user.userId, page.limit + 1, page.offset]
-  );
+  const scope = req.query.scope;
+  if (scope && !['active', 'past'].includes(scope)) throw httpError(400, 'scope must be active or past.');
+  const filter = scope === 'active'
+    ? `AND o.status NOT IN ('delivered', 'cancelled')`
+    : scope === 'past' ? `AND o.status IN ('delivered', 'cancelled')` : '';
+  const [r, active] = await Promise.all([
+    pool.query(
+      `${ORDER_SELECT} WHERE o.customer_id = $1 ${filter} ORDER BY o.created_at DESC, o.id DESC LIMIT $2 OFFSET $3`,
+      [req.user.userId, page.limit + 1, page.offset]
+    ),
+    pool.query(`SELECT COUNT(*)::int AS n FROM orders WHERE customer_id = $1 AND status NOT IN ('delivered', 'cancelled')`, [req.user.userId]),
+  ]);
   const { items, meta } = pageOf(r.rows, page);
-  res.json({ success: true, data: items.map(formatCustomerOrder), meta });
+  res.json({ success: true, data: items.map(formatCustomerOrder), meta: { ...meta, activeCount: active.rows[0].n } });
 });
 
 /**
@@ -405,24 +359,6 @@ const cancelOrder = asyncHandler(async (req, res) => {
 });
 
 /**
- * POST /api/customer/wallet/topup — simulated deposit (no payment gateway)
- */
-const topupWallet = asyncHandler(async (req, res) => {
-  const amount = Number(req.body.amount);
-  if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000) {
-    throw httpError(400, 'Top-up amount must be between Rs. 0.01 and Rs. 1,000,000.');
-  }
-  const amountPaisa = toPaisa(amount);
-  const balance = await withTransaction((client) => creditWallet(client, {
-    userId: req.user.userId,
-    amountPaisa,
-    type: 'deposit',
-    description: `Top-up of Rs. ${paisaToString(amountPaisa)}`,
-  }));
-  res.json({ success: true, message: 'Wallet topped up successfully.', walletBalance: paisaToNumber(balance) });
-});
-
-/**
  * POST /api/customer/orders/:id/picked-up — self pickup: customer collected items
  */
 const customerMarkPickedUp = asyncHandler(async (req, res) => {
@@ -471,6 +407,8 @@ const customerConfirmOrderDelivered = asyncHandler(async (req, res) => {
 
 module.exports = {
   getPublicConfig,
+  quoteCart,
+  getStores,
   getCategories,
   getProducts,
   getVendorDetails,
@@ -479,7 +417,6 @@ module.exports = {
   getCustomerOrder,
   getOrderTracking,
   cancelOrder,
-  topupWallet,
   customerMarkPickedUp,
   customerConfirmOrderDelivered,
 };

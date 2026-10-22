@@ -8,7 +8,6 @@ import 'dart:async';
 
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:vendra_rider/vendra_core.dart';
 
 import '../models/rider_models.dart';
@@ -283,15 +282,23 @@ class RiderHomeBloc extends Bloc<RiderHomeEvent, RiderHomeState> {
     emit(state.copyWith(togglingStatus: true));
     try {
       if (event.online) {
-        final LatLng point;
-        try {
-          point = await _location.currentPosition(fresh: true);
-        } on LocationUnavailable catch (e) {
-          emit(state.copyWith(togglingStatus: false, message: _msg(e.message, isError: true)));
-          return;
+        // A refused manual position switches the app to GPS; then try once more with GPS
+        for (var attempt = 0;; attempt++) {
+          final LocationFix fix;
+          try {
+            fix = await _location.currentFix(fresh: true);
+          } on LocationUnavailable catch (e) {
+            emit(state.copyWith(togglingStatus: false, message: _msg(e.message, isError: true)));
+            return;
+          }
+          try {
+            await _api.put(ApiConfig.riderStatus, data: {'isOnline': true, ...fix.toJson()});
+            break;
+          } catch (e) {
+            if (attempt == 0 && fix.manual && _location.handleManualRejected(e)) continue;
+            rethrow;
+          }
         }
-        await _api.put(ApiConfig.riderStatus,
-            data: {'isOnline': true, 'lat': point.latitude, 'lng': point.longitude});
         _location.start();
         _setPolling(true);
         emit(state.copyWith(isOnline: true, togglingStatus: false, message: _msg('You are online')));

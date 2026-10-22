@@ -21,6 +21,8 @@ import '../../auth/bloc/auth_bloc.dart';
 import '../../auth/bloc/auth_event.dart';
 import 'vendor_disputes_screen.dart';
 
+final NumberFormat _money = NumberFormat('#,##0');
+
 class VendorOrdersScreen extends StatelessWidget {
   const VendorOrdersScreen({super.key});
 
@@ -74,19 +76,56 @@ class VendorOrdersScreen extends StatelessWidget {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                  child: Text('Orders', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600)),
-                ),
-                TabBar(
-                  labelColor: AppColors.secondary,
-                  indicatorColor: AppColors.secondary,
-                  unselectedLabelColor: AppColors.textSecondary,
-                  labelStyle: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
-                  tabs: [
-                    Tab(text: activeCount == null ? 'Active' : 'Active ($activeCount)'),
-                    const Tab(text: 'History'),
-                  ],
+                Container(
+                  color: Colors.white,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: AppColors.secondary.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(Icons.receipt_long, color: AppColors.secondary),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Orders',
+                                      style: GoogleFonts.poppins(
+                                          fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                                  Text('Accept → Pack → Ready for pickup',
+                                      style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      TabBar(
+                        labelColor: AppColors.secondary,
+                        indicatorColor: AppColors.secondary,
+                        indicatorWeight: 3,
+                        indicatorSize: TabBarIndicatorSize.tab,
+                        dividerColor: Colors.grey.shade200,
+                        unselectedLabelColor: AppColors.textSecondary,
+                        labelStyle: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
+                        unselectedLabelStyle: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500),
+                        tabs: [
+                          Tab(text: activeCount == null ? 'Active' : 'Active ($activeCount)'),
+                          const Tab(text: 'History'),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
                 Expanded(
                   child: !bloc.hasLoaded
@@ -131,15 +170,34 @@ class VendorOrdersScreen extends StatelessWidget {
     );
   }
 
-  Widget _emptyList(BuildContext context, String text) {
+  Widget _emptyList(BuildContext context, String text, {String? hint}) {
     return RefreshIndicator(
       onRefresh: () => _refresh(context),
       child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
         children: [
-          const SizedBox(height: 120),
-          Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey.shade300),
+          const SizedBox(height: 110),
+          Center(
+            child: Container(
+              width: 88,
+              height: 88,
+              decoration: BoxDecoration(
+                color: AppColors.secondary.withValues(alpha: 0.07),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.receipt_long_outlined, size: 40, color: AppColors.secondary.withValues(alpha: 0.5)),
+            ),
+          ),
           const SizedBox(height: 16),
-          Center(child: Text(text, style: GoogleFonts.poppins(color: AppColors.textSecondary))),
+          Text(text,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+          if (hint != null) ...[
+            const SizedBox(height: 6),
+            Text(hint,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary, height: 1.4)),
+          ],
         ],
       ),
     );
@@ -147,7 +205,10 @@ class VendorOrdersScreen extends StatelessWidget {
 
   Widget _activeTab(BuildContext context, VendorOrderBloc bloc) {
     final orders = bloc.activeOrders;
-    if (orders.isEmpty) return _emptyList(context, 'No orders in progress');
+    if (orders.isEmpty) {
+      return _emptyList(context, 'No orders in progress',
+          hint: 'New online orders appear here instantly. Accept them, pack them, then mark them ready for pickup.');
+    }
     return RefreshIndicator(
       onRefresh: () => _refresh(context),
       child: ListView.builder(
@@ -162,7 +223,8 @@ class VendorOrdersScreen extends StatelessWidget {
   Widget _historyTab(BuildContext context, VendorOrderBloc bloc) {
     final orders = bloc.historyOrders;
     if (orders.isEmpty && !bloc.hasMoreHistory) {
-      return _emptyList(context, 'No completed or cancelled orders yet');
+      return _emptyList(context, 'No completed or cancelled orders yet',
+          hint: 'Delivered and cancelled orders are kept here.');
     }
     return RefreshIndicator(
       onRefresh: () => _refresh(context),
@@ -241,7 +303,7 @@ class VendorOrdersScreen extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('#ORD-${order.id.toString().padLeft(3, '0')}',
-                  style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600)),
+                  style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
               Flexible(
                 child: Container(
                   margin: const EdgeInsets.only(left: 8),
@@ -259,6 +321,13 @@ class VendorOrdersScreen extends StatelessWidget {
               ),
             ],
           ),
+
+          // New → Accepted → Packed → Ready (in-progress orders only)
+          if (_stepIndex(order) != null) ...[
+            const SizedBox(height: 12),
+            _OrderSteps(current: _stepIndex(order)!, isDelivery: order.isDelivery),
+            const SizedBox(height: 4),
+          ],
 
           const SizedBox(height: 6),
 
@@ -320,8 +389,11 @@ class VendorOrdersScreen extends StatelessWidget {
 
           // Items
           for (final item in order.items)
-            Text('${item.quantity} × ${item.productName ?? 'Product #${item.productId}'}',
-                style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text('${item.quantity} × ${item.productName ?? 'Product #${item.productId}'}',
+                  style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
+            ),
 
           const Divider(height: 16),
 
@@ -337,7 +409,7 @@ class VendorOrdersScreen extends StatelessWidget {
                   ),
                 ),
               Text(
-                'Rs. ${order.totalAmount.toStringAsFixed(0)}',
+                'Rs. ${_money.format(order.totalAmount)}',
                 style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.primary),
               ),
             ],
@@ -347,6 +419,20 @@ class VendorOrdersScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Position on the store's workflow: 0 waiting to accept, 1 accepted (pack it),
+  /// 2 packed (mark ready), 3 ready / with the rider. Null for finished orders.
+  int? _stepIndex(OrderModel order) {
+    switch (order.status) {
+      case 'pending': return 0;
+      case 'confirmed': return 1;
+      case 'packed': return 2;
+      case 'ready_for_pickup':
+      case 'picked':
+      case 'on_the_way': return 3;
+      default: return null;
+    }
   }
 
   // ── Escrow status (FR03) ──
@@ -495,7 +581,7 @@ class VendorOrdersScreen extends StatelessWidget {
               child: ElevatedButton.icon(
                 onPressed: () => bloc.add(ApproveVendorOrder(orderId: order.id)),
                 icon: const Icon(Icons.check, size: 18),
-                label: Text('Approve', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                label: Text('Accept', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
                 style: _buttonStyle(AppColors.stockGreen),
               ),
             ),
@@ -608,5 +694,69 @@ class VendorOrdersScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Four-step tracker on each in-progress order card:
+/// New → Accepted → Packed → Ready (then the rider / customer takes over)
+class _OrderSteps extends StatelessWidget {
+  /// 0 = waiting to be accepted … 3 = ready / handed over
+  final int current;
+  final bool isDelivery;
+  const _OrderSteps({required this.current, required this.isDelivery});
+
+  @override
+  Widget build(BuildContext context) {
+    final labels = ['New', 'Accepted', 'Packed', isDelivery ? 'Ready · rider' : 'Ready'];
+    const icons = [Icons.fiber_new_outlined, Icons.check, Icons.inventory_2_outlined, Icons.storefront_outlined];
+    final children = <Widget>[];
+    for (var i = 0; i < labels.length; i++) {
+      // A step is done once the order has moved past it; the last step is done when reached
+      final done = i < current || (i == current && i == labels.length - 1);
+      final active = i == current && !done;
+      final color = done ? AppColors.stockGreen : (active ? AppColors.primary : Colors.grey.shade400);
+      children.add(Expanded(
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: i == 0
+                      ? const SizedBox.shrink()
+                      : Container(height: 2, color: i <= current ? AppColors.stockGreen : Colors.grey.shade300),
+                ),
+                Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    color: done ? AppColors.stockGreen : (active ? AppColors.primary : Colors.white),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: color, width: 1.5),
+                  ),
+                  child: Icon(done ? Icons.check : icons[i], size: 14, color: done || active ? Colors.white : color),
+                ),
+                Expanded(
+                  child: i == labels.length - 1
+                      ? const SizedBox.shrink()
+                      : Container(height: 2, color: i < current ? AppColors.stockGreen : Colors.grey.shade300),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              labels[i],
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.poppins(
+                fontSize: 10,
+                fontWeight: active || done ? FontWeight.w600 : FontWeight.w400,
+                color: active ? AppColors.primary : (done ? AppColors.stockGreen : AppColors.textLight),
+              ),
+            ),
+          ],
+        ),
+      ));
+    }
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: children);
   }
 }

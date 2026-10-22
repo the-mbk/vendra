@@ -1,8 +1,12 @@
-# Local Postgres for development.
-#   docker compose up -d        start (data persists in the vendra-pgdata volume)
+# Local services for development:
+#   db       Postgres
+#   storage  SeaweedFS, an S3-compatible stand-in for Cloudflare R2 (production only changes S3_*)
+#   gateway  Vendra Pay, the card payment gateway sandbox (test cards, payouts, signed webhooks)
+#   docker compose up -d        start (data persists in named volumes)
 #   docker compose down         stop (data kept)
 #   docker compose down -v      stop and wipe the data
 # Matches DATABASE_URL=postgresql://postgres:vendra_dev@localhost:5433/vendra_db
+# and S3_ENDPOINT=http://localhost:8333 with the keys in docker/seaweedfs-s3.json
 services:
   db:
     image: postgres:16-alpine
@@ -22,5 +26,44 @@ services:
       retries: 30
     restart: unless-stopped
 
+  storage:
+    image: chrislusf/seaweedfs:4.48
+    container_name: vendra-storage
+    # S3 API on 8333 (what the backend uses); file browser on 8888 to look inside the bucket
+    command: server -dir=/data -s3 -s3.config=/etc/seaweedfs/s3.json -ip.bind=0.0.0.0 -volume.max=0
+    ports:
+      - "8333:8333"
+      - "8888:8888"
+    volumes:
+      - vendra-storage:/data
+      - ./docker/seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/healthz || wget -q -S -O /dev/null http://127.0.0.1:8333/ 2>&1 | grep -q 'HTTP/'"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    restart: unless-stopped
+
+  gateway:
+    build: ./gateway
+    image: vendra-pay:local
+    container_name: vendra-pay
+    environment:
+      # The backend runs on the host; Docker Desktop resolves host.docker.internal to it
+      WEBHOOK_URL: ${GATEWAY_WEBHOOK_URL:-http://host.docker.internal:3000/api/payments/webhook}
+      PAYOUT_DELAY_SEC: ${PAYOUT_DELAY_SEC:-20}
+      PUBLISHABLE_KEY: pk_test_vendra
+      SECRET_KEY: sk_test_vendra
+      WEBHOOK_SECRET: whsec_vendra
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "4242:4242"   # API + merchant dashboard at http://localhost:4242
+    volumes:
+      - vendra-pay-data:/data
+    restart: unless-stopped
+
 volumes:
   vendra-pgdata:
+  vendra-storage:
+  vendra-pay-data:

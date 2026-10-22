@@ -1,8 +1,11 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Rider App - Main Entry Point
-// Initializes BLoC providers, theme, and routes, and signs the rider
+// Loads the platform config (mode, features, card gateway) first, then
+// initializes BLoC providers, theme, and routes, and signs the rider
 // out (back to login) on logout or when the server rejects the session
 // ══════════════════════════════════════════════════════════════
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -25,9 +28,14 @@ import 'features/rider/bloc/earnings_bloc.dart';
 import 'features/rider/bloc/rider_home_bloc.dart';
 import 'features/rider/screens/active_delivery_screen.dart';
 import 'features/rider/screens/rider_home_screen.dart';
+import 'features/rider/services/rider_location_service.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Never throws and gives up after a few seconds: if the backend is down the
+  // app starts on production-safe defaults (GPS only) and retries when needed
+  await AppConfig.load(role: 'rider');
+  AppConfig.startLiveUpdates(); // admin policy changes reach the app straight away
   runApp(const VendraRiderApp());
 }
 
@@ -47,17 +55,33 @@ class _VendraRiderAppState extends State<VendraRiderApp> {
   /// Several requests can 401 at once; only the first one signs out
   bool _sessionExpiring = false;
 
+  /// Location messages (manual location refused → GPS, simulated drive arrived)
+  StreamSubscription<LocationNotice>? _locationNotices;
+
   @override
   void initState() {
     super.initState();
     ApiService.onSessionExpired = _onSessionExpired;
+    _locationNotices = RiderLocationService().notices.listen(_showLocationNotice);
   }
 
   @override
   void dispose() {
     if (ApiService.onSessionExpired == _onSessionExpired) ApiService.onSessionExpired = null;
+    _locationNotices?.cancel();
     _authBloc.close();
     super.dispose();
+  }
+
+  void _showLocationNotice(LocationNotice notice) {
+    NotificationCenter.messengerKey.currentState
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(notice.text),
+        backgroundColor: notice.isError ? AppColors.error : AppColors.success,
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: notice.isError ? 6 : 4),
+      ));
   }
 
   /// 401 TOKEN_EXPIRED / INVALID_TOKEN on a signed-in request. Ignored while
@@ -97,11 +121,14 @@ class _VendraRiderAppState extends State<VendraRiderApp> {
         theme: AppTheme.lightTheme,
         navigatorKey: _navigatorKey,
         scaffoldMessengerKey: NotificationCenter.messengerKey,
-        builder: (context, child) => BlocListener<AuthBloc, AuthState>(
-          // Signed-in → signed-out only (splash's own "no session" result is handled there)
-          listenWhen: (prev, curr) => curr is Unauthenticated && (prev is Authenticated || prev is AuthLoading),
-          listener: _onSignedOut,
-          child: child ?? const SizedBox.shrink(),
+        // "DEVELOPMENT" badge while the backend runs in development mode
+        builder: (context, child) => DevBanner(
+          child: BlocListener<AuthBloc, AuthState>(
+            // Signed-in → signed-out only (splash's own "no session" result is handled there)
+            listenWhen: (prev, curr) => curr is Unauthenticated && (prev is Authenticated || prev is AuthLoading),
+            listener: _onSignedOut,
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
 
         initialRoute: AppRoutes.splash,

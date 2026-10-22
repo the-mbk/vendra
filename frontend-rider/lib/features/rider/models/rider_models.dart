@@ -4,6 +4,7 @@
 // and the deliver response. (Rider-only, so not in the shared core.)
 // ══════════════════════════════════════════════════════════════
 
+import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:vendra_rider/vendra_core.dart';
 
@@ -249,7 +250,11 @@ class DeliveryResult {
 }
 
 /// Small formatting helpers shared by the rider screens
-String rs(double v) => 'Rs. ${v.toStringAsFixed(v.truncateToDouble() == v ? 0 : 2)}';
+final _rsWhole = NumberFormat('#,##0', 'en_US');
+final _rsCents = NumberFormat('#,##0.00', 'en_US');
+
+/// "Rs. 4,041.76" (whole amounts drop the decimals: "Rs. 500")
+String rs(double v) => 'Rs. ${(v.truncateToDouble() == v ? _rsWhole : _rsCents).format(v)}';
 String km(double? v) => v == null ? '—' : '${v.toStringAsFixed(v < 10 ? 2 : 1)} km';
 
 String vehicleLabel(String? type) {

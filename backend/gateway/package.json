@@ -1,0 +1,13 @@
+{
+  "name": "vendra-pay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Vendra Pay: a local card payment gateway sandbox for Vendra",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

@@ -63,4 +63,13 @@ function pageOf(rows, { limit, offset }) {
   return { items, meta: { limit, offset, hasMore, nextOffset: hasMore ? offset + limit : null } };
 }
 
-module.exports = { httpError, asyncHandler, withTransaction, intParam, paging, pageOf };
+/**
+ * ILIKE pattern for a free-text search box: trimmed, with % and _ matched
+ * literally. null when there's nothing to search for.
+ */
+function searchPattern(text) {
+  const t = typeof text === 'string' ? text.trim().slice(0, 100) : '';
+  return t ? `%${t.replace(/[\\%_]/g, '\\$&')}%` : null;
+}
+
+module.exports = { httpError, asyncHandler, withTransaction, intParam, paging, pageOf, searchPattern };

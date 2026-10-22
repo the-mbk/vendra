@@ -6,7 +6,7 @@
 const { test, before, after, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const { io } = require('socket.io-client');
-const { resetDatabase, startServer, apiClient, query, moneyInvariant } = require('./helpers');
+const { resetDatabase, startServer, cardToken, apiClient, query, moneyInvariant } = require('./helpers');
 
 // Seed locations
 const CLIFTON = { lat: 24.8138, lng: 67.0300 };      // Ahmed's pin
@@ -29,7 +29,7 @@ async function product(id) {
 
 async function assertMoneyBalanced() {
   const m = await moneyInvariant();
-  assert.equal(m.accounted.toFixed(2), m.deposits.toFixed(2), 'wallets + pool + platform must equal deposits');
+  assert.equal(m.accounted.toFixed(2), m.deposits.toFixed(2), 'wallets + pool + platform must equal money paid in minus money paid out');
   assert.equal(m.pool.toFixed(2), m.held.toFixed(2), 'escrow pool must equal money held on open orders');
 }
 
@@ -63,9 +63,12 @@ before(async () => {
   tokens.bilal = await login('bilal@rider.pk', 'rider');
   tokens.hamza = await login('hamza@rider.pk', 'rider');
 
+  // Money enters only through the card gateway
   for (const t of [tokens.ahmed, tokens.fatima]) {
-    const r = await api('POST', '/api/customer/wallet/topup', { amount: 1000000 }, t);
-    assert.equal(r.status, 200, JSON.stringify(r.body));
+    for (let i = 0; i < 2; i++) {
+      const r = await api('POST', '/api/payments/topup', { amount: 500000, token: await cardToken(srv.gatewayUrl) }, t);
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+    }
   }
 });
 
@@ -273,7 +276,7 @@ describe('FR03 + FR04 + FR07 — rider delivery, geofence, payout, escrow', () =
     assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
     // Winner cancels out of the test by delivering nothing; free the rider for later tests
     const winner = results[0].status === 200 ? raceToken : tokens.hamza;
-    await api('POST', `/api/rider/orders/${race.id}/picked`, undefined, winner);
+    await api('POST', `/api/rider/orders/${race.id}/picked`, SADDAR, winner);
     const done = await api('POST', `/api/rider/orders/${race.id}/deliver`, CLIFTON, winner);
     assert.equal(done.status, 200, JSON.stringify(done.body));
   });
@@ -283,9 +286,69 @@ describe('FR03 + FR04 + FR07 — rider delivery, geofence, payout, escrow', () =
     assert.equal(r.status, 409);
   });
 
+  test('arriving and picking up are refused away from the store', async () => {
+    const noGps = await api('POST', `/api/rider/orders/${order.id}/arrived`, undefined, tokens.bilal);
+    assert.equal(noGps.status, 400, 'a location is required');
+    const far = await api('POST', `/api/rider/orders/${order.id}/arrived`, CLIFTON, tokens.bilal);
+    assert.equal(far.status, 422);
+    assert.equal(far.body.code, 'OUTSIDE_PICKUP_GEOFENCE');
+    assert.ok(far.body.distanceMeters > 4000);
+    assert.equal(far.body.geofenceMeters, 200);
+    const farPick = await api('POST', `/api/rider/orders/${order.id}/picked`, CLIFTON, tokens.bilal);
+    assert.equal(farPick.body.code, 'OUTSIDE_PICKUP_GEOFENCE', 'picking up cannot skip the store check');
+    const o = (await query('SELECT status, rider_arrived_at FROM orders WHERE id = $1', [order.id])).rows[0];
+    assert.equal(o.status, 'ready_for_pickup');
+    assert.equal(o.rider_arrived_at, null);
+  });
+
+  test('rider pings reach only the socket tracking that order', async () => {
+    const connect = (token) => new Promise((res, rej) => {
+      const s = io(srv.baseUrl, { auth: { token }, transports: ['websocket'] });
+      s.on('connect', () => res(s));
+      s.on('connect_error', rej);
+    });
+    const [watcher, idle, stranger] = await Promise.all([connect(tokens.ahmed), connect(tokens.ahmed), connect(tokens.fatima)]);
+    const got = { watcher: [], idle: [], stranger: [] };
+    watcher.on('rider:location', (e) => got.watcher.push(e));
+    idle.on('rider:location', (e) => got.idle.push(e));
+    stranger.on('rider:location', (e) => got.stranger.push(e));
+    const emit = (s, event, data) => new Promise((res) => s.emit(event, data, res));
+    try {
+      assert.deepEqual(await emit(watcher, 'track:order', { orderId: order.id }), { ok: true, orderId: order.id });
+      const denied = await emit(stranger, 'track:order', { orderId: order.id });
+      assert.equal(denied.ok, false, "a customer can't watch someone else's order");
+
+      await api('POST', '/api/rider/location', SADDAR, tokens.bilal);
+      await new Promise((r) => setTimeout(r, 300));
+      assert.equal(got.watcher.length, 1);
+      assert.equal(got.watcher[0].orderId, order.id);
+      assert.equal(got.idle.length, 0, 'the same customer on a screen not tracking it gets nothing');
+      assert.equal(got.stranger.length, 0);
+
+      await emit(watcher, 'untrack:order');
+      await api('POST', '/api/rider/location', SADDAR, tokens.bilal);
+      await new Promise((r) => setTimeout(r, 300));
+      assert.equal(got.watcher.length, 1, 'nothing after untracking');
+    } finally {
+      [watcher, idle, stranger].forEach((s) => s.close());
+    }
+  });
+
+  test('customer orders split into active and past', async () => {
+    const active = await api('GET', '/api/customer/orders?scope=active&limit=100', undefined, tokens.ahmed);
+    assert.equal(active.status, 200);
+    assert.ok(active.body.data.some((o) => o.id === order.id));
+    assert.ok(active.body.data.every((o) => !['delivered', 'cancelled'].includes(o.status)));
+    assert.equal(active.body.meta.activeCount, active.body.data.length);
+    const past = await api('GET', '/api/customer/orders?scope=past&limit=100', undefined, tokens.ahmed);
+    assert.ok(past.body.data.every((o) => ['delivered', 'cancelled'].includes(o.status)));
+    assert.equal((await api('GET', '/api/customer/orders?scope=nope', undefined, tokens.ahmed)).status, 400);
+  });
+
   test('delivery outside the 200 m geofence is refused', async () => {
-    assert.equal((await api('POST', `/api/rider/orders/${order.id}/arrived`, undefined, tokens.bilal)).status, 200);
-    assert.equal((await api('POST', `/api/rider/orders/${order.id}/picked`, undefined, tokens.bilal)).status, 200);
+    const nearStore = { lat: SADDAR.lat + 0.001, lng: SADDAR.lng }; // ~110 m
+    assert.equal((await api('POST', `/api/rider/orders/${order.id}/arrived`, nearStore, tokens.bilal)).status, 200);
+    assert.equal((await api('POST', `/api/rider/orders/${order.id}/picked`, SADDAR, tokens.bilal)).status, 200);
     assert.equal((await api('POST', `/api/rider/orders/${order.id}/on-the-way`, undefined, tokens.bilal)).status, 200);
 
     // GPS pings from store to customer (PR 03)
@@ -356,7 +419,7 @@ describe('FR08 — disputes freeze escrow until an admin decides', () => {
   test('customer disputes a delivered order with photo evidence; admin refunds', async () => {
     const order = await readyDeliveryOrder([{ productId: 4, quantity: 1 }]);
     await api('POST', `/api/rider/tasks/${order.id}/accept`, undefined, tokens.bilal);
-    await api('POST', `/api/rider/orders/${order.id}/picked`, undefined, tokens.bilal);
+    await api('POST', `/api/rider/orders/${order.id}/picked`, SADDAR, tokens.bilal);
     const delivered = await api('POST', `/api/rider/orders/${order.id}/deliver`, CLIFTON, tokens.bilal);
     assert.equal(delivered.status, 200, JSON.stringify(delivered.body));
     assert.equal(delivered.body.data.distanceSource, 'straight_line', 'no GPS pings → straight-line fallback');
@@ -438,17 +501,71 @@ describe('Policy engine — rules change without a redeploy', () => {
     assert.equal(unknown.status, 400);
   });
 
-  test('delivery fee follows the policy', async () => {
-    await setPolicies({ delivery_fee: 99 });
-    const co = await api('POST', '/api/customer/checkout', {
+  test('the delivery fee is a base plus a rate per km, both policies', async () => {
+    await setPolicies({ delivery_fee: 99, delivery_fee_per_km: 0 });
+    const flat = await api('POST', '/api/customer/checkout', {
       items: [{ productId: 4, quantity: 1 }], deliveryType: 'delivery', customerLat: CLIFTON.lat, customerLng: CLIFTON.lng,
     }, tokens.ahmed);
-    assert.equal(co.status, 201);
-    assert.equal(co.body.data.deliveryFee, 99);
-    assert.equal(co.body.data.totalAmount, 2499 + 99);
+    assert.equal(flat.status, 201);
+    assert.equal(flat.body.data.deliveryFee, 100, 'rounded to the nearest Rs 10');
+    assert.equal(flat.body.data.totalAmount, 2499 + 100);
+    await api('POST', `/api/customer/orders/${flat.body.data.id}/cancel`, undefined, tokens.ahmed);
+
+    // Clifton is ~4.7 km from the Saddar store: 100 + 40 × 4.7 ≈ 288 → Rs 290
+    await setPolicies({ delivery_fee: 100, delivery_fee_per_km: 40 });
+    const body = { items: [{ productId: 4, quantity: 1 }], deliveryType: 'delivery', customerLat: CLIFTON.lat, customerLng: CLIFTON.lng };
+    const quote = await api('POST', '/api/customer/checkout/quote', body, tokens.ahmed);
+    assert.equal(quote.status, 200, JSON.stringify(quote.body));
+    assert.ok(quote.body.data.distanceKm > 4.5 && quote.body.data.distanceKm < 5);
+    assert.equal(quote.body.data.deliveryFee, 290);
+    assert.equal(quote.body.data.total, 2499 + 290);
+    const near = await api('POST', '/api/customer/checkout/quote', { ...body, customerLat: SADDAR.lat, customerLng: SADDAR.lng }, tokens.ahmed);
+    assert.equal(near.body.data.deliveryFee, 100, 'next door costs the base fee');
+    const pickup = await api('POST', '/api/customer/checkout/quote', { items: body.items, deliveryType: 'self_pickup' }, tokens.ahmed);
+    assert.equal(pickup.body.data.deliveryFee, 0);
+
+    const co = await api('POST', '/api/customer/checkout', body, tokens.ahmed);
+    assert.equal(co.body.data.deliveryFee, 290, 'the order charges what the quote said');
     await api('POST', `/api/customer/orders/${co.body.data.id}/cancel`, undefined, tokens.ahmed);
-    await setPolicies({ delivery_fee: 150 });
+    await setPolicies({ delivery_fee: 150, delivery_fee_per_km: 30 });
     await assertMoneyBalanced();
+  });
+
+  test('stores farther than the delivery radius offer self pickup only', async () => {
+    // Product 6 belongs to the Lahore store, ~1,000 km from Ahmed's Karachi pin
+    const far = { items: [{ productId: 6, quantity: 1 }], deliveryType: 'delivery', customerLat: CLIFTON.lat, customerLng: CLIFTON.lng };
+    const refused = await api('POST', '/api/customer/checkout/quote', far, tokens.ahmed);
+    assert.equal(refused.status, 400);
+    assert.equal(refused.body.code, 'OUT_OF_DELIVERY_RANGE');
+    assert.equal(refused.body.maxDeliveryKm, 15);
+    assert.ok(refused.body.distanceKm > 900);
+    assert.equal((await api('POST', '/api/customer/checkout', far, tokens.ahmed)).body.code, 'OUT_OF_DELIVERY_RANGE');
+    assert.equal((await api('POST', '/api/payments/checkout', { ...far, token: 'tok_notcharged00' }, tokens.ahmed)).body.code,
+      'OUT_OF_DELIVERY_RANGE', 'refused before any card is charged');
+
+    const pickup = await api('POST', '/api/customer/checkout/quote', { items: far.items, deliveryType: 'self_pickup' }, tokens.ahmed);
+    assert.equal(pickup.status, 200, 'self pickup is still allowed');
+    const near = await api('POST', '/api/customer/checkout/quote', { ...far, items: [{ productId: 4, quantity: 1 }] }, tokens.ahmed);
+    assert.equal(near.status, 200, 'the Saddar store is 4.7 km away');
+
+    const stores = (await api('GET', `/api/stores?lat=${CLIFTON.lat}&lng=${CLIFTON.lng}`)).body.data;
+    assert.deepEqual(stores.map((st) => st.deliversToYou), [true, false]);
+    assert.equal((await api('GET', '/api/public-config')).body.data.maxDeliveryKm, 15);
+  });
+
+  test('apps hear about policy changes straight away', async () => {
+    const { io } = require('socket.io-client');
+    const socket = io(srv.baseUrl, { transports: ['websocket'] });
+    try {
+      await new Promise((resolve) => socket.on('connect', resolve));
+      const heard = new Promise((resolve) => socket.on('config:update', resolve));
+      await setPolicies({ geofence_m: 250 });
+      assert.deepEqual((await heard).keys, ['geofence_m']);
+      assert.equal((await api('GET', '/api/public-config')).body.data.geofenceMeters, 250);
+    } finally {
+      socket.close();
+      await setPolicies({ geofence_m: 200 });
+    }
   });
 });
 
@@ -512,11 +629,30 @@ describe('Admin overview', () => {
 });
 
 describe('Public config', () => {
-  test('apps can read the delivery fee before checkout', async () => {
+  test('apps can read the delivery fee rates before checkout', async () => {
     const r = await api('GET', '/api/public-config');
     assert.equal(r.status, 200);
     assert.equal(r.body.data.deliveryFee, 150);
+    assert.equal(r.body.data.deliveryFeePerKm, 30);
     assert.equal(r.body.data.geofenceMeters, 200);
+  });
+
+  test('the map lists every open store, nearest first', async () => {
+    const r = await api('GET', `/api/stores?lat=${CLIFTON.lat}&lng=${CLIFTON.lng}`);
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.data.map((s) => s.storeName), ['Karachi Electronics Hub', 'Lahore Fashion Store']);
+    assert.ok(r.body.data[0].distanceKm < r.body.data[1].distanceKm);
+    assert.ok(r.body.data[0].productCount > 0);
+  });
+
+  test('customers can search stores by name or area', async () => {
+    const byName = await api('GET', `/api/stores?search=lahore&lat=${CLIFTON.lat}&lng=${CLIFTON.lng}`);
+    assert.deepEqual(byName.body.data.map((s) => s.storeName), ['Lahore Fashion Store']);
+    const none = await api('GET', '/api/stores?search=100%25');
+    assert.equal(none.body.data.length, 0, '% is matched literally, not as a wildcard');
+    const products = await api('GET', '/api/products?search=karachi%20electronics');
+    assert.ok(products.body.data.length > 0, 'product search also matches the store name');
+    assert.ok(products.body.data.every((p) => p.storeName === 'Karachi Electronics Hub'));
   });
 });
 
@@ -670,6 +806,73 @@ describe('Product photos', () => {
     const del = await api('DELETE', '/api/vendor/products/1/image', undefined, tokens.usman);
     assert.equal(del.status, 200);
     assert.equal((await product(1)).image_url, null);
+  });
+});
+
+describe('Store location changes need admin approval', () => {
+  const MOVED = { latitude: 24.8600, longitude: 67.0100 }; // ~1.2 km from the shop
+
+  test('an approved store files a request and stays put until reviewed', async () => {
+    const req1 = await api('PUT', '/api/vendor/location', { ...MOVED, storeAddress: 'Shop 4, Tariq Road' }, tokens.usman);
+    assert.equal(req1.status, 202, JSON.stringify(req1.body));
+    assert.equal(req1.body.data.applied, false);
+    const v = (await query('SELECT latitude, longitude, location_requested_at FROM vendors WHERE id = 1')).rows[0];
+    assert.deepEqual([v.latitude, v.longitude], [SADDAR.lat, SADDAR.lng], 'the live location did not move');
+    assert.ok(v.location_requested_at);
+
+    const me = await api('GET', '/api/auth/me', undefined, tokens.usman);
+    assert.equal(me.body.data.pendingLocation.latitude, MOVED.latitude);
+    assert.equal(me.body.data.storeLat, SADDAR.lat);
+
+    const list = await api('GET', '/api/admin/vendors', undefined, tokens.admin);
+    const row = list.body.data.find((x) => x.id === 1);
+    assert.equal(row.pendingLocation.address, 'Shop 4, Tariq Road');
+    assert.ok(row.pendingLocation.movedKm > 1 && row.pendingLocation.movedKm < 2);
+    const stats = await api('GET', '/api/admin/stats', undefined, tokens.admin);
+    assert.equal(Number(stats.body.data.vendors.location_requests), 1);
+  });
+
+  test('admin rejects with a reason; the vendor is told why', async () => {
+    const noReason = await api('PUT', '/api/admin/vendors/1/location/reject', {}, tokens.admin);
+    assert.equal(noReason.status, 400);
+    const r = await api('PUT', '/api/admin/vendors/1/location/reject', { reason: 'Pin is in the middle of the road' }, tokens.admin);
+    assert.equal(r.status, 200);
+    const me = await api('GET', '/api/auth/me', undefined, tokens.usman);
+    assert.equal(me.body.data.pendingLocation, null);
+    assert.equal(me.body.data.locationRejectionReason, 'Pin is in the middle of the road');
+    const n = await query(`SELECT body FROM notifications WHERE user_id = 2 AND type = 'location_rejected'`);
+    assert.equal(n.rows.length, 1);
+    const again = await api('PUT', '/api/admin/vendors/1/location/approve', {}, tokens.admin);
+    assert.equal(again.status, 409, 'nothing left to review');
+  });
+
+  test('admin approves; the store moves', async () => {
+    await api('PUT', '/api/vendor/location', MOVED, tokens.usman);
+    const ok = await api('PUT', '/api/admin/vendors/1/location/approve', {}, tokens.admin);
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    let v = (await query('SELECT latitude, longitude, location_requested_at, location_rejection_reason FROM vendors WHERE id = 1')).rows[0];
+    assert.deepEqual([v.latitude, v.longitude], [MOVED.latitude, MOVED.longitude]);
+    assert.equal(v.location_requested_at, null);
+    assert.equal(v.location_rejection_reason, null);
+
+    // The vendor can withdraw a request; then move back for the remaining tests
+    await api('PUT', '/api/vendor/location', { latitude: SADDAR.lat, longitude: SADDAR.lng }, tokens.usman);
+    const cancel = await api('DELETE', '/api/vendor/location/request', undefined, tokens.usman);
+    assert.equal(cancel.body.data.pendingLocation, null);
+    await api('PUT', '/api/vendor/location', { latitude: SADDAR.lat, longitude: SADDAR.lng }, tokens.usman);
+    await api('PUT', '/api/admin/vendors/1/location/approve', {}, tokens.admin);
+    v = (await query('SELECT latitude FROM vendors WHERE id = 1')).rows[0];
+    assert.equal(v.latitude, SADDAR.lat);
+  });
+
+  test('a store waiting for approval sets its location directly', async () => {
+    const signup = await api('POST', '/api/auth/signup', {
+      fullName: 'New Shop', email: 'newshop@vendor.pk', password: 'secret123', role: 'vendor', cnic: '42101-0000000-1',
+    });
+    const r = await api('PUT', '/api/vendor/location', MOVED, signup.body.data.token);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.data.applied, true);
+    assert.equal(r.body.data.latitude, MOVED.latitude);
   });
 });
 

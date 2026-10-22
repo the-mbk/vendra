@@ -1,6 +1,7 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Rider App - Active Delivery BLoC
-// Walks the delivery: arrived at store → picked up → on the way →
+// Walks the delivery: arrived at store → picked up (both checked against
+// the store location, pickup geofence) → on the way →
 // confirm delivery (geofenced, SSR02). The deliver response carries
 // the GPS-based payout breakdown (FR04); escrow release starts (FR03).
 // ══════════════════════════════════════════════════════════════
@@ -9,7 +10,6 @@ import 'dart:async';
 
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:vendra_rider/vendra_core.dart';
 
 import '../models/rider_models.dart';
@@ -107,7 +107,7 @@ class DeliveryBloc extends Bloc<DeliveryEvent, DeliveryState> {
   int _messageId = 0;
   int? _orderId;
 
-  DeliveryBloc() : super(const DeliveryState()) {
+  DeliveryBloc() : super(DeliveryState(geofenceMeters: AppConfig.current.geofenceMeters.toDouble())) {
     on<DeliveryLoadRequested>(_onLoad);
     on<DeliveryAdvanceRequested>(_onAdvance);
 
@@ -126,10 +126,9 @@ class DeliveryBloc extends Bloc<DeliveryEvent, DeliveryState> {
     if (state.order == null) emit(state.copyWith(loading: true, clearLoadError: true));
     try {
       if (state.loading) {
-        try {
-          final cfg = await _api.get(ApiConfig.publicConfig);
-          emit(state.copyWith(geofenceMeters: toDouble(cfg.data['data']['geofenceMeters'], 200)));
-        } catch (_) {}
+        // Retries the platform config if the startup load failed (never throws)
+        final cfg = await AppConfig.ensureLoaded();
+        emit(state.copyWith(geofenceMeters: cfg.geofenceMeters.toDouble()));
       }
       final order = await _fetchActive();
       _orderId = order?.id ?? _orderId;
@@ -155,12 +154,14 @@ class DeliveryBloc extends Bloc<DeliveryEvent, DeliveryState> {
     try {
       switch (order.step) {
         case DeliveryStep.headingToStore:
-          await _api.post(ApiConfig.riderArrived(order.id));
-          await _reload(emit, 'Arrival recorded — waiting time is being tracked');
+          if (await _atStore(ApiConfig.riderArrived(order.id), emit)) {
+            await _reload(emit, 'Arrival recorded — waiting time is being tracked');
+          }
           break;
         case DeliveryStep.atStore:
-          await _api.post(ApiConfig.riderPicked(order.id));
-          await _reload(emit, 'Order picked up');
+          if (await _atStore(ApiConfig.riderPicked(order.id), emit)) {
+            await _reload(emit, 'Order picked up');
+          }
           break;
         case DeliveryStep.pickedUp:
           await _api.post(ApiConfig.riderOnTheWay(order.id));
@@ -189,22 +190,57 @@ class DeliveryBloc extends Bloc<DeliveryEvent, DeliveryState> {
     emit(state.copyWith(busy: false, order: fresh, clearOrder: fresh == null, message: _msg(message)));
   }
 
-  Future<void> _deliver(RiderOrder order, Emitter<DeliveryState> emit) async {
-    final LatLng point;
+  /// Arrived / picked up: the server checks the rider is near the store (pickup
+  /// geofence). False when it said no (or there was no fix); the rider was told why.
+  Future<bool> _atStore(String path, Emitter<DeliveryState> emit) async {
+    final LocationFix fix;
     try {
-      point = await _location.currentPosition(fresh: true);
+      fix = await _location.currentFix(fresh: true);
+    } on LocationUnavailable catch (e) {
+      emit(state.copyWith(busy: false, message: _msg(e.message, isError: true)));
+      return false;
+    }
+    try {
+      await _api.post(path, data: fix.toJson());
+      return true;
+    } catch (e) {
+      if (_location.handleManualRejected(e)) {
+        emit(state.copyWith(busy: false));
+        return false;
+      }
+      if (ApiService.getErrorCode(e) == 'OUTSIDE_PICKUP_GEOFENCE') {
+        final data = ApiService.getErrorData(e) ?? const {};
+        final away = toInt(data['distanceMeters']);
+        final limit = toInt(data['geofenceMeters']);
+        emit(state.copyWith(
+          busy: false,
+          message: _msg('You are $away m from the store — move within $limit m of it to continue.', isError: true),
+        ));
+        return false;
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _deliver(RiderOrder order, Emitter<DeliveryState> emit) async {
+    final LocationFix fix;
+    try {
+      fix = await _location.currentFix(fresh: true);
     } on LocationUnavailable catch (e) {
       emit(state.copyWith(busy: false, message: _msg(e.message, isError: true)));
       return;
     }
     try {
-      final res = await _api.post(
-        ApiConfig.riderDeliver(order.id),
-        data: {'lat': point.latitude, 'lng': point.longitude},
-      );
+      final res = await _api.post(ApiConfig.riderDeliver(order.id), data: fix.toJson());
       final result = DeliveryResult.fromJson(Map<String, dynamic>.from(res.data['data']));
+      _location.stopDrive();
       emit(state.copyWith(busy: false, result: result));
     } catch (e) {
+      // Manual position refused: the service switched to GPS and told the rider — tap again
+      if (_location.handleManualRejected(e)) {
+        emit(state.copyWith(busy: false));
+        return;
+      }
       if (ApiService.getErrorCode(e) == 'OUTSIDE_GEOFENCE') {
         final data = ApiService.getErrorData(e) ?? const {};
         final away = toInt(data['distanceMeters']);

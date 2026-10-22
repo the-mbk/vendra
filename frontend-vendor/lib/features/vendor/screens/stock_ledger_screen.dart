@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:vendra_vendor/vendra_core.dart';
+import '../widgets/tab_header.dart';
 import '../../../core/models/ledger_entry_model.dart';
 
 class StockLedgerScreen extends StatefulWidget {
@@ -94,15 +95,32 @@ class _StockLedgerScreenState extends State<StockLedgerScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Text('Stock Ledger', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600)),
+          const TabHeader(
+            icon: Icons.inventory_2,
+            title: 'Stock Ledger',
+            subtitle: 'Every stock movement: online, walk-in and edits',
           ),
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
                 : _error != null
-                    ? Center(child: Text(_error!))
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.cloud_off_outlined, size: 48, color: Colors.grey.shade400),
+                              const SizedBox(height: 12),
+                              Text(_error!,
+                                  textAlign: TextAlign.center,
+                                  style: GoogleFonts.poppins(color: AppColors.textSecondary)),
+                              const SizedBox(height: 12),
+                              OutlinedButton(onPressed: _fetchLedger, child: const Text('Retry')),
+                            ],
+                          ),
+                        ),
+                      )
                     : _entries.isEmpty
                         ? Center(
                             child: Column(
@@ -160,7 +178,9 @@ class _StockLedgerScreenState extends State<StockLedgerScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(entry.productName ?? 'Product #${entry.productId}',
-                    style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                 const SizedBox(height: 2),
                 Text(entry.changeTypeDisplay,
                     style: GoogleFonts.poppins(fontSize: 12, color: color, fontWeight: FontWeight.w600)),
@@ -184,11 +204,11 @@ class _StockLedgerScreenState extends State<StockLedgerScreen> {
                 ),
               ),
               if (entry.privateStockAfter != null)
-                Text('Priv: ${entry.privateStockAfter}',
-                    style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textLight)),
+                Text('Private ${entry.privateStockAfter}',
+                    style: GoogleFonts.poppins(fontSize: 11, color: AppColors.secondary, fontWeight: FontWeight.w500)),
               if (entry.publicStockAfter != null)
-                Text('Pub: ${entry.publicStockAfter}',
-                    style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textLight)),
+                Text('Public ${entry.publicStockAfter}',
+                    style: GoogleFonts.poppins(fontSize: 11, color: AppColors.stockGreen, fontWeight: FontWeight.w500)),
             ],
           ),
         ],

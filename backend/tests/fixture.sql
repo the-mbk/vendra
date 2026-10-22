@@ -91,11 +91,11 @@ INSERT INTO inventory_ledger (product_id, vendor_id, change_type, quantity_chang
 (9, 1, 'stock_in', 25, 25, 22, 'Initial stock');
 
 -- ──────────────────────────────────────
--- 6. WALLET TOP-UPS (simulated deposits)
+-- 6. OPENING WALLET BALANCES (demo money that did not come through the gateway)
 -- ──────────────────────────────────────
 INSERT INTO wallet_ledger (user_id, transaction_type, amount, balance_after, description) VALUES
-(4, 'deposit', 200000.00, 200000.00, 'Top-up of Rs. 200000.00'),
-(5, 'deposit', 50000.00, 50000.00, 'Top-up of Rs. 50000.00');
+(4, 'opening_balance', 200000.00, 200000.00, 'Opening balance (demo data)'),
+(5, 'opening_balance', 50000.00, 50000.00, 'Opening balance (demo data)');
 
 -- ──────────────────────────────────────
 -- 7. ORDERS

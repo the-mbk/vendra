@@ -8,12 +8,18 @@ import { PageLoader, ErrorBox, Spinner, formatDate } from "../../lib/ui";
 // Display grouping only; any policy not listed here shows under "Other rules"
 const groups = [
   { title: "Catalog & Inventory", icon: "inventory_2", keys: ["auto_approve_products", "default_buffer"] },
-  { title: "Fees & Commission", icon: "payments", keys: ["commission_pct", "delivery_fee"] },
+  { title: "Fees & Commission", icon: "payments", keys: ["commission_pct", "delivery_fee", "delivery_fee_per_km"] },
   { title: "Escrow & Disputes", icon: "account_balance_wallet", keys: ["dispute_window_min"] },
+  {
+    title: "Order Timeouts",
+    icon: "timer_off",
+    keys: ["vendor_accept_timeout_min", "rider_assign_timeout_min"],
+  },
+  { title: "Wallet & Withdrawals", icon: "output", keys: ["min_withdrawal"] },
   {
     title: "Delivery & Rider Payouts",
     icon: "two_wheeler",
-    keys: ["geofence_m", "task_radius_km", "rider_base_fee", "rider_per_km", "rider_per_wait_min", "rider_free_wait_min"],
+    keys: ["max_delivery_km", "geofence_m", "pickup_geofence_m", "task_radius_km", "rider_base_fee", "rider_per_km", "rider_per_wait_min", "rider_free_wait_min"],
   },
 ];
 
@@ -71,6 +77,9 @@ function PolicyRow({ policy, draft, onChange }) {
   const changed = isChanged(policy, draft);
   const isFlag = policy.unit === "0/1";
   const hint = policy.unit === "min" ? minutesHint(draft) : null;
+  // In development mode fast timers cap some values; the backend reports what it actually uses
+  const effective = Number(policy.effectiveValue);
+  const overridden = policy.effectiveValue != null && Number.isFinite(effective) && effective !== Number(policy.value);
 
   return (
     <div className={`flex flex-col md:flex-row md:items-center gap-4 px-5 py-4 ${changed ? "bg-amber-50/50" : ""}`}>
@@ -81,6 +90,15 @@ function PolicyRow({ policy, draft, onChange }) {
           {changed && (
             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
               Unsaved (was {isFlag ? (policy.value === 1 ? "On" : "Off") : `${policy.value} ${policy.unit}`})
+            </span>
+          )}
+          {overridden && (
+            <span
+              title={`Saved value is ${policy.value} ${policy.unit}; development mode's fast timers use ${effective} ${policy.unit} instead. Production uses the saved value.`}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200"
+            >
+              <span className="material-symbols-outlined text-[13px]">construction</span>
+              Development mode: using {isFlag ? (effective === 1 ? "On" : "Off") : `${effective} ${policy.unit}`}
             </span>
           )}
         </div>
@@ -225,8 +243,9 @@ export default function PoliciesPage() {
           <p className="text-sm font-semibold text-blue-900">Changes apply immediately. No redeploy needed.</p>
           <p className="text-xs text-blue-700 mt-0.5">
             The backend reads these values on every action, so a saved change is used by the very next checkout,
-            delivery, payout or escrow release. The customer and rider apps pick up the new delivery fee, geofence
-            and dispute window the next time they load their config.
+            delivery, payout or escrow release. Open customer, vendor and rider apps are told about the change and
+            reload it straight away. The delivery fee is the base fee plus the per-km rate for the distance from the
+            store to the customer, rounded to the nearest Rs 10.
           </p>
         </div>
       </div>

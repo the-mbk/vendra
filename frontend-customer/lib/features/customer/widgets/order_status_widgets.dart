@@ -159,7 +159,7 @@ class EscrowStatusCard extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      'Rs. ${order.totalAmount.toStringAsFixed(0)}',
+                      formatRupees(order.totalAmount),
                       style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.primary),
                     ),
                   ],

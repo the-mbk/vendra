@@ -38,7 +38,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
 
   List<CategoryModel> _categories = [];
   int? _categoryId;
-  int? _defaultBuffer; // platform policy, from /api/public-config
+  int? _defaultBuffer; // platform policy (AppConfig, from /api/public-config); null if unknown
   String? _stockError; // server-side BELOW_RESERVED message
 
   final _picker = ImagePicker();
@@ -58,6 +58,8 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     _bufferCtrl = TextEditingController(text: p?.buffer.toString() ?? '');
     _barcodeCtrl = TextEditingController(text: p?.barcode ?? '');
     _categoryId = p?.categoryId;
+    final config = AppConfig.current;
+    if (config.fromServer) _defaultBuffer = config.defaultBuffer;
     _loadLookups();
   }
 
@@ -70,11 +72,11 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
           .toList();
       if (mounted) setState(() => _categories = list);
     } catch (_) {}
-    try {
-      final res = await api.get(ApiConfig.publicConfig);
-      final value = toIntOrNull((res.data['data'] as Map)['defaultBuffer']);
-      if (mounted) setState(() => _defaultBuffer = value);
-    } catch (_) {}
+    // Loaded at startup; retried here only if the backend was unreachable then
+    if (_defaultBuffer == null) {
+      final config = await AppConfig.ensureLoaded();
+      if (mounted && config.fromServer) setState(() => _defaultBuffer = config.defaultBuffer);
+    }
   }
 
   @override
