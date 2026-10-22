@@ -1,7 +1,9 @@
 // ══════════════════════════════════════════════════════════════
 // CORS origin check shared by Express and Socket.IO
-// Allows localhost (any port) outside production, plus ALLOWED_ORIGINS.
+// Allows localhost (any port) in development mode, plus ALLOWED_ORIGINS.
 // ══════════════════════════════════════════════════════════════
+
+const { isDevelopment } = require('../config/mode');
 
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
@@ -16,7 +18,7 @@ function isOriginAllowed(origin) {
   // Mobile apps and server-to-server calls send no Origin header
   if (!origin) return true;
   if (allowedOrigins().includes(origin)) return true;
-  return process.env.NODE_ENV !== 'production' && LOCALHOST_ORIGIN.test(origin);
+  return isDevelopment && LOCALHOST_ORIGIN.test(origin);
 }
 
 function corsOrigin(origin, callback) {

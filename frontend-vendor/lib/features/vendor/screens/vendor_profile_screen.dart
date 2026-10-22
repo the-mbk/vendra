@@ -1,18 +1,22 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra App - Vendor Profile Screen
-// Shows vendor info, wallet / disputes / change-password shortcuts and logout
+// Shows vendor info, wallet (+ withdraw to card) / disputes / change-password
+// shortcuts and logout
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import 'package:vendra_vendor/vendra_core.dart';
+import '../widgets/tab_header.dart';
 import '../../../config/app_routes.dart';
 import '../../auth/bloc/auth_bloc.dart';
 import '../../auth/bloc/auth_event.dart';
 import '../../auth/bloc/auth_state.dart';
 import 'vendor_disputes_screen.dart';
 import 'wallet_screen.dart';
+import '../widgets/wallet_widgets.dart';
 
 class VendorProfileScreen extends StatelessWidget {
   const VendorProfileScreen({super.key});
@@ -24,10 +28,7 @@ class VendorProfileScreen extends StatelessWidget {
       child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          child: Text('Profile', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600)),
-        ),
+        const TabHeader(icon: Icons.person, title: 'Profile', subtitle: 'Your store, wallet and account'),
         Expanded(
           child: BlocBuilder<AuthBloc, AuthState>(
             builder: (context, state) {
@@ -47,7 +48,8 @@ class VendorProfileScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Text(user.fullName, style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w600)),
+                  Text(user.fullName,
+                      style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                   const SizedBox(height: 4),
                   Text(user.email, style: GoogleFonts.poppins(color: AppColors.textSecondary)),
                   const SizedBox(height: 4),
@@ -74,7 +76,8 @@ class VendorProfileScreen extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Store Information', style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600)),
+                        Text('Store Information',
+                            style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                         const Divider(height: 20),
                         _infoRow(Icons.storefront, 'Store Name', user.storeName ?? 'N/A'),
                         const SizedBox(height: 12),
@@ -87,7 +90,9 @@ class VendorProfileScreen extends StatelessWidget {
 
                   const SizedBox(height: 16),
                   _linkTile(context, Icons.account_balance_wallet_outlined, 'Wallet',
-                      'Rs. ${user.walletBalance.toStringAsFixed(0)} · escrow releases', const WalletScreen()),
+                      'Rs. ${NumberFormat('#,##0').format(user.walletBalance)} · escrow releases', const WalletScreen()),
+                  _actionTile(Icons.north_east, 'Withdraw to card', 'Send your wallet balance to a debit card',
+                      () => startWithdrawal(context, balance: user.walletBalance)),
                   _linkTile(context, Icons.gavel_outlined, 'Disputes', 'Disputes on your orders', const VendorDisputesScreen()),
                   _linkTile(context, Icons.lock_reset, 'Change password', 'Choose a new sign-in password',
                       const ChangePasswordScreen()),
@@ -125,7 +130,10 @@ class VendorProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _linkTile(BuildContext context, IconData icon, String title, String subtitle, Widget screen) {
+  Widget _linkTile(BuildContext context, IconData icon, String title, String subtitle, Widget screen) =>
+      _actionTile(icon, title, subtitle, () => Navigator.push(context, MaterialPageRoute(builder: (_) => screen)));
+
+  Widget _actionTile(IconData icon, String title, String subtitle, VoidCallback onTap) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
@@ -139,7 +147,7 @@ class VendorProfileScreen extends StatelessWidget {
         title: Text(title, style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600)),
         subtitle: Text(subtitle, style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
         trailing: const Icon(Icons.chevron_right),
-        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => screen)),
+        onTap: onTap,
       ),
     );
   }

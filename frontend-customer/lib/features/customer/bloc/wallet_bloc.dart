@@ -1,7 +1,9 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra App - Wallet BLoC
-// GET /api/wallet → balance + ledger (top-ups, escrow holds, refunds)
-// POST /api/customer/wallet/topup → simulated deposit
+// GET /api/wallet → balance + ledger (card top-ups, escrow holds, refunds,
+// withdrawals). Card top-ups and withdrawals run in the shared card flows
+// (they need sheets/dialogs); afterwards the screen sends WalletChanged so
+// the ledger reloads and the outcome is shown once.
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -24,31 +26,35 @@ class FetchWallet extends WalletEvent {
   List<Object?> get props => [silent];
 }
 
-class WalletTopUpRequested extends WalletEvent {
-  final double amount;
-  const WalletTopUpRequested(this.amount);
+/// Money moved outside the bloc (card top-up, withdrawal): reload and show [feedback]
+class WalletChanged extends WalletEvent {
+  final String? feedback;
+  final bool isError;
+  const WalletChanged({this.feedback, this.isError = false});
   @override
-  List<Object?> get props => [amount];
+  List<Object?> get props => [feedback, isError, identityHashCode(this)];
 }
 
 // ── State ──
 class WalletState extends Equatable {
   final WalletSummary? summary;
   final bool loading;
-  final bool toppingUp;
   final String? error;
 
-  /// One-shot message after a top-up (success or failure)
+  /// One-shot message after a top-up or withdrawal (success or failure)
   final String? feedback;
   final bool feedbackIsError;
+
+  /// Bumped after each change so the withdrawal history reloads too
+  final int revision;
 
   const WalletState({
     this.summary,
     this.loading = false,
-    this.toppingUp = false,
     this.error,
     this.feedback,
     this.feedbackIsError = false,
+    this.revision = 0,
   });
 
   @override
@@ -57,10 +63,10 @@ class WalletState extends Equatable {
         summary?.transactions.length,
         summary?.transactions.isNotEmpty == true ? summary!.transactions.first.id : null,
         loading,
-        toppingUp,
         error,
         feedback,
         feedbackIsError,
+        revision,
       ];
 }
 
@@ -68,12 +74,26 @@ class WalletState extends Equatable {
 class WalletBloc extends Bloc<WalletEvent, WalletState> {
   final ApiService _api = ApiService();
   StreamSubscription<OrderUpdateEvent>? _updatesSub;
+  StreamSubscription<NotificationModel>? _notifSub;
+
+  /// Notifications that mean the balance changed without an order update
+  static const _walletNotifications = {
+    'wallet_topup',
+    'payment_order_failed',
+    'withdrawal_paid',
+    'withdrawal_failed',
+    'withdrawal_reversal',
+  };
 
   WalletBloc() : super(const WalletState(loading: true)) {
     on<FetchWallet>(_onFetch);
-    on<WalletTopUpRequested>(_onTopUp);
+    on<WalletChanged>(_onChanged);
     // Cancellations and dispute refunds credit the wallet and push an order:update
     _updatesSub = RealtimeService().orderUpdates.listen((_) => add(const FetchWallet(silent: true)));
+    // Card top-ups confirmed by webhook, bounced withdrawals returning money…
+    _notifSub = RealtimeService().notifications.listen((n) {
+      if (_walletNotifications.contains(n.type)) add(const FetchWallet(silent: true));
+    });
   }
 
   Future<WalletSummary> _load() async {
@@ -82,38 +102,33 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
   }
 
   Future<void> _onFetch(FetchWallet event, Emitter<WalletState> emit) async {
-    if (!event.silent) emit(WalletState(summary: state.summary, loading: true));
+    if (!event.silent) emit(WalletState(summary: state.summary, loading: true, revision: state.revision));
     try {
-      emit(WalletState(summary: await _load()));
+      emit(WalletState(summary: await _load(), revision: state.revision));
     } catch (e) {
-      emit(WalletState(summary: state.summary, error: ApiService.getErrorMessage(e)));
+      emit(WalletState(summary: state.summary, error: ApiService.getErrorMessage(e), revision: state.revision));
     }
   }
 
-  Future<void> _onTopUp(WalletTopUpRequested event, Emitter<WalletState> emit) async {
-    emit(WalletState(summary: state.summary, toppingUp: true));
+  Future<void> _onChanged(WalletChanged event, Emitter<WalletState> emit) async {
+    WalletSummary? summary = state.summary;
     try {
-      final res = await _api.post(ApiConfig.walletTopup, data: {'amount': event.amount});
-      if (res.data['success'] != true) {
-        emit(WalletState(
-          summary: state.summary,
-          feedback: res.data['message']?.toString() ?? 'Top up failed',
-          feedbackIsError: true,
-        ));
-        return;
-      }
-      emit(WalletState(
-        summary: await _load(),
-        feedback: 'Rs. ${event.amount.toStringAsFixed(0)} added to your wallet',
-      ));
-    } catch (e) {
-      emit(WalletState(summary: state.summary, feedback: ApiService.getErrorMessage(e), feedbackIsError: true));
+      summary = await _load();
+    } catch (_) {
+      // Keep the old ledger; the feedback still matters more
     }
+    emit(WalletState(
+      summary: summary,
+      feedback: event.feedback,
+      feedbackIsError: event.isError,
+      revision: state.revision + 1,
+    ));
   }
 
   @override
   Future<void> close() {
     _updatesSub?.cancel();
+    _notifSub?.cancel();
     return super.close();
   }
 }

@@ -40,3 +40,20 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--color-outline-variant); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-outline); }
+
+/* Wide admin tables: keep the last (actions) column pinned to the right edge of the
+   card while the other columns scroll sideways, so Approve / Reject stay visible. */
+.sticky-actions th:last-child,
+.sticky-actions td:last-child:not([colspan]) {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background-color: #ffffff;
+  box-shadow: -10px 0 12px -12px rgb(11 28 48 / 0.35);
+}
+.sticky-actions thead th:last-child {
+  background-color: #f7f9ff;
+}
+.sticky-actions tbody tr:hover td:last-child:not([colspan]) {
+  background-color: #fbfcff;
+}

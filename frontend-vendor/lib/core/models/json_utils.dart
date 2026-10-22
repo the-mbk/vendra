@@ -35,3 +35,12 @@ int? toIntOrNull(dynamic v) {
 }
 
 DateTime? toDate(dynamic v) => v == null ? null : DateTime.tryParse(v.toString())?.toLocal();
+
+/// "Rs. 1,500" (no decimals for whole rupees), "Rs. 1,234.50"
+String formatRupees(double v) {
+  final whole = v % 1 == 0;
+  final fixed = v.toStringAsFixed(whole ? 0 : 2);
+  final parts = fixed.split('.');
+  final grouped = parts[0].replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',');
+  return 'Rs. $grouped${parts.length > 1 ? '.${parts[1]}' : ''}';
+}

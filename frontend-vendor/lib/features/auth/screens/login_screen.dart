@@ -1,7 +1,8 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Vendor App - Login Screen
 // Single-role (vendor) version of the Stitch login design:
-// email/password, store signup fields, login button, signup toggle
+// email/password, store signup fields, login button, signup toggle, and
+// (development only) one-tap demo accounts from GET /api/public-config
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -257,25 +258,20 @@ class _LoginScreenState extends State<LoginScreen> {
                             onPressed: _submit,
                           ),
 
-                          if (!_isSignup) ...[
-                            const SizedBox(height: 20),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                'Quick demo login',
-                                style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+                          // Development only: renders nothing in production
+                          if (!_isSignup)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 20),
+                              child: DemoLoginPanel(
+                                role: 'vendor',
+                                enabled: !isLoading,
+                                emailController: _emailController,
+                                passwordController: _passwordController,
+                                onLogin: (email, password) => context
+                                    .read<AuthBloc>()
+                                    .add(LoginRequested(email: email, password: password)),
                               ),
                             ),
-                            const SizedBox(height: 10),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                _demoLoginChip(context, label: 'Vendor 1', email: 'usman@vendor.pk'),
-                                _demoLoginChip(context, label: 'Vendor 2', email: 'ayesha@vendor.pk'),
-                              ],
-                            ),
-                          ],
                         ],
                       ),
                     ),
@@ -307,19 +303,6 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
       },
-    );
-  }
-
-  Widget _demoLoginChip(BuildContext context, {required String label, required String email}) {
-    return ActionChip(
-      label: Text(label, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500)),
-      onPressed: () {
-        _emailController.text = email;
-        _passwordController.text = 'password123';
-        context.read<AuthBloc>().add(LoginRequested(email: email, password: 'password123'));
-      },
-      backgroundColor: AppColors.secondary.withValues(alpha: 0.08),
-      side: BorderSide(color: AppColors.secondary.withValues(alpha: 0.35)),
     );
   }
 }

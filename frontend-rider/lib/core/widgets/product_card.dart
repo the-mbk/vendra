@@ -6,6 +6,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../config/app_theme.dart';
+import '../models/json_utils.dart';
 import '../models/product_model.dart';
 import 'product_image.dart';
 
@@ -117,7 +118,7 @@ class ProductCard extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Rs. ${product.price.toStringAsFixed(0)}',
+                                formatRupees(product.price),
                                 style: GoogleFonts.poppins(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w700,
@@ -126,7 +127,9 @@ class ProductCard extends StatelessWidget {
                               ),
                               if (showVendorStock)
                                 Text(
-                                  'Priv: ${product.privateStock} | Pub: ${product.publicStock}',
+                                  'Private ${product.privateStock} · Reserved ${product.reservedQuantity} · Public ${product.publicStock}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: GoogleFonts.poppins(
                                     fontSize: 10,
                                     color: AppColors.textSecondary,

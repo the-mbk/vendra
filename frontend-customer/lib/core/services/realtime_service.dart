@@ -8,10 +8,15 @@
 //   order:update     → orderUpdates        status / escrow changes
 //   stock:update     → stockUpdates        public stock (marketplace)
 //   stock:vendor     → vendorStock         private/reserved (vendor POS)
-//   rider:location   → riderLocations      live rider position (customer map)
+//   rider:location   → riderLocations      live rider position, only for the
+//                                          order passed to trackOrder()
 //   task:new         → newTasks            ready orders (riders)
 //   task:taken       → takenTasks          another rider accepted
 //   catalog:update   → catalogUpdates      products approved/hidden
+//
+// Live tracking is one order at a time: trackOrder(id) asks the server for
+// that order's rider pings (and stops the previous one); untrackOrder(id)
+// stops them. It is re-sent after a reconnect, since rooms don't survive one.
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -64,6 +69,9 @@ class RealtimeService {
   sio.Socket? _socket;
   String? _token;
 
+  /// The order whose rider pings this app wants (null: none)
+  int? _trackedOrderId;
+
   final _notifications = StreamController<NotificationModel>.broadcast();
   final _orderUpdates = StreamController<OrderUpdateEvent>.broadcast();
   final _stockUpdates = StreamController<StockUpdateEvent>.broadcast();
@@ -72,6 +80,7 @@ class RealtimeService {
   final _newTasks = StreamController<int>.broadcast();
   final _takenTasks = StreamController<int>.broadcast();
   final _catalogUpdates = StreamController<void>.broadcast();
+  final _configUpdates = StreamController<void>.broadcast();
   final _connected = ValueNotifier<bool>(false);
 
   Stream<NotificationModel> get notifications => _notifications.stream;
@@ -82,6 +91,9 @@ class RealtimeService {
   Stream<int> get newTasks => _newTasks.stream;
   Stream<int> get takenTasks => _takenTasks.stream;
   Stream<void> get catalogUpdates => _catalogUpdates.stream;
+
+  /// An admin changed a policy: re-read GET /api/public-config (AppConfig does this)
+  Stream<void> get configUpdates => _configUpdates.stream;
   ValueListenable<bool> get connected => _connected;
 
   /// Connects (or reconnects) using the stored JWT. Safe to call repeatedly.
@@ -103,7 +115,11 @@ class RealtimeService {
     final socket = sio.io(ApiConfig.socketUrl, builder.build());
     _socket = socket;
 
-    socket.onConnect((_) => _connected.value = true);
+    socket.onConnect((_) {
+      _connected.value = true;
+      final tracked = _trackedOrderId;
+      if (tracked != null) socket.emit('track:order', {'orderId': tracked});
+    });
     socket.onDisconnect((_) => _connected.value = false);
     socket.onConnectError((e) => debugPrint('Realtime connect error: $e'));
 
@@ -128,11 +144,27 @@ class RealtimeService {
     socket.on('task:new', (d) => _newTasks.add(toInt(_map(d)['orderId'])));
     socket.on('task:taken', (d) => _takenTasks.add(toInt(_map(d)['orderId'])));
     socket.on('catalog:update', (_) => _catalogUpdates.add(null));
+    socket.on('config:update', (_) => _configUpdates.add(null));
 
     socket.connect();
   }
 
+  /// Start receiving rider:location for [orderId] only (replaces any other order)
+  void trackOrder(int orderId) {
+    if (_trackedOrderId == orderId) return;
+    _trackedOrderId = orderId;
+    if (_socket?.connected == true) _socket!.emit('track:order', {'orderId': orderId});
+  }
+
+  /// Stop receiving rider pings for [orderId] (no-op if another order is tracked now)
+  void untrackOrder(int orderId) {
+    if (_trackedOrderId != orderId) return;
+    _trackedOrderId = null;
+    if (_socket?.connected == true) _socket!.emit('untrack:order');
+  }
+
   void disconnect() {
+    _trackedOrderId = null;
     _socket?.dispose();
     _socket = null;
     _token = null;

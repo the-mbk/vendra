@@ -12,12 +12,15 @@ const { listPolicies } = require('../services/policy.service');
 const { notify } = require('../services/notification.service');
 const { broadcast } = require('../realtime');
 const { httpError, asyncHandler, withTransaction, intParam } = require('../utils/http');
+const { haversineKm } = require('../utils/geo');
 
 /** GET /api/admin/stats */
 const getDashboardStats = asyncHandler(async (req, res) => {
   const [vendors, users, orders, products, disputes] = await Promise.all([
     pool.query(`SELECT COUNT(*) FILTER (WHERE is_approved) AS approved,
-                       COUNT(*) FILTER (WHERE NOT is_approved) AS pending, COUNT(*) AS total FROM vendors`),
+                       COUNT(*) FILTER (WHERE NOT is_approved) AS pending,
+                       COUNT(*) FILTER (WHERE location_requested_at IS NOT NULL) AS location_requests,
+                       COUNT(*) AS total FROM vendors`),
     pool.query(`SELECT COUNT(*) FILTER (WHERE u.role = 'customer') AS customers,
                        COUNT(*) FILTER (WHERE u.role = 'rider') AS riders,
                        COUNT(*) FILTER (WHERE r.is_online) AS riders_online
@@ -65,6 +68,7 @@ const getDashboardStats = asyncHandler(async (req, res) => {
 const getAllVendors = asyncHandler(async (req, res) => {
   const r = await pool.query(
     `SELECT v.id, v.store_name, v.store_address, v.cnic, v.is_approved, v.created_at, v.latitude, v.longitude,
+            v.pending_latitude, v.pending_longitude, v.pending_address, v.location_requested_at,
             u.id AS user_id, u.full_name, u.email, u.phone,
             (SELECT COUNT(*) FROM products p WHERE p.vendor_id = v.id AND p.is_active) AS product_count,
             (SELECT COALESCE(SUM(o.total_amount), 0) FROM orders o WHERE o.vendor_id = v.id AND o.status <> 'cancelled') AS total_revenue
@@ -81,6 +85,19 @@ const getAllVendors = asyncHandler(async (req, res) => {
       cnic: v.cnic,
       isApproved: v.is_approved,
       hasLocation: v.latitude != null,
+      latitude: v.latitude,
+      longitude: v.longitude,
+      pendingLocation: v.location_requested_at
+        ? {
+            latitude: v.pending_latitude,
+            longitude: v.pending_longitude,
+            address: v.pending_address,
+            requestedAt: v.location_requested_at,
+            movedKm: v.latitude != null
+              ? Number(haversineKm(v.latitude, v.longitude, v.pending_latitude, v.pending_longitude).toFixed(2))
+              : null,
+          }
+        : null,
       ownerName: v.full_name,
       email: v.email,
       phone: v.phone,
@@ -116,6 +133,48 @@ function setVendorApproval(approved) {
 
 const approveVendor = setVendorApproval(true);
 const disapproveVendor = setVendorApproval(false);
+
+/**
+ * PUT /api/admin/vendors/:id/location/approve — the store moves to the requested point
+ * PUT /api/admin/vendors/:id/location/reject  Body: { reason } — the store stays put
+ */
+function reviewLocation(approve) {
+  return asyncHandler(async (req, res) => {
+    const vendorId = intParam(req.params.id);
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 300) : '';
+    if (!approve && !reason) throw httpError(400, 'Give the vendor a reason for rejecting the new location.');
+    const vendor = await withTransaction(async (client, afterCommit) => {
+      const v = (await client.query('SELECT * FROM vendors WHERE id = $1 FOR UPDATE', [vendorId])).rows[0];
+      if (!v) throw httpError(404, 'Vendor not found.');
+      if (!v.location_requested_at) throw httpError(409, 'This store has no location change waiting for review.');
+      const r = await client.query(
+        approve
+          ? `UPDATE vendors SET latitude = pending_latitude, longitude = pending_longitude,
+                    store_address = COALESCE(pending_address, store_address),
+                    pending_latitude = NULL, pending_longitude = NULL, pending_address = NULL,
+                    location_requested_at = NULL, location_rejection_reason = NULL
+             WHERE id = $1 RETURNING *`
+          : `UPDATE vendors SET pending_latitude = NULL, pending_longitude = NULL, pending_address = NULL,
+                    location_requested_at = NULL, location_rejection_reason = $2
+             WHERE id = $1 RETURNING *`,
+        approve ? [vendorId] : [vendorId, reason]
+      );
+      await notify(client, afterCommit, v.user_id, approve
+        ? { type: 'location_approved', title: 'New store location approved', body: 'Customers and riders now see your store at its new location.' }
+        : { type: 'location_rejected', title: 'Store location change rejected', body: reason });
+      afterCommit.push(() => broadcast('catalog:update', { vendorId }));
+      return r.rows[0];
+    });
+    res.json({
+      success: true,
+      message: approve ? `"${vendor.store_name}" moved to its new location.` : `Location change for "${vendor.store_name}" rejected.`,
+      data: { id: vendor.id, latitude: vendor.latitude, longitude: vendor.longitude, storeAddress: vendor.store_address },
+    });
+  });
+}
+
+const approveVendorLocation = reviewLocation(true);
+const rejectVendorLocation = reviewLocation(false);
 
 // ──────────────────────────────────────
 // Product catalog approval (FR06)
@@ -201,7 +260,7 @@ const updatePolicies = asyncHandler(async (req, res) => {
     throw httpError(400, 'Send { values: { key: number } }.');
   }
 
-  await withTransaction(async (client) => {
+  await withTransaction(async (client, afterCommit) => {
     const known = await client.query('SELECT key, unit FROM policies');
     const units = new Map(known.rows.map((r) => [r.key, r.unit]));
 
@@ -217,6 +276,8 @@ const updatePolicies = asyncHandler(async (req, res) => {
         [value, req.user.userId, key]
       );
     }
+    // Every app re-reads GET /api/public-config when it hears this
+    afterCommit.push(() => broadcast('config:update', { keys: Object.keys(values) }));
   });
 
   res.json({ success: true, message: 'Policies updated. New values apply to the next action.', data: await listPolicies() });
@@ -303,6 +364,7 @@ const getFinance = asyncHandler(async (req, res) => {
 const getAllOrders = asyncHandler(async (req, res) => {
   const r = await pool.query(
     `SELECT o.id, o.status, o.escrow_status, o.delivery_type, o.total_amount, o.rider_payout, o.created_at, o.updated_at,
+            o.payment_method, o.cancellation_reason,
             u.full_name AS customer_name, u.email AS customer_email, v.store_name, rd.full_name AS rider_name,
             (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
      FROM orders o
@@ -324,6 +386,8 @@ const getAllOrders = asyncHandler(async (req, res) => {
       deliveryType: o.delivery_type,
       totalAmount: Number(o.total_amount),
       riderPayout: Number(o.rider_payout),
+      paymentMethod: o.payment_method,
+      cancellationReason: o.cancellation_reason,
       itemCount: Number(o.item_count),
       createdAt: o.created_at,
       updatedAt: o.updated_at,
@@ -384,6 +448,8 @@ module.exports = {
   getAllVendors,
   approveVendor,
   disapproveVendor,
+  approveVendorLocation,
+  rejectVendorLocation,
   getProducts,
   approveProduct,
   hideProduct,

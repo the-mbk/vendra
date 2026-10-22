@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:latlong2/latlong.dart';
+import 'dart:async';
 import 'dart:math';
 import 'package:vendra_customer/vendra_core.dart';
 import '../../../config/app_routes.dart';
@@ -24,6 +25,7 @@ import '../../auth/bloc/auth_state.dart';
 
 import 'store_screen.dart';
 import 'customer_orders_panel.dart';
+import '../widgets/wallet_actions.dart';
 import '../../../core/services/customer_location_storage.dart';
 
 
@@ -46,6 +48,10 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
   /// Active filters (FR06)
   int? _categoryId;
   String _search = '';
+  Timer? _searchDebounce;
+
+  /// Stores whose name or area matches [_search] (shown above the products)
+  List<_MapStore> _storeMatches = const [];
 
   @override
   void initState() {
@@ -61,6 +67,50 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
           search: _search.isNotEmpty ? _search : null,
           categoryId: _categoryId,
         ));
+    _searchStores();
+  }
+
+  /// Runs the search a moment after the customer stops typing
+  void _onSearchChanged(String value) {
+    setState(() {});
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted || value.trim() == _search) return;
+      setState(() => _search = value.trim());
+      _fetchProducts();
+    });
+  }
+
+  void _submitSearch(String value) {
+    _searchDebounce?.cancel();
+    setState(() => _search = value.trim());
+    _fetchProducts();
+  }
+
+  /// Stores matching the search box, nearest first
+  Future<void> _searchStores() async {
+    final query = _search;
+    if (query.isEmpty) {
+      if (_storeMatches.isNotEmpty) setState(() => _storeMatches = const []);
+      return;
+    }
+    try {
+      final res = await ApiService().get(ApiConfig.stores,
+          queryParams: {'search': query, 'lat': _customerLat, 'lng': _customerLng});
+      final list = (res.data['data'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map((m) => _MapStore.fromJson(Map<String, dynamic>.from(m)))
+          .toList();
+      if (!mounted || query != _search) return;
+      setState(() => _storeMatches = list);
+    } catch (_) {
+      // Store matches are extra; the product results still show
+      if (mounted && query == _search) setState(() => _storeMatches = const []);
+    }
+  }
+
+  void _openStore(_MapStore st) {
+    Navigator.push(context, MaterialPageRoute(builder: (context) => StoreScreen(vendorId: st.id, storeName: st.name)));
   }
 
   /// Asks for the next page of products when the bottom is close (or already
@@ -80,6 +130,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
   }
 
   void _clearFilters() {
+    _searchDebounce?.cancel();
     _searchController.clear();
     setState(() {
       _search = '';
@@ -104,7 +155,9 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
+    _exploreSearch.dispose();
     _homeScroll.dispose();
     super.dispose();
   }
@@ -185,7 +238,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                     Icon(Icons.account_balance_wallet, size: 16, color: Colors.green.shade700),
                     const SizedBox(width: 6),
                     Text(
-                      'Rs. ${authState.user.walletBalance.toStringAsFixed(0)}',
+                      formatRupees(authState.user.walletBalance),
                       style: GoogleFonts.poppins(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -300,13 +353,10 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
               child: TextField(
                 controller: _searchController,
                 textInputAction: TextInputAction.search,
-                onChanged: (_) => setState(() {}),
-                onSubmitted: (value) {
-                  setState(() => _search = value.trim());
-                  _fetchProducts();
-                },
+                onChanged: _onSearchChanged,
+                onSubmitted: _submitSearch,
                 decoration: InputDecoration(
-                  hintText: 'Search for groceries, clothing...',
+                  hintText: 'Search products or stores...',
                   prefixIcon: const Icon(Icons.search, color: AppColors.textLight),
                   suffixIcon: _searchController.text.isEmpty && _search.isEmpty
                       ? null
@@ -314,6 +364,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                           tooltip: 'Clear search',
                           icon: const Icon(Icons.close, color: AppColors.textLight),
                           onPressed: () {
+                            _searchDebounce?.cancel();
                             _searchController.clear();
                             setState(() => _search = '');
                             _fetchProducts();
@@ -334,7 +385,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
               ),
             ),
 
-            // Promo banner
+            // Escrow banner (how every payment on Vendra works — no promo codes)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Container(
@@ -354,25 +405,33 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Free Delivery!',
-                              style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white)),
+                          Text('Escrow-protected payments',
+                              style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white)),
                           const SizedBox(height: 4),
-                          Text('On your first 3 orders',
-                              style: GoogleFonts.poppins(fontSize: 13, color: Colors.white70)),
-                          const SizedBox(height: 8),
+                          Text('Your money is held safely until your order is delivered.',
+                              style: GoogleFonts.poppins(fontSize: 13, height: 1.35, color: Colors.white.withValues(alpha: 0.85))),
+                          const SizedBox(height: 10),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.2),
+                              color: Colors.white.withValues(alpha: 0.18),
                               borderRadius: BorderRadius.circular(6),
                             ),
-                            child: Text('Code: VENDRA1',
-                                style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.store_mall_directory_outlined, size: 14, color: Colors.white),
+                                const SizedBox(width: 6),
+                                Text('Local stores · Live tracking',
+                                    style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                              ],
+                            ),
                           ),
                         ],
                       ),
                     ),
-                    const Icon(Icons.local_shipping_outlined, size: 56, color: Colors.white38),
+                    const SizedBox(width: 12),
+                    const Icon(Icons.verified_user_outlined, size: 52, color: Colors.white38),
                   ],
                 ),
               ),
@@ -425,6 +484,29 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
             ),
 
             const SizedBox(height: 20),
+
+            // Stores matching the search
+            if (_search.isNotEmpty && _storeMatches.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  'Stores (${_storeMatches.length})',
+                  style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 76,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: _storeMatches.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 10),
+                  itemBuilder: (context, i) => _storeMatchCard(_storeMatches[i]),
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
 
             // Products grid title
             Padding(
@@ -634,7 +716,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                       children: [
                         Expanded(
                           child: Text(
-                            'Rs. ${product.price.toStringAsFixed(0)}',
+                            formatRupees(product.price),
                             style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.primary),
                           ),
                         ),
@@ -833,24 +915,70 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
   }
 
   Widget _buildCustomerDrawer(BuildContext context) {
+    final auth = context.read<AuthBloc>().state;
+    final user = auth is Authenticated ? auth.user : null;
     return Drawer(
-      child: SafeArea(
+      backgroundColor: Colors.white,
+      child: ListTileTheme(
+        iconColor: AppColors.secondary,
+        textColor: AppColors.textPrimary,
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            DrawerHeader(
+            Container(
+              padding: EdgeInsets.fromLTRB(20, MediaQuery.of(context).padding.top + 36, 20, 20),
               decoration: const BoxDecoration(
-                gradient: LinearGradient(colors: [AppColors.secondary, Color(0xFF1A6DB5)]),
+                gradient: LinearGradient(
+                  colors: [AppColors.secondary, Color(0xFF1A6DB5)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Vendra', style: GoogleFonts.poppins(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 4),
-                  Text('Customer', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 13)),
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white24, width: 2),
+                    ),
+                    child: const Icon(Icons.person, color: Colors.white, size: 28),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(user?.fullName ?? 'Vendra',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+                  Text(user?.email ?? 'Customer',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(color: Colors.white70, fontSize: 13)),
+                  if (user != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.account_balance_wallet_outlined, size: 14, color: Colors.white),
+                          const SizedBox(width: 6),
+                          Text('Wallet ${formatRupees(user.walletBalance)}',
+                              style: GoogleFonts.poppins(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
+            const SizedBox(height: 8),
             ListTile(
               leading: const Icon(Icons.home_outlined),
               title: const Text('Home'),
@@ -877,7 +1005,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.favorite_outline),
-              title: const Text('Saved & events'),
+              title: const Text('Saved'),
               onTap: () {
                 Navigator.pop(context);
                 setState(() => _currentNavIndex = 3);
@@ -885,7 +1013,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.person_outline),
-              title: const Text('Profile & wallet'),
+              title: const Text('Profile'),
               onTap: () {
                 Navigator.pop(context);
                 setState(() => _currentNavIndex = 4);
@@ -993,13 +1121,13 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Rs. ${user.walletBalance.toStringAsFixed(2)}',
+                      formatRupees(user.walletBalance),
                       style: GoogleFonts.poppins(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
                     ),
                     if (user.platformEscrowBalance > 0) ...[
                       const SizedBox(height: 8),
                       Text(
-                        'Platform escrow pool: Rs. ${user.platformEscrowBalance.toStringAsFixed(2)}',
+                        'Platform escrow pool: ${formatRupees(user.platformEscrowBalance)}',
                         style: GoogleFonts.poppins(color: Colors.white70, fontSize: 11),
                       ),
                     ],
@@ -1014,9 +1142,9 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                               padding: const EdgeInsets.symmetric(vertical: 12),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
-                            icon: const Icon(Icons.add_circle_outline),
-                            label: const Text('Top Up (Rs. 5000)'),
-                            onPressed: () => _handleTopup(context, 5000),
+                            icon: const Icon(Icons.add_card),
+                            label: const Text('Add money'),
+                            onPressed: () => _handleTopup(context),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -1028,13 +1156,9 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                               padding: const EdgeInsets.symmetric(vertical: 12),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
-                            icon: const Icon(Icons.arrow_downward),
+                            icon: const Icon(Icons.north_east),
                             label: const Text('Withdraw'),
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Withdrawal feature coming soon.')),
-                              );
-                            },
+                            onPressed: () => startWithdrawal(context, balance: user.walletBalance),
                           ),
                         ),
                       ],
@@ -1058,7 +1182,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.history, color: AppColors.textSecondary),
                 title: Text('Wallet Ledger', style: GoogleFonts.poppins()),
-                subtitle: Text('Top-ups, escrow holds and refunds', style: GoogleFonts.poppins(fontSize: 12)),
+                subtitle: Text('Top-ups, escrow holds, refunds and withdrawals', style: GoogleFonts.poppins(fontSize: 12)),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.pushNamed(context, AppRoutes.wallet),
               ),
@@ -1098,117 +1222,283 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     );
   }
   
-  Future<void> _handleTopup(BuildContext context, double amount) async {
+  /// Card top-up (amount → card → one-time password if asked)
+  Future<void> _handleTopup(BuildContext context) async {
+    final result = await startCardTopUp(context);
+    if (result == null || !context.mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(result.message),
+        backgroundColor: result.success ? AppColors.stockGreen : AppColors.error,
+        behavior: SnackBarBehavior.floating,
+      ));
+  }
+
+  /// Every open store for the Explore map (GET /api/stores), nearest first.
+  /// [_storesFor] is the location they were fetched for; moving re-fetches.
+  List<_MapStore>? _stores;
+  String? _storesFor;
+  bool _storesLoading = false;
+  String? _storesError;
+
+  Future<void> _loadStores() async {
+    final at = '$_customerLat,$_customerLng';
+    setState(() {
+      _storesFor = at;
+      _storesLoading = true;
+      _storesError = null;
+    });
     try {
-      final api = ApiService();
-      final res = await api.post(ApiConfig.walletTopup, data: {'amount': amount});
-      if (res.data['success'] == true) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Wallet topped up successfully!'), behavior: SnackBarBehavior.floating),
-          );
-          final wb = res.data['walletBalance'];
-          if (wb != null) {
-            context.read<AuthBloc>().add(AuthWalletBalanceUpdated(walletBalance: (wb as num).toDouble()));
-          }
-          context.read<AuthBloc>().add(CheckAuthRequested());
-        }
-      } else {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(res.data['message'] ?? 'Top up failed'), backgroundColor: AppColors.error),
-          );
-        }
-      }
+      final res = await ApiService().get(ApiConfig.stores, queryParams: {'lat': _customerLat, 'lng': _customerLng});
+      final list = (res.data['data'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map((m) => _MapStore.fromJson(Map<String, dynamic>.from(m)))
+          .toList();
+      if (!mounted || _storesFor != at) return;
+      setState(() {
+        _stores = list;
+        _storesLoading = false;
+      });
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Network error. Try again.'), backgroundColor: AppColors.error),
-        );
-      }
+      if (!mounted || _storesFor != at) return;
+      setState(() {
+        _storesLoading = false;
+        _storesError = ApiService.getErrorMessage(e);
+      });
     }
   }
 
-  Widget _buildExploreTab() {
-    return BlocBuilder<CustomerProductBloc, CustomerProductState>(
-      builder: (context, state) {
-        if (state is CustomerProductLoaded) {
-          // Extract unique vendors from products
-          final Map<int, MapMarkerData> vendorMarkers = {};
-          
-          for (var p in state.products) {
-            if (p.vendorLat != null && p.vendorLng != null) {
-              vendorMarkers[p.vendorId] = MapMarkerData(
-                position: LatLng(p.vendorLat!, p.vendorLng!),
-                label: p.storeName ?? 'Store',
-                icon: Icons.store,
-                color: AppColors.secondary,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => StoreScreen(vendorId: p.vendorId, storeName: p.storeName ?? 'Store'),
-                  ),
-                ),
-              );
-            }
-          }
-
-          final List<MapMarkerData> markers = [];
-          markers.add(
-            MapMarkerData(
-              position: LatLng(_customerLat, _customerLng),
-              label: 'You are here',
-              icon: Icons.person_pin_circle,
-              color: AppColors.primary,
+  Widget _storeMatchCard(_MapStore st) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () => _openStore(st),
+      child: Container(
+        width: 230,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 20,
+              backgroundColor: AppColors.secondary.withValues(alpha: 0.1),
+              child: const Icon(Icons.storefront, color: AppColors.secondary),
             ),
-          );
-          for (var marker in vendorMarkers.values) {
-            markers.add(marker);
-          }
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(st.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600)),
+                  Text(_storeSubtitle(st),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          color: st.deliversToYou == false ? Colors.orange.shade900 : AppColors.textSecondary)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-          return Stack(
-            children: [
-              Positioned.fill(
-                child: MapPickerWidget(
-                  initialCenter: LatLng(_customerLat, _customerLng),
-                  initialZoom: 13.0,
-                  interactive: false,
-                  height: double.infinity,
-                  markers: markers,
-                ),
-              ),
-              Positioned(
-                top: 16,
-                left: 16,
-                right: 16,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.9),
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 8)],
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.map, color: AppColors.secondary),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Explore Nearby Vendors',
-                          style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
-                        ),
+  /// "2.9 km · 30 products" (+ "pickup only" beyond the delivery radius)
+  String _storeSubtitle(_MapStore st) {
+    final parts = <String>[
+      if (st.distanceKm != null) '${st.distanceKm!.toStringAsFixed(1)} km',
+      '${st.productCount} products',
+      if (st.deliversToYou == false) 'pickup only',
+    ];
+    return parts.join(' · ');
+  }
+
+  /// Explore map search: filters the pins by store name or area
+  final _exploreSearch = TextEditingController();
+
+  List<_MapStore> _exploreMatches(List<_MapStore> stores) {
+    final q = _exploreSearch.text.trim().toLowerCase();
+    if (q.isEmpty) return stores;
+    return stores
+        .where((st) => st.name.toLowerCase().contains(q) || (st.address ?? '').toLowerCase().contains(q))
+        .toList();
+  }
+
+  Widget _buildExploreTab() {
+    // Fetch on first build and whenever the customer's location changes
+    if (_storesFor != '$_customerLat,$_customerLng' && !_storesLoading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadStores();
+      });
+    }
+    final searching = _exploreSearch.text.trim().isNotEmpty;
+    final stores = _exploreMatches(_stores ?? const <_MapStore>[]);
+    final delivering = stores.where((st) => st.deliversToYou != false).length;
+
+    final markers = <MapMarkerData>[
+      MapMarkerData(
+        position: LatLng(_customerLat, _customerLng),
+        label: 'You are here',
+        icon: Icons.person_pin_circle,
+        color: AppColors.primary,
+      ),
+      for (final st in stores)
+        MapMarkerData(
+          position: LatLng(st.lat, st.lng),
+          label: '${st.name} · ${st.productCount} products${st.deliversToYou == false ? ' · pickup only' : ''}',
+          icon: Icons.store,
+          color: st.deliversToYou == false ? AppColors.textLight : AppColors.secondary,
+          onTap: () => _openStore(st),
+        ),
+    ];
+
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: MapPickerWidget(
+            // The key re-centres the map when the customer moves
+            key: ValueKey('$_customerLat,$_customerLng'),
+            initialCenter: LatLng(_customerLat, _customerLng),
+            initialZoom: 13.0,
+            interactive: false,
+            height: double.infinity,
+            markers: markers,
+          ),
+        ),
+        Positioned(
+          top: 12,
+          left: 12,
+          // Leaves the map's zoom buttons (top-right) uncovered
+          right: 64,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 12, offset: const Offset(0, 3))],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppColors.secondary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      Text('${vendorMarkers.length} found', style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
-                    ],
+                      child: const Icon(Icons.map_outlined, size: 20, color: AppColors.secondary),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Explore Nearby Vendors',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                          Text(
+                            _storesLoading
+                                ? 'Finding stores near you…'
+                                : _storesError != null
+                                    ? "Couldn't load stores"
+                                    : '${stores.length} stores · $delivering deliver to you',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.poppins(
+                                fontSize: 12, color: _storesError != null ? AppColors.error : AppColors.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_storesLoading)
+                      const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    else if (_storesError != null)
+                      TextButton(onPressed: _loadStores, child: const Text('Retry')),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _exploreSearch,
+                  textInputAction: TextInputAction.search,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: 'Search stores by name or area',
+                    prefixIcon: const Icon(Icons.search, size: 20, color: AppColors.textLight),
+                    suffixIcon: searching
+                        ? IconButton(
+                            tooltip: 'Clear search',
+                            icon: const Icon(Icons.close, size: 18, color: AppColors.textLight),
+                            onPressed: () => setState(_exploreSearch.clear),
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: Colors.grey.shade200),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: Colors.grey.shade200),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   ),
                 ),
-              ),
-            ],
-          );
-        }
-        
-        return const Center(child: CircularProgressIndicator());
-      },
+                if (searching) ...[
+                  const SizedBox(height: 6),
+                  if (stores.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text('No stores match "${_exploreSearch.text.trim()}"',
+                          style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                    )
+                  else
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 230),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        padding: EdgeInsets.zero,
+                        itemCount: stores.length,
+                        itemBuilder: (context, i) {
+                          final st = stores[i];
+                          return ListTile(
+                            dense: true,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                            leading: Icon(Icons.storefront,
+                                color: st.deliversToYou == false ? AppColors.textLight : AppColors.secondary),
+                            title: Text(st.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600)),
+                            subtitle: Text(_storeSubtitle(st),
+                                style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary)),
+                            trailing: const Icon(Icons.chevron_right, size: 18),
+                            onTap: () => _openStore(st),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1219,14 +1509,29 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.event_available_outlined, size: 56, color: Colors.grey.shade400),
-            const SizedBox(height: 16),
-            Text(label, style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600)),
+            Container(
+              width: 88,
+              height: 88,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.favorite_outline, size: 40, color: AppColors.primary),
+            ),
+            const SizedBox(height: 20),
+            Text(label, style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
             const SizedBox(height: 8),
             Text(
               'Saved products and local vendor events will appear here in a future update.',
               textAlign: TextAlign.center,
               style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 20),
+            OutlinedButton.icon(
+              onPressed: () => setState(() => _currentNavIndex = 0),
+              style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
+              icon: const Icon(Icons.storefront_outlined, size: 18),
+              label: const Text('Browse products'),
             ),
           ],
         ),
@@ -1247,4 +1552,31 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
       ],
     );
   }
+}
+
+/// A store pin on the Explore map
+class _MapStore {
+  final int id;
+  final String name;
+  final double lat;
+  final double lng;
+  final int productCount;
+  final double? distanceKm;
+  final String? address;
+
+  /// Within the max delivery distance of the customer (null when unknown)
+  final bool? deliversToYou;
+
+  const _MapStore({required this.id, required this.name, required this.lat, required this.lng, required this.productCount, this.distanceKm, this.address, this.deliversToYou});
+
+  factory _MapStore.fromJson(Map<String, dynamic> json) => _MapStore(
+        id: toInt(json['id']),
+        name: json['storeName'] ?? 'Store',
+        lat: toDouble(json['latitude']),
+        lng: toDouble(json['longitude']),
+        productCount: toInt(json['productCount']),
+        distanceKm: toDoubleOrNull(json['distanceKm']),
+        address: json['storeAddress'] as String?,
+        deliversToYou: json['deliversToYou'] is bool ? json['deliversToYou'] as bool : null,
+      );
 }

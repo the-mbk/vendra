@@ -1,13 +1,24 @@
 // ══════════════════════════════════════════════════════════════
-// Vendra App - Cart Screen
-// Delivery method, synced saved address/map location, checkout
+// Vendra App - Cart Screen (one store's cart)
+// Every order comes from one store, so each store has its own cart
+// (CartsScreen lists them). Delivery method, saved address/pin, checkout
+// - Stores farther than the max delivery distance (admin policy) offer
+//   self pickup only
 // - Delivery needs a map pin: the rider can only complete the delivery
 //   inside the geofence around it (FR04), so checkout sends lat/lng
-// - Delivery fee comes from GET /api/public-config (admin policy)
+// - Delivery fee depends on the distance from the store to the pin: the
+//   cart asks POST /api/customer/checkout/quote whenever the items, the pin
+//   or an admin policy change, and shows exactly what checkout will charge
 // - Live stock (FR01) flags lines the store can no longer fill
-// - 409 INSUFFICIENT_STOCK / 400 INSUFFICIENT_BALANCE explained clearly
+// - Pay from the wallet, or by card (shared CardPaymentFlow: card sheet →
+//   POST /api/payments/checkout → one-time password if asked)
+// - 409 INSUFFICIENT_STOCK / 400 INSUFFICIENT_BALANCE explained clearly;
+//   a card charged for an order that then couldn't be placed is explained
+//   (the money is in the wallet)
 // ══════════════════════════════════════════════════════════════
 
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -19,19 +30,36 @@ import 'package:vendra_customer/vendra_core.dart';
 import '../../../config/app_routes.dart';
 import '../../../core/models/cart_item_model.dart';
 import '../../../core/services/customer_location_storage.dart';
-import '../../../core/services/public_config_service.dart';
 import '../bloc/cart_bloc.dart';
 import '../bloc/checkout_bloc.dart';
 import '../bloc/order_bloc.dart';
 import '../../auth/bloc/auth_bloc.dart';
 import '../../auth/bloc/auth_event.dart';
 import '../../auth/bloc/auth_state.dart';
+import '../widgets/wallet_actions.dart';
+
+/// Opens one store's cart
+void openStoreCart(BuildContext context, int vendorId) {
+  Navigator.push(context, MaterialPageRoute(builder: (_) => CartScreen(vendorId: vendorId)));
+}
 
 class CartScreen extends StatefulWidget {
-  const CartScreen({super.key});
+  /// The store whose cart this is
+  final int vendorId;
+
+  const CartScreen({super.key, required this.vendorId});
 
   @override
   State<CartScreen> createState() => _CartScreenState();
+}
+
+/// The server's price for the cart as it is now
+class _CartQuote {
+  final double subtotal;
+  final double deliveryFee;
+  final double total;
+  final double distanceKm;
+  const _CartQuote(this.subtotal, this.deliveryFee, this.total, this.distanceKm);
 }
 
 class _CartScreenState extends State<CartScreen> {
@@ -46,25 +74,78 @@ class _CartScreenState extends State<CartScreen> {
   bool _hasPin = false;
   bool _prefsLoaded = false;
 
-  PublicConfig? _config;
-  bool _configFailed = false;
-
   bool get _isDelivery => _deliveryType == 'delivery';
+
+  /// wallet | card
+  String _paymentMethod = 'wallet';
+  bool get _payByCard => _paymentMethod == 'card';
+  bool get _cardAvailable => AppConfig.current.payments.isAvailable;
+
+  /// Quote for the current delivery cart; [_quoteKey] is the request it belongs to
+  _CartQuote? _quote;
+  String? _quoteKey;
+  bool _quoteLoading = false;
+  String? _quoteError;
+  Timer? _quoteDebounce;
 
   @override
   void initState() {
     super.initState();
     _loadSavedDeliveryPrefs();
     _loadConfig();
+    AppConfig.notifier.addListener(_onConfigChanged);
   }
 
-  Future<void> _loadConfig() async {
+  /// An admin changed a policy (fee rates, geofence…): redraw and re-quote
+  void _onConfigChanged() {
+    if (!mounted) return;
+    setState(() => _quoteKey = null);
+  }
+
+  /// Asks for a fresh quote when the delivery cart changed. Called while building,
+  /// so it only sets fields the rest of this build reads.
+  void _ensureQuote(CartState cart) {
+    if (!_isDelivery || !_hasPin || cart.items.isEmpty) return;
+    final body = {
+      'items': cart.items.map((i) => {'productId': i.product.id, 'quantity': i.quantity}).toList(),
+      'deliveryType': 'delivery',
+      'customerLat': _customerLat,
+      'customerLng': _customerLng,
+    };
+    final key = jsonEncode(body);
+    if (key == _quoteKey) return;
+    _quoteKey = key;
+    _quote = null;
+    _quoteError = null;
+    _quoteLoading = true;
+    _quoteDebounce?.cancel();
+    _quoteDebounce = Timer(const Duration(milliseconds: 300), () => _fetchQuote(key, body));
+  }
+
+  Future<void> _fetchQuote(String key, Map<String, dynamic> body) async {
     try {
-      final config = await PublicConfigService.load();
-      if (mounted) setState(() => _config = config);
-    } catch (_) {
-      if (mounted) setState(() => _configFailed = true);
+      final res = await ApiService().post(ApiConfig.checkoutQuote, data: body);
+      final d = Map<String, dynamic>.from(res.data['data'] as Map);
+      if (!mounted || key != _quoteKey) return;
+      setState(() {
+        _quote = _CartQuote(toDouble(d['subtotal']), toDouble(d['deliveryFee']), toDouble(d['total']), toDouble(d['distanceKm']));
+        _quoteLoading = false;
+      });
+    } catch (e) {
+      if (!mounted || key != _quoteKey) return;
+      setState(() {
+        _quoteLoading = false;
+        _quoteError = ApiService.getErrorMessage(e);
+      });
     }
+  }
+
+  /// Retries the startup config fetch if the backend was unreachable then
+  /// (fee rates and geofence are read live from AppConfig.current)
+  Future<void> _loadConfig() async {
+    if (AppConfig.current.fromServer) return;
+    await AppConfig.ensureLoaded();
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadSavedDeliveryPrefs() async {
@@ -91,6 +172,8 @@ class _CartScreenState extends State<CartScreen> {
 
   @override
   void dispose() {
+    AppConfig.notifier.removeListener(_onConfigChanged);
+    _quoteDebounce?.cancel();
     _addressController.dispose();
     _labelController.dispose();
     _checkoutBloc.close();
@@ -116,7 +199,37 @@ class _CartScreenState extends State<CartScreen> {
     return '~${km.toStringAsFixed(1)} km from the store';
   }
 
-  int get _geofence => _config?.geofenceMeters ?? 200;
+  int get _geofence => AppConfig.current.geofenceMeters;
+
+  /// Straight-line km from this store to the delivery pin (null without a pin or store location)
+  double? _storeKm(CartState cart) {
+    if (!_hasPin || cart.items.isEmpty) return null;
+    final p = cart.items.first.product;
+    if (p.vendorLat == null || p.vendorLng == null) return null;
+    return _haversineKm(_customerLat, _customerLng, p.vendorLat!, p.vendorLng!);
+  }
+
+  /// The store is beyond the max delivery distance from the pin
+  bool _outOfRange(CartState cart) {
+    final km = _storeKm(cart);
+    return km != null && !AppConfig.current.deliversAt(km);
+  }
+
+  String _rangeText(CartState cart) =>
+      '${_storeKm(cart)!.toStringAsFixed(1)} km from your pin · delivery up to ${AppConfig.current.maxDeliveryKm.toStringAsFixed(0)} km';
+
+  bool _rangeChecked = false;
+
+  /// On opening, a store out of delivery range starts on self pickup (once)
+  void _pickupIfTooFar(CartState cart) {
+    if (_rangeChecked || !_prefsLoaded || cart.isEmpty) return;
+    _rangeChecked = true;
+    if (_isDelivery && _outOfRange(cart)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _deliveryType = 'self_pickup');
+      });
+    }
+  }
 
   void _snack(String message, {bool error = false, SnackBarAction? action}) {
     ScaffoldMessenger.of(context)
@@ -227,10 +340,23 @@ class _CartScreenState extends State<CartScreen> {
     );
   }
 
-  /// null while the fee is loading (or failed to load)
-  double? get _deliveryFee => _isDelivery ? _config?.deliveryFee : 0;
+  /// null while the fee is unknown (no pin yet, quote loading or failed)
+  double? get _deliveryFee => _isDelivery ? _quote?.deliveryFee : 0;
 
-  String _money(double v) => 'Rs. ${v.toStringAsFixed(0)}';
+  /// What the fee depends on, from the admin policies
+  String get _feeRates {
+    final c = AppConfig.current;
+    if (!c.fromServer) return '';
+    return c.deliveryFeePerKm > 0 ? '${_money(c.deliveryFee)} + ${_money(c.deliveryFeePerKm)}/km' : _money(c.deliveryFee);
+  }
+
+  String _money(double v) => formatRupees(v.roundToDouble());
+
+  /// Subtotal + delivery fee, or null while the fee is unknown
+  double? _orderTotal(CartState cartState) {
+    final fee = _deliveryFee;
+    return fee == null ? null : cartState.totalAmount + fee;
+  }
 
   Future<void> _placeOrder(CartState cartState) async {
     if (cartState.hasStockProblems) {
@@ -242,19 +368,107 @@ class _CartScreenState extends State<CartScreen> {
       _openEditDeliverySheet();
       return;
     }
+    if (_isDelivery && _outOfRange(cartState)) {
+      _snack('${_rangeText(cartState)}. Choose self pickup instead.', error: true);
+      return;
+    }
     if (_isDelivery) await _persistDeliveryPrefs();
     if (!mounted) return;
 
     final addr = _isDelivery
         ? (_addressController.text.trim().isNotEmpty ? _addressController.text.trim() : _labelController.text.trim())
         : null;
-    _checkoutBloc.add(CheckoutRequested(
+    final request = CheckoutRequested(
       items: cartState.items,
       deliveryType: _deliveryType,
       deliveryAddress: addr,
       customerLat: _isDelivery ? _customerLat : null,
       customerLng: _isDelivery ? _customerLng : null,
-    ));
+    );
+    if (_payByCard) {
+      await _payWithCard(request, cartState);
+    } else {
+      _checkoutBloc.add(request);
+    }
+  }
+
+  /// Card checkout: the server checks the cart first, then charges the exact total
+  Future<void> _payWithCard(CheckoutRequested request, CartState cartState) async {
+    final total = _orderTotal(cartState);
+    final outcome = await CardPaymentFlow.run(
+      context,
+      title: 'Pay by card',
+      subtitle: 'The total is held in escrow until '
+          '${_isDelivery ? 'your order is delivered' : 'you collect your order'}.',
+      actionLabel: total != null ? 'Pay ${formatRupees(total)}' : 'Pay',
+      submit: (token) => ApiService().post(ApiConfig.paymentsCheckout, data: {...request.toBody(), 'token': token}),
+    );
+    if (mounted) _checkoutBloc.add(CardCheckoutCompleted(outcome));
+  }
+
+  /// Wallet too low: pay this order by card instead, or add money first
+  Future<void> _offerCardOrTopUp(String message, CartState cartState) async {
+    final total = _orderTotal(cartState);
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Not enough in your wallet', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        content: Text(
+          '$message\n\nPay ${total != null ? formatRupees(total) : 'the total'} by card instead, or add money to your wallet first.',
+          style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'topup'), child: const Text('Add money')),
+          if (_cardAvailable)
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, 'card'),
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+              child: const Text('Pay by card'),
+            ),
+        ],
+      ),
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'card') {
+      setState(() => _paymentMethod = 'card');
+      await _placeOrder(cartState);
+    } else {
+      final auth = context.read<AuthBloc>().state;
+      final balance = auth is Authenticated ? auth.user.walletBalance : 0.0;
+      final result = await startCardTopUp(context, suggestedAmount: total != null ? total - balance : null);
+      if (result != null && mounted) _snack(result.message, error: !result.success);
+    }
+  }
+
+  /// The card was charged but the order couldn't be placed — explain where the money is
+  Future<void> _explainPaidNotPlaced(CheckoutPaidNotPlaced state) {
+    return showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        icon: const Icon(Icons.account_balance_wallet_outlined, color: AppColors.reservedAmber, size: 36),
+        title: Text("Your order couldn't be placed",
+            textAlign: TextAlign.center, style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 17)),
+        content: Text(
+          '${state.reason}\n\nThe ${formatRupees(state.amount)} charged to ${state.cardLabel} is safe in your '
+          'Vendra wallet. Update your cart and pay from the wallet, or withdraw it back to a card.',
+          textAlign: TextAlign.center,
+          style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.pushNamed(context, AppRoutes.wallet);
+            },
+            child: const Text('Open wallet'),
+          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Back to cart')),
+        ],
+      ),
+    );
   }
 
   void _onCheckoutState(BuildContext context, CheckoutState state) {
@@ -262,9 +476,22 @@ class _CartScreenState extends State<CartScreen> {
       if (state.walletBalance != null) {
         context.read<AuthBloc>().add(AuthWalletBalanceUpdated(walletBalance: state.walletBalance!));
       }
-      context.read<OrderBloc>().add(const FetchCustomerOrders(silent: true));
-      context.read<CartBloc>().add(ClearCart());
+      context.read<OrderBloc>().add(const FetchCustomerOrders(silent: true, scope: OrderScope.active));
+      context.read<CartBloc>().add(ClearStoreCart(vendorId: widget.vendorId));
+      if (state.paidWith != null) _snack('Paid with ${state.paidWith}');
       Navigator.pushReplacementNamed(context, AppRoutes.orderConfirmation, arguments: state.order);
+    } else if (state is CheckoutPaidNotPlaced) {
+      if (state.walletBalance != null) {
+        context.read<AuthBloc>().add(AuthWalletBalanceUpdated(walletBalance: state.walletBalance!));
+      }
+      // The money is already in the wallet: pay from there next time
+      setState(() => _paymentMethod = 'wallet');
+      _explainPaidNotPlaced(state);
+    } else if (state is CheckoutFailure && state.isOrderPlacedElsewhere) {
+      context.read<OrderBloc>().add(const FetchCustomerOrders(silent: true, scope: OrderScope.active));
+      context.read<CartBloc>().add(ClearStoreCart(vendorId: widget.vendorId));
+      _snack(state.message);
+      Navigator.pushReplacementNamed(context, AppRoutes.customerOrders);
     } else if (state is CheckoutFailure) {
       if (state.isStockProblem && state.productId != null) {
         // Someone else bought it first — reflect the real stock in the cart
@@ -279,15 +506,7 @@ class _CartScreenState extends State<CartScreen> {
           error: true,
         );
       } else if (state.isBalanceProblem) {
-        _snack(
-          state.message,
-          error: true,
-          action: SnackBarAction(
-            label: 'TOP UP',
-            textColor: Colors.white,
-            onPressed: () => Navigator.pushNamed(context, AppRoutes.wallet),
-          ),
-        );
+        _offerCardOrTopUp(state.message, context.read<CartBloc>().state.forStore(widget.vendorId));
       } else {
         _snack(state.message, error: true);
       }
@@ -299,14 +518,22 @@ class _CartScreenState extends State<CartScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: Text('My Cart', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        title: BlocBuilder<CartBloc, CartState>(
+          builder: (context, cart) {
+            final store = cart.forStore(widget.vendorId);
+            final name = store.isEmpty ? 'Cart' : store.stores.first.storeName;
+            return Text(name, style: GoogleFonts.poppins(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis);
+          },
+        ),
       ),
       body: BlocConsumer<CheckoutBloc, CheckoutState>(
         bloc: _checkoutBloc,
         listener: _onCheckoutState,
         builder: (context, checkoutState) {
           return BlocBuilder<CartBloc, CartState>(
-            builder: (context, cartState) {
+            builder: (context, allCarts) {
+              final cartState = allCarts.forStore(widget.vendorId);
+              _pickupIfTooFar(cartState);
               if (cartState.isEmpty) {
                 return Center(
                   child: Column(
@@ -314,7 +541,7 @@ class _CartScreenState extends State<CartScreen> {
                     children: [
                       Icon(Icons.shopping_cart_outlined, size: 80, color: Colors.grey.shade300),
                       const SizedBox(height: 16),
-                      Text('Your cart is empty', style: GoogleFonts.poppins(fontSize: 18, color: AppColors.textSecondary)),
+                      Text('This cart is empty', style: GoogleFonts.poppins(fontSize: 18, color: AppColors.textSecondary)),
                       const SizedBox(height: 8),
                       Text('Browse products and add them to cart', style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textLight)),
                     ],
@@ -334,6 +561,8 @@ class _CartScreenState extends State<CartScreen> {
                               ...cartState.items.map(_cartItemCard),
                               const SizedBox(height: 8),
                               _deliveryMethodCard(cartState),
+                              const SizedBox(height: 8),
+                              _paymentMethodCard(),
                               const SizedBox(height: 8),
                               _escrowNotice(),
                             ],
@@ -478,6 +707,7 @@ class _CartScreenState extends State<CartScreen> {
 
   Widget _deliveryMethodCard(CartState cartState) {
     final distanceSubtitle = _deliveryDistanceSubtitle(cartState.items);
+    final tooFar = _outOfRange(cartState);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -490,15 +720,17 @@ class _CartScreenState extends State<CartScreen> {
         children: [
           Text('Delivery method', style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600)),
           const SizedBox(height: 12),
-          Row(
+          IntrinsicHeight(
+            child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
                 child: _deliveryOption(
                   icon: Icons.delivery_dining,
                   label: 'Home Delivery',
-                  subtitle: _config != null
-                      ? 'A rider brings it to your pin • ${_money(_config!.deliveryFee)}'
-                      : 'A rider brings it to your pin',
+                  subtitle: tooFar
+                      ? 'Too far for delivery'
+                      : (_feeRates.isNotEmpty ? 'A rider brings it to your pin • $_feeRates' : 'A rider brings it to your pin'),
                   value: 'delivery',
                 ),
               ),
@@ -513,6 +745,26 @@ class _CartScreenState extends State<CartScreen> {
               ),
             ],
           ),
+          ),
+          if (tooFar) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(10)),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 18, color: Colors.orange.shade800),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${_rangeText(cartState)}. Choose self pickup, or move your pin closer.',
+                      style: GoogleFonts.poppins(fontSize: 12, color: Colors.orange.shade900),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           if (_isDelivery) ...[
             Row(
@@ -607,6 +859,52 @@ class _CartScreenState extends State<CartScreen> {
     );
   }
 
+  Widget _paymentMethodCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Payment method', style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          IntrinsicHeight(
+            child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: BlocBuilder<AuthBloc, AuthState>(
+                  builder: (context, auth) => _choiceOption(
+                    icon: Icons.account_balance_wallet_outlined,
+                    label: 'Wallet',
+                    subtitle: auth is Authenticated ? '${_money(auth.user.walletBalance)} available' : 'Vendra balance',
+                    selected: !_payByCard,
+                    onTap: () => setState(() => _paymentMethod = 'wallet'),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _choiceOption(
+                  icon: Icons.credit_card,
+                  label: 'Card',
+                  subtitle: _cardAvailable ? 'Visa / Mastercard' : 'Unavailable right now',
+                  selected: _payByCard,
+                  onTap: _cardAvailable ? () => setState(() => _paymentMethod = 'card') : null,
+                ),
+              ),
+            ],
+          ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _pinRequiredNotice() {
     return InkWell(
       onTap: _openEditDeliverySheet,
@@ -662,12 +960,13 @@ class _CartScreenState extends State<CartScreen> {
               children: [
                 Text(
                   'Escrow Payment',
-                  style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.amber.shade800),
+                  style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF8A5A00)),
                 ),
                 Text(
-                  'The total moves from your wallet into escrow now. The store is paid only after '
+                  '${_payByCard ? 'Your card is charged the total now and it is held in escrow.' : 'The total moves from your wallet into escrow now.'} '
+                  'The store is paid only after '
                   '${_isDelivery ? 'the rider delivers' : 'you confirm pickup'} and the dispute window closes.',
-                  style: GoogleFonts.poppins(fontSize: 11, color: Colors.amber.shade700),
+                  style: GoogleFonts.poppins(fontSize: 11, height: 1.4, color: const Color(0xFF6D4C00)),
                 ),
               ],
             ),
@@ -678,9 +977,15 @@ class _CartScreenState extends State<CartScreen> {
   }
 
   Widget _totalsPanel(CartState cartState, bool submitting) {
-    final subtotal = cartState.totalAmount;
+    _ensureQuote(cartState);
+    // The quote is the server's price; until it arrives show the cart's own subtotal
+    final quote = _isDelivery ? _quote : null;
+    final subtotal = quote?.subtotal ?? cartState.totalAmount;
     final fee = _deliveryFee;
-    final total = fee == null ? null : subtotal + fee;
+    final total = quote?.total ?? (fee == null ? null : subtotal + fee);
+    final feeLabel = _isDelivery && quote != null
+        ? 'Delivery fee (${quote.distanceKm.toStringAsFixed(1)} km)'
+        : (_isDelivery ? 'Delivery fee' : 'Self pickup');
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -695,14 +1000,21 @@ class _CartScreenState extends State<CartScreen> {
             _totalRow('Subtotal', _money(subtotal)),
             const SizedBox(height: 4),
             _totalRow(
-              _isDelivery ? 'Delivery fee' : 'Self pickup',
+              feeLabel,
               !_isDelivery
                   ? 'Free'
                   : fee != null
                       ? _money(fee)
-                      : (_configFailed ? 'Added at checkout' : '…'),
+                      : !_hasPin
+                          ? 'Set your pin'
+                          : (_quoteLoading ? '…' : 'Added at checkout'),
               valueColor: _isDelivery ? AppColors.textPrimary : Colors.green,
             ),
+            if (_isDelivery && _quoteError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(_quoteError!, style: GoogleFonts.poppins(fontSize: 11, color: AppColors.error)),
+              ),
             const Divider(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -714,39 +1026,64 @@ class _CartScreenState extends State<CartScreen> {
                 ),
               ],
             ),
-            BlocBuilder<AuthBloc, AuthState>(
-              builder: (context, auth) {
-                if (auth is! Authenticated) return const SizedBox(height: 12);
-                final balance = auth.user.walletBalance;
-                final short = total != null && balance < total;
-                return InkWell(
-                  onTap: () => Navigator.pushNamed(context, AppRoutes.wallet),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Row(
-                      children: [
-                        Icon(Icons.account_balance_wallet_outlined,
-                            size: 16, color: short ? AppColors.error : AppColors.textSecondary),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            short
-                                ? 'Wallet has ${_money(balance)} — top up ${_money(total - balance)} more'
-                                : 'Paid from wallet · ${_money(balance)} available',
-                            style: GoogleFonts.poppins(fontSize: 12, color: short ? AppColors.error : AppColors.textSecondary),
-                          ),
-                        ),
-                        Text(short ? 'Top up' : 'View',
-                            style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.secondary)),
-                      ],
+            if (_payByCard)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.credit_card, size: 16, color: AppColors.textSecondary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Charged to your card · held in escrow until the order is complete',
+                        style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
+                      ),
                     ),
-                  ),
-                );
-              },
-            ),
+                  ],
+                ),
+              )
+            else
+              BlocBuilder<AuthBloc, AuthState>(
+                builder: (context, auth) {
+                  if (auth is! Authenticated) return const SizedBox(height: 12);
+                  final balance = auth.user.walletBalance;
+                  final short = total != null && balance < total;
+                  return InkWell(
+                    onTap: () => Navigator.pushNamed(context, AppRoutes.wallet),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Row(
+                        children: [
+                          Icon(Icons.account_balance_wallet_outlined,
+                              size: 16, color: short ? AppColors.error : AppColors.textSecondary),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              short
+                                  ? 'Wallet has ${_money(balance)} — add ${_money(total - balance)} more or pay by card'
+                                  : 'Paid from wallet · ${_money(balance)} available',
+                              style: GoogleFonts.poppins(fontSize: 12, color: short ? AppColors.error : AppColors.textSecondary),
+                            ),
+                          ),
+                          Text(short ? 'Add money' : 'View',
+                              style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.secondary)),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
             VendraButton(
-              text: _isDelivery && !_hasPin ? 'Set delivery pin' : 'Place Order',
-              icon: _isDelivery && !_hasPin ? Icons.pin_drop_outlined : Icons.arrow_forward,
+              text: _isDelivery && !_hasPin
+                  ? 'Set delivery pin'
+                  : _payByCard
+                      ? (total != null ? 'Pay ${_money(total)} by card' : 'Pay by card')
+                      : 'Place Order',
+              icon: _isDelivery && !_hasPin
+                  ? Icons.pin_drop_outlined
+                  : _payByCard
+                      ? Icons.lock_outline
+                      : Icons.arrow_forward,
               isLoading: submitting,
               onPressed: () => _placeOrder(cartState),
             ),
@@ -772,38 +1109,59 @@ class _CartScreenState extends State<CartScreen> {
     required String subtitle,
     required String value,
   }) {
-    final isSelected = _deliveryType == value;
-    return GestureDetector(
+    return _choiceOption(
+      icon: icon,
+      label: label,
+      subtitle: subtitle,
+      selected: _deliveryType == value,
       onTap: () => setState(() => _deliveryType = value),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary.withValues(alpha: 0.08) : Colors.grey.shade50,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSelected ? AppColors.primary : Colors.grey.shade200,
-            width: isSelected ? 2 : 1,
+    );
+  }
+
+  /// A selectable tile (delivery method, payment method); [onTap] null = disabled
+  Widget _choiceOption({
+    required IconData icon,
+    required String label,
+    required String subtitle,
+    required bool selected,
+    required VoidCallback? onTap,
+  }) {
+    final isSelected = selected;
+    return GestureDetector(
+      onTap: onTap,
+      child: Opacity(
+        opacity: onTap == null ? 0.5 : 1,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: isSelected ? AppColors.primary.withValues(alpha: 0.08) : Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected ? AppColors.primary : Colors.grey.shade200,
+              width: isSelected ? 2 : 1,
+            ),
           ),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, size: 28, color: isSelected ? AppColors.primary : AppColors.textSecondary),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: GoogleFonts.poppins(
-                fontSize: 12,
-                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                color: isSelected ? AppColors.primary : AppColors.textPrimary,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 28, color: isSelected ? AppColors.primary : AppColors.textSecondary),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  color: isSelected ? AppColors.primary : AppColors.textPrimary,
+                ),
               ),
-            ),
-            Text(
-              subtitle,
-              style: GoogleFonts.poppins(fontSize: 9, color: AppColors.textSecondary),
-              textAlign: TextAlign.center,
-            ),
-          ],
+              Text(
+                subtitle,
+                style: GoogleFonts.poppins(fontSize: 10, height: 1.3, color: AppColors.textSecondary),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
         ),
       ),
     );

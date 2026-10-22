@@ -140,6 +140,19 @@ export async function disapproveVendor(vendorId) {
   return apiFetch(`/admin/vendors/${vendorId}/disapprove`, { method: "PUT" });
 }
 
+/** Moves the store to its requested location (409 if nothing is pending) */
+export async function approveVendorLocation(vendorId) {
+  return apiFetch(`/admin/vendors/${vendorId}/location/approve`, { method: "PUT" });
+}
+
+/** Clears the requested location; the vendor is notified with `reason` (required, max 300 chars) */
+export async function rejectVendorLocation(vendorId, reason) {
+  return apiFetch(`/admin/vendors/${vendorId}/location/reject`, {
+    method: "PUT",
+    body: JSON.stringify({ reason }),
+  });
+}
+
 export async function getOrders() {
   return apiFetch("/admin/orders");
 }
@@ -202,6 +215,46 @@ export async function getRiders() {
 
 export async function getFinance() {
   return apiFetch("/admin/finance");
+}
+
+// ── Card payments, withdrawals & gateway reconciliation ──
+/** Does the money held at the payment gateway match the books? Always fresh. */
+export async function getReconciliation() {
+  return apiFetch("/admin/finance/reconciliation", { cache: "no-store" });
+}
+
+function pagedQuery({ status, search, limit = 50, offset = 0 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (status) params.set("status", status);
+  const term = typeof search === "string" ? search.trim() : "";
+  if (term) params.set("search", term);
+  return params.toString();
+}
+
+/** Paged: { data, meta: { hasMore, nextOffset } }. `search` matches user name/email, gateway id, order number or card last 4. */
+export async function getPayments(options) {
+  return apiFetch(`/admin/payments?${pagedQuery(options)}`, { cache: "no-store" });
+}
+
+/** Paged: { data, meta: { hasMore, nextOffset } }. `search` matches user name/email, payout id or card last 4. */
+export async function getWithdrawals(options) {
+  return apiFetch(`/admin/withdrawals?${pagedQuery(options)}`, { cache: "no-store" });
+}
+
+// ── Public config (mode, feature flags, demo accounts, gateway URL) ──
+// Read once per page load and shared by every caller.
+let publicConfigPromise = null;
+
+export function getPublicConfig() {
+  if (!publicConfigPromise) {
+    publicConfigPromise = apiFetch("/public-config?role=admin")
+      .then((res) => res.data || {})
+      .catch((err) => {
+        publicConfigPromise = null; // allow a retry on the next call
+        throw err;
+      });
+  }
+  return publicConfigPromise;
 }
 
 /**

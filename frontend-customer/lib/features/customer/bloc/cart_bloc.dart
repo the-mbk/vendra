@@ -1,6 +1,8 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra App - Cart BLoC (Local State)
-// Manages shopping cart without server persistence.
+// Manages shopping carts without server persistence. Every order comes from
+// one store, so items are grouped into a separate cart per store
+// (CartState.stores / forStore); checking one out clears only that store.
 // Listens to realtime public stock (FR01) so cart lines show when a
 // product sold out or dropped below the requested quantity.
 // ══════════════════════════════════════════════════════════════
@@ -43,6 +45,14 @@ class UpdateCartQuantity extends CartEvent {
 
 class ClearCart extends CartEvent {}
 
+/// Empties one store's cart (after its order is placed, or when the customer removes it)
+class ClearStoreCart extends CartEvent {
+  final int vendorId;
+  const ClearStoreCart({required this.vendorId});
+  @override
+  List<Object?> get props => [vendorId];
+}
+
 /// Latest public stock for a product (realtime event or a 409 INSUFFICIENT_STOCK reply)
 class CartStockChanged extends CartEvent {
   final int productId;
@@ -53,6 +63,23 @@ class CartStockChanged extends CartEvent {
 }
 
 // ── State ──
+
+/// The items from one store, checked out together as one order
+class StoreCart {
+  final int vendorId;
+  final List<CartItemModel> items;
+  const StoreCart(this.vendorId, this.items);
+
+  ProductModel get _first => items.first.product;
+  String get storeName => _first.storeName ?? 'Store';
+  String? get storeAddress => _first.storeAddress;
+  double? get storeLat => _first.vendorLat;
+  double? get storeLng => _first.vendorLng;
+  int get totalItems => items.fold(0, (sum, item) => sum + item.quantity);
+  double get totalAmount => items.fold(0, (sum, item) => sum + item.total);
+  bool get hasStockProblems => items.any((item) => item.exceedsStock);
+}
+
 class CartState extends Equatable {
   final List<CartItemModel> items;
 
@@ -75,6 +102,19 @@ class CartState extends Equatable {
   /// Any line asking for more than the store can currently sell
   bool get hasStockProblems => items.any((item) => item.exceedsStock);
 
+  /// One cart per store, in the order the stores were first added
+  List<StoreCart> get stores {
+    final byStore = <int, List<CartItemModel>>{};
+    for (final item in items) {
+      byStore.putIfAbsent(item.product.vendorId, () => []).add(item);
+    }
+    return [for (final e in byStore.entries) StoreCart(e.key, e.value)];
+  }
+
+  /// Just this store's items, as a cart of its own
+  CartState forStore(int vendorId) =>
+      CartState(items: items.where((i) => i.product.vendorId == vendorId).toList());
+
   @override
   List<Object?> get props => [items];
 }
@@ -88,6 +128,7 @@ class CartBloc extends Bloc<CartEvent, CartState> {
     on<RemoveFromCart>(_onRemove);
     on<UpdateCartQuantity>(_onUpdateQuantity);
     on<ClearCart>(_onClear);
+    on<ClearStoreCart>(_onClearStore);
     on<CartStockChanged>(_onStockChanged);
 
     _stockSub = RealtimeService().stockUpdates.listen((e) {
@@ -149,5 +190,9 @@ class CartBloc extends Bloc<CartEvent, CartState> {
 
   void _onClear(ClearCart event, Emitter<CartState> emit) {
     emit(const CartState());
+  }
+
+  void _onClearStore(ClearStoreCart event, Emitter<CartState> emit) {
+    emit(CartState(items: state.items.where((i) => i.product.vendorId != event.vendorId).toList()));
   }
 }

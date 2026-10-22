@@ -236,7 +236,8 @@ class _PosScreenState extends State<PosScreen> {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Walk-in POS', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600)),
+                    Text('Walk-in POS',
+                        style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                     Text(store,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
@@ -356,6 +357,7 @@ class _PosScreenState extends State<PosScreen> {
                   ],
                 ),
               ),
+            const _StockLegend(),
             Expanded(child: _buildProductGrid(context, productBloc, productState, visible)),
           ],
         );
@@ -403,10 +405,10 @@ class _PosScreenState extends State<PosScreen> {
       builder: (context, pos) => RefreshIndicator(
         onRefresh: () async => _refreshStock(),
         child: GridView.builder(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
           gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
             maxCrossAxisExtent: 260,
-            mainAxisExtent: 160,
+            mainAxisExtent: 168,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
           ),
@@ -471,7 +473,8 @@ class _PosProductTile extends StatelessWidget {
                       product.name,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500, height: 1.3),
+                      style: GoogleFonts.poppins(
+                          fontSize: 13, fontWeight: FontWeight.w600, height: 1.3, color: AppColors.textPrimary),
                     ),
                   ),
                   if (inSale > 0)
@@ -491,15 +494,23 @@ class _PosProductTile extends StatelessWidget {
                     child: Text(_rs(product.price),
                         style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.primary)),
                   ),
-                  Container(
-                    width: 30,
-                    height: 30,
-                    decoration: BoxDecoration(
-                      color: soldOut ? Colors.grey.shade400 : AppColors.secondary,
-                      shape: BoxShape.circle,
+                  if (soldOut)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.stockRed.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text('Sold out',
+                          style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.stockRed)),
+                    )
+                  else
+                    Container(
+                      width: 30,
+                      height: 30,
+                      decoration: const BoxDecoration(color: AppColors.secondary, shape: BoxShape.circle),
+                      child: const Icon(Icons.add, color: Colors.white, size: 18),
                     ),
-                    child: const Icon(Icons.add, color: Colors.white, size: 18),
-                  ),
                 ],
               ),
               const SizedBox(height: 6),
@@ -507,7 +518,12 @@ class _PosProductTile extends StatelessWidget {
                 children: [
                   _StockPill(label: 'Private', value: product.privateStock, color: AppColors.secondary),
                   const SizedBox(width: 4),
-                  _StockPill(label: 'Reserved', value: product.reservedQuantity, color: AppColors.reservedAmber),
+                  _StockPill(
+                    label: 'Reserved',
+                    value: product.reservedQuantity,
+                    color: AppColors.reservedAmber,
+                    highlight: product.reservedQuantity > 0,
+                  ),
                   const SizedBox(width: 4),
                   _StockPill(
                     label: 'Sellable',
@@ -528,20 +544,81 @@ class _StockPill extends StatelessWidget {
   final String label;
   final int value;
   final Color color;
-  const _StockPill({required this.label, required this.value, required this.color});
+  /// Filled background, e.g. units locked by online orders right now
+  final bool highlight;
+  const _StockPill({required this.label, required this.value, required this.color, this.highlight = false});
 
   @override
   Widget build(BuildContext context) {
+    final fg = highlight ? Colors.white : color;
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 3),
-        decoration: BoxDecoration(color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(6)),
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        decoration: BoxDecoration(
+          color: highlight ? color : color.withValues(alpha: 0.09),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: color.withValues(alpha: highlight ? 1 : 0.25)),
+        ),
         child: Column(
           children: [
-            Text('$value', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w700, color: color, height: 1.2)),
-            Text(label, style: GoogleFonts.poppins(fontSize: 9, color: color, height: 1.2)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (highlight) ...[
+                  Icon(Icons.lock, size: 10, color: fg),
+                  const SizedBox(width: 2),
+                ],
+                Text('$value',
+                    style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w700, color: fg, height: 1.15)),
+              ],
+            ),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(label,
+                  style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w500, color: fg, height: 1.2)),
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// One-line key for the three stock numbers on every POS tile
+class _StockLegend extends StatelessWidget {
+  const _StockLegend();
+
+  Widget _item(Color color, String label, String meaning) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 4),
+        Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(text: label, style: const TextStyle(fontWeight: FontWeight.w600)),
+              TextSpan(text: ' $meaning'),
+            ],
+          ),
+          style: GoogleFonts.poppins(fontSize: 10.5, color: AppColors.textSecondary),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 6),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 2,
+        children: [
+          _item(AppColors.secondary, 'Private', 'on hand'),
+          _item(AppColors.reservedAmber, 'Reserved', 'for online orders'),
+          _item(AppColors.stockGreen, 'Sellable', 'at the counter'),
+        ],
       ),
     );
   }
@@ -783,10 +860,10 @@ class _SaleLineRow extends StatelessWidget {
             child: Text(
               overLimit
                   ? 'Only ${product!.sellableInStore} sellable — ${product!.reservedQuantity} reserved for online orders'
-                  : 'Sellable ${product!.sellableInStore} · Reserved ${product!.reservedQuantity}',
+                  : 'Private ${product!.privateStock} · Reserved ${product!.reservedQuantity} · Sellable ${product!.sellableInStore}',
               style: GoogleFonts.poppins(
                 fontSize: 11,
-                color: overLimit ? AppColors.reservedAmber : AppColors.textLight,
+                color: overLimit ? AppColors.reservedAmber : AppColors.textSecondary,
                 fontWeight: overLimit ? FontWeight.w600 : FontWeight.w400,
               ),
             ),

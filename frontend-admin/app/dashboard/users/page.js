@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { getUsers, resetUserPassword, isAuthError } from "../../lib/api";
-import { Spinner } from "../../lib/ui";
+import { Spinner, SearchBox, NoSearchResults, matchesSearch } from "../../lib/ui";
 
 const roleConfig = {
   admin: { label: "Admin", color: "bg-purple-100 text-purple-700", icon: "admin_panel_settings" },
@@ -108,6 +108,7 @@ export default function UsersPage() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [roleFilter, setRoleFilter] = useState("all");
+  const [search, setSearch] = useState("");
   const [confirmResetId, setConfirmResetId] = useState(null);
   const [resettingId, setResettingId] = useState(null);
   const [resetResult, setResetResult] = useState(null); // { name, email, password }
@@ -160,7 +161,10 @@ export default function UsersPage() {
     );
   }
 
-  const filteredUsers = roleFilter === "all" ? users : users.filter((u) => u.role === roleFilter);
+  const roleUsers = roleFilter === "all" ? users : users.filter((u) => u.role === roleFilter);
+  const filteredUsers = roleUsers.filter((u) =>
+    matchesSearch(search, u.fullName, u.email, u.phone, u.role, roleConfig[u.role]?.label, u.storeName)
+  );
 
   // Role counts
   const roleCounts = users.reduce((acc, u) => { acc[u.role] = (acc[u.role] || 0) + 1; return acc; }, {});
@@ -171,7 +175,7 @@ export default function UsersPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-on-surface">User Management</h1>
-          <p className="text-on-surface-variant text-sm mt-1">{users.length} total users on the platform</p>
+          <p className="text-on-surface-variant text-sm mt-1">{users.length.toLocaleString("en-PK")} total users on the platform</p>
         </div>
       </div>
 
@@ -211,23 +215,34 @@ export default function UsersPage() {
               }`}>{config.icon}</span>
               <span className="text-xs font-semibold text-on-surface-variant uppercase">{config.label}s</span>
             </div>
-            <p className="text-2xl font-bold text-on-surface">{roleCounts[role] || 0}</p>
+            <p className="text-2xl font-bold text-on-surface">{(roleCounts[role] || 0).toLocaleString("en-PK")}</p>
           </button>
         ))}
+      </div>
+
+      {/* Search */}
+      <div className="flex justify-end mb-4">
+        <SearchBox
+          value={search}
+          onChange={setSearch}
+          placeholder="Search name, email, phone, role or store"
+          count={filteredUsers.length}
+          total={roleUsers.length}
+        />
       </div>
 
       {/* Users Table */}
       <div className="bg-white rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full sticky-actions">
             <thead>
               <tr className="bg-surface-container-low/50 border-b border-outline-variant/20">
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">User</th>
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Role</th>
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Phone</th>
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Store</th>
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Joined</th>
-                <th className="text-right px-5 py-3.5 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Actions</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-on-surface-variant uppercase tracking-wider whitespace-nowrap">User</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-on-surface-variant uppercase tracking-wider whitespace-nowrap">Role</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-on-surface-variant uppercase tracking-wider whitespace-nowrap">Phone</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-on-surface-variant uppercase tracking-wider whitespace-nowrap">Store</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-on-surface-variant uppercase tracking-wider whitespace-nowrap">Joined</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-on-surface-variant uppercase tracking-wider whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/10">
@@ -235,32 +250,32 @@ export default function UsersPage() {
                 const config = roleConfig[user.role] || roleConfig.customer;
                 return (
                   <tr key={user.id} className="hover:bg-surface-container-low/30 transition-colors">
-                    <td className="px-5 py-4">
+                    <td className="px-4 py-3.5">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center shrink-0">
                           <span className="text-primary font-bold text-sm">
                             {user.fullName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
                           </span>
                         </div>
-                        <div>
-                          <p className="text-sm font-semibold text-on-surface">{user.fullName}</p>
-                          <p className="text-xs text-outline">{user.email}</p>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-on-surface truncate">{user.fullName}</p>
+                          <p className="text-xs text-outline truncate" title={user.email}>{user.email}</p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-5 py-4">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${config.color}`}>
+                    <td className="px-4 py-3.5">
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${config.color}`}>
                         {config.label}
                       </span>
                     </td>
-                    <td className="px-5 py-4 text-sm text-on-surface">{user.phone || "—"}</td>
-                    <td className="px-5 py-4 text-sm text-on-surface">{user.storeName || "—"}</td>
-                    <td className="px-5 py-4 text-xs text-outline">
+                    <td className="px-4 py-3.5 text-sm text-on-surface whitespace-nowrap">{user.phone || "—"}</td>
+                    <td className="px-4 py-3.5 text-sm text-on-surface">{user.storeName || <span className="text-outline">—</span>}</td>
+                    <td className="px-4 py-3.5 text-xs text-outline whitespace-nowrap">
                       {new Date(user.createdAt).toLocaleDateString("en-PK", {
                         day: "numeric", month: "short", year: "numeric",
                       })}
                     </td>
-                    <td className="px-5 py-4 text-right whitespace-nowrap">
+                    <td className="px-4 py-3.5 text-right whitespace-nowrap">
                       {user.role === "admin" ? (
                         <span className="text-xs text-outline">—</span>
                       ) : resettingId === user.id ? (
@@ -299,8 +314,14 @@ export default function UsersPage() {
               {filteredUsers.length === 0 && (
                 <tr>
                   <td colSpan={6} className="text-center py-12 text-on-surface-variant">
-                    <span className="material-symbols-outlined text-[48px] text-outline-variant block mb-2">group_off</span>
-                    No users found for this filter.
+                    {roleUsers.length > 0 ? (
+                      <NoSearchResults query={search} onClear={() => setSearch("")} />
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-[48px] text-outline-variant block mb-2">group_off</span>
+                        No users found for this filter.
+                      </>
+                    )}
                   </td>
                 </tr>
               )}

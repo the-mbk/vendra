@@ -530,19 +530,82 @@ const markVendorOrderDelivered = asyncHandler(async (req, res) => {
 // LOCATION + LEDGER
 // ──────────────────────────────────────
 
-/** PUT /api/vendor/location  Body: { latitude, longitude, storeAddress? } */
+/** The vendor's location and any change waiting for the admin */
+function locationView(v) {
+  return {
+    latitude: v.latitude,
+    longitude: v.longitude,
+    storeAddress: v.store_address,
+    pendingLocation: v.location_requested_at
+      ? { latitude: v.pending_latitude, longitude: v.pending_longitude, address: v.pending_address, requestedAt: v.location_requested_at }
+      : null,
+    locationRejectionReason: v.location_rejection_reason,
+  };
+}
+
+/**
+ * PUT /api/vendor/location  Body: { latitude, longitude, storeAddress? }
+ * A store waiting for approval sets its location directly (the admin reviews it
+ * with the store). An approved store can't move itself: this files a request
+ * (202) and the store stays put until an admin approves it. A new request
+ * replaces an earlier one.
+ */
 const updateVendorLocation = asyncHandler(async (req, res) => {
   const vendorId = vendorIdOf(req);
   const latitude = Number(req.body.latitude);
   const longitude = Number(req.body.longitude);
   if (!isValidCoordinate(latitude, longitude)) throw httpError(400, 'Valid latitude and longitude are required.');
+  const address = typeof req.body.storeAddress === 'string' && req.body.storeAddress.trim() ? req.body.storeAddress.trim() : null;
 
+  const result = await withTransaction(async (client, afterCommit) => {
+    const v = (await client.query('SELECT * FROM vendors WHERE id = $1 FOR UPDATE', [vendorId])).rows[0];
+    if (!v) throw httpError(404, 'Vendor not found.');
+    if (!v.is_approved) {
+      const r = await client.query(
+        `UPDATE vendors SET latitude = $1, longitude = $2, store_address = COALESCE($3, store_address),
+                pending_latitude = NULL, pending_longitude = NULL, pending_address = NULL,
+                location_requested_at = NULL, location_rejection_reason = NULL
+         WHERE id = $4 RETURNING *`,
+        [latitude, longitude, address, vendorId]
+      );
+      return { applied: true, vendor: r.rows[0] };
+    }
+    const r = await client.query(
+      `UPDATE vendors SET pending_latitude = $1, pending_longitude = $2, pending_address = $3,
+              location_requested_at = NOW(), location_rejection_reason = NULL
+       WHERE id = $4 RETURNING *`,
+      [latitude, longitude, address, vendorId]
+    );
+    const movedKm = v.latitude != null ? haversineKm(v.latitude, v.longitude, latitude, longitude) : null;
+    await notifyAdmins(client, afterCommit, {
+      type: 'location_change_requested',
+      title: `${v.store_name} wants to move`,
+      body: movedKm != null
+        ? `New store location ${movedKm.toFixed(1)} km from the current one. Review it in Vendors.`
+        : 'The store has asked to set its location. Review it in Vendors.',
+    });
+    afterCommit.push(() => broadcast('vendors:update', { vendorId }));
+    return { applied: false, vendor: r.rows[0] };
+  });
+
+  res.status(result.applied ? 200 : 202).json({
+    success: true,
+    message: result.applied
+      ? 'Location updated'
+      : 'Sent to Vendra for approval. Customers and riders keep seeing your current location until an admin approves the change.',
+    data: { applied: result.applied, ...locationView(result.vendor) },
+  });
+});
+
+/** DELETE /api/vendor/location/request — withdraw a location change that's waiting for review */
+const cancelLocationRequest = asyncHandler(async (req, res) => {
+  const vendorId = vendorIdOf(req);
   const r = await pool.query(
-    `UPDATE vendors SET latitude = $1, longitude = $2, store_address = COALESCE($3, store_address)
-     WHERE id = $4 RETURNING *`,
-    [latitude, longitude, req.body.storeAddress || null, vendorId]
+    `UPDATE vendors SET pending_latitude = NULL, pending_longitude = NULL, pending_address = NULL, location_requested_at = NULL
+     WHERE id = $1 RETURNING *`,
+    [vendorId]
   );
-  res.json({ success: true, message: 'Location updated', data: r.rows[0] });
+  res.json({ success: true, message: 'Location change withdrawn.', data: locationView(r.rows[0]) });
 });
 
 /** GET /api/vendor/inventory/ledger */
@@ -577,5 +640,6 @@ module.exports = {
   markOrderReadyForPickup,
   markVendorOrderDelivered,
   updateVendorLocation,
+  cancelLocationRequest,
   getInventoryLedger,
 };

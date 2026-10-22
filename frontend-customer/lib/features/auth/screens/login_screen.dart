@@ -1,7 +1,8 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Customer App - Login Screen
 // Single-role (customer) version of the Stitch login design:
-// email/password, login button, signup toggle
+// email/password, login button, signup toggle, and — in development only —
+// one-tap demo accounts from GET /api/public-config (DemoLoginPanel)
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -110,6 +111,16 @@ class _LoginScreenState extends State<LoginScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.storefront, color: Colors.white, size: 26),
+                      ),
+                      const SizedBox(width: 10),
                       Text(
                         'Vendra',
                         style: GoogleFonts.poppins(
@@ -118,31 +129,11 @@ class _LoginScreenState extends State<LoginScreen> {
                           color: AppColors.secondary,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Container(
-                        width: 28,
-                        height: 20,
-                        decoration: BoxDecoration(borderRadius: BorderRadius.circular(2)),
-                        child: Row(
-                          children: [
-                            Expanded(flex: 1, child: Container(color: Colors.white)),
-                            Expanded(
-                              flex: 3,
-                              child: Container(
-                                decoration: const BoxDecoration(
-                                  color: AppColors.pakistanGreen,
-                                  borderRadius: BorderRadius.horizontal(right: Radius.circular(2)),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
                     ],
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    "Pakistan's Leading Marketplace",
+                    "Your hyperlocal marketplace",
                     style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary),
                   ),
 
@@ -245,25 +236,20 @@ class _LoginScreenState extends State<LoginScreen> {
                             onPressed: _submit,
                           ),
 
-                          if (!_isSignup) ...[
-                            const SizedBox(height: 20),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                'Quick demo login',
-                                style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+                          // Development only: renders nothing in production
+                          if (!_isSignup)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 20),
+                              child: DemoLoginPanel(
+                                role: 'customer',
+                                enabled: !isLoading,
+                                emailController: _emailController,
+                                passwordController: _passwordController,
+                                onLogin: (email, password) => context
+                                    .read<AuthBloc>()
+                                    .add(LoginRequested(email: email, password: password)),
                               ),
                             ),
-                            const SizedBox(height: 10),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                _demoLoginChip(context, label: 'Customer 1', email: 'ahmed@customer.pk'),
-                                _demoLoginChip(context, label: 'Customer 2', email: 'fatima@customer.pk'),
-                              ],
-                            ),
-                          ],
                         ],
                       ),
                     ),
@@ -295,19 +281,6 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
       },
-    );
-  }
-
-  Widget _demoLoginChip(BuildContext context, {required String label, required String email}) {
-    return ActionChip(
-      label: Text(label, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500)),
-      onPressed: () {
-        _emailController.text = email;
-        _passwordController.text = 'password123';
-        context.read<AuthBloc>().add(LoginRequested(email: email, password: 'password123'));
-      },
-      backgroundColor: AppColors.secondary.withValues(alpha: 0.08),
-      side: BorderSide(color: AppColors.secondary.withValues(alpha: 0.35)),
     );
   }
 }

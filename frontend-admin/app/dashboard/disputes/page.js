@@ -4,9 +4,11 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getDisputes, isAuthError } from "../../lib/api";
 import {
-  PageLoader, ErrorBox, Th, TabButton, EscrowBadge, roleColors,
-  formatRs, formatDate, formatOrderId, humanize,
+  PageLoader, ErrorBox, Th, TabButton, EscrowBadge, SearchBox, NoSearchResults, roleColors,
+  formatRs, formatDate, formatOrderId, humanize, matchesSearch, matchesId,
 } from "../../lib/ui";
+
+const formatDisputeId = (id) => `#D-${String(id).padStart(4, "0")}`;
 
 function DisputeStatus({ dispute }) {
   if (dispute.status === "open") {
@@ -35,6 +37,7 @@ export default function DisputesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState("all"); // all, open, resolved
+  const [search, setSearch] = useState("");
   const router = useRouter();
 
   useEffect(() => {
@@ -64,7 +67,16 @@ export default function DisputesPage() {
   const heldInDisputes = disputes
     .filter((d) => d.status === "open")
     .reduce((sum, d) => sum + (Number(d.order?.heldAmount) || 0), 0);
-  const filtered = filter === "all" ? disputes : disputes.filter((d) => d.status === filter);
+  const tabDisputes = filter === "all" ? disputes : disputes.filter((d) => d.status === filter);
+  const filtered = tabDisputes.filter(
+    (d) =>
+      matchesId(search, d.id, formatDisputeId(d.id)) ||
+      matchesId(search, d.orderId, formatOrderId(d.orderId)) ||
+      matchesSearch(
+        search, d.order?.customerName, d.order?.storeName, d.raisedBy?.name,
+        d.issueType, humanize(d.issueType), d.description
+      )
+  );
 
   return (
     <div>
@@ -99,17 +111,26 @@ export default function DisputesPage() {
         </div>
       )}
 
-      {/* Filter Tabs */}
-      <div className="flex gap-2 mb-6">
-        <TabButton active={filter === "all"} onClick={() => setFilter("all")}>All</TabButton>
-        <TabButton active={filter === "open"} onClick={() => setFilter("open")} count={openCount}>Open</TabButton>
-        <TabButton active={filter === "resolved"} onClick={() => setFilter("resolved")} count={resolvedCount}>Resolved</TabButton>
+      {/* Filter Tabs + Search */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div className="flex gap-2">
+          <TabButton active={filter === "all"} onClick={() => setFilter("all")}>All</TabButton>
+          <TabButton active={filter === "open"} onClick={() => setFilter("open")} count={openCount}>Open</TabButton>
+          <TabButton active={filter === "resolved"} onClick={() => setFilter("resolved")} count={resolvedCount}>Resolved</TabButton>
+        </div>
+        <SearchBox
+          value={search}
+          onChange={setSearch}
+          placeholder="Search dispute/order #, customer, store or issue"
+          count={filtered.length}
+          total={tabDisputes.length}
+        />
       </div>
 
       {/* Disputes Table */}
       <div className="bg-white rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full sticky-actions">
             <thead>
               <tr className="bg-surface-container-low/50 border-b border-outline-variant/20">
                 <Th>Dispute</Th>
@@ -131,12 +152,12 @@ export default function DisputesPage() {
                     d.status === "open" ? "" : "opacity-80"
                   }`}
                 >
-                  <td className="px-5 py-4 whitespace-nowrap">
-                    <p className="text-sm font-bold text-primary">#D-{String(d.id).padStart(4, "0")}</p>
+                  <td className="px-4 py-3.5 whitespace-nowrap">
+                    <p className="text-sm font-bold text-primary">{formatDisputeId(d.id)}</p>
                     <p className="text-xs text-outline">Order {formatOrderId(d.orderId)}</p>
                     <p className="text-[11px] text-outline">{formatDate(d.createdAt, true)}</p>
                   </td>
-                  <td className="px-5 py-4 max-w-[260px]">
+                  <td className="px-4 py-3.5 min-w-[160px] max-w-[240px]">
                     <p className="text-sm font-semibold text-on-surface">{humanize(d.issueType)}</p>
                     <p className="text-xs text-outline line-clamp-2">{d.description}</p>
                     {d.evidence?.length > 0 && (
@@ -146,7 +167,7 @@ export default function DisputesPage() {
                       </p>
                     )}
                   </td>
-                  <td className="px-5 py-4 whitespace-nowrap">
+                  <td className="px-4 py-3.5 whitespace-nowrap">
                     <p className="text-sm text-on-surface">{d.raisedBy?.name}</p>
                     <span
                       className={`inline-block mt-0.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
@@ -156,16 +177,16 @@ export default function DisputesPage() {
                       {humanize(d.raisedBy?.role)}
                     </span>
                   </td>
-                  <td className="px-5 py-4 whitespace-nowrap">
+                  <td className="px-4 py-3.5 whitespace-nowrap">
                     <p className="text-sm text-on-surface">{d.order?.storeName}</p>
                     <p className="text-xs text-outline">{d.order?.customerName}</p>
                   </td>
-                  <td className="px-5 py-4 text-sm font-semibold text-on-surface whitespace-nowrap">
+                  <td className="px-4 py-3.5 text-sm font-semibold text-on-surface whitespace-nowrap">
                     {formatRs(d.order?.heldAmount)}
                   </td>
-                  <td className="px-5 py-4"><EscrowBadge status={d.order?.escrowStatus} /></td>
-                  <td className="px-5 py-4"><DisputeStatus dispute={d} /></td>
-                  <td className="px-5 py-4 text-right whitespace-nowrap">
+                  <td className="px-4 py-3.5"><EscrowBadge status={d.order?.escrowStatus} /></td>
+                  <td className="px-4 py-3.5"><DisputeStatus dispute={d} /></td>
+                  <td className="px-4 py-3.5 text-right whitespace-nowrap">
                     <span
                       className={`text-xs font-semibold px-3 py-1.5 rounded-lg ${
                         d.status === "open" ? "bg-primary text-white" : "bg-surface-container-low text-primary"
@@ -180,10 +201,16 @@ export default function DisputesPage() {
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={8} className="text-center py-12 text-on-surface-variant">
-                    <span className="material-symbols-outlined text-[48px] text-outline-variant block mb-2">
-                      {filter === "open" ? "task_alt" : "inbox"}
-                    </span>
-                    {filter === "open" ? "No open disputes. All clear." : "No disputes found for this filter."}
+                    {tabDisputes.length > 0 ? (
+                      <NoSearchResults query={search} onClear={() => setSearch("")} />
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-[48px] text-outline-variant block mb-2">
+                          {filter === "open" ? "task_alt" : "inbox"}
+                        </span>
+                        {filter === "open" ? "No open disputes. All clear." : "No disputes found for this filter."}
+                      </>
+                    )}
                   </td>
                 </tr>
               )}

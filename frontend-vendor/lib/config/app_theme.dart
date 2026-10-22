@@ -19,6 +19,9 @@ class AppColors {
   static const Color textSecondary = Color(0xFF6C757D);
   static const Color textLight = Color(0xFF9E9E9E);
 
+  /// Dividers and card outlines
+  static const Color hairline = Color(0xFFE6E8EB);
+
   // Status colors
   static const Color success = Color(0xFF28A745);
   static const Color warning = Color(0xFFFFC107);
@@ -38,14 +41,28 @@ class AppTheme {
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
+      // Seeded from the brand orange, but with plain white surfaces: without
+      // these, drawers, sheets, dialogs and dividers pick up a pink tint
       colorScheme: ColorScheme.fromSeed(
         seedColor: AppColors.primary,
         primary: AppColors.primary,
         secondary: AppColors.secondary,
         surface: AppColors.surface,
         error: AppColors.error,
+      ).copyWith(
+        surfaceTint: Colors.transparent,
+        surfaceContainerLowest: Colors.white,
+        surfaceContainerLow: Colors.white,
+        surfaceContainer: Colors.white,
+        surfaceContainerHigh: Colors.white,
+        outlineVariant: AppColors.hairline,
       ),
       scaffoldBackgroundColor: AppColors.background,
+      dividerColor: AppColors.hairline,
+      dividerTheme: const DividerThemeData(color: AppColors.hairline, thickness: 1),
+      bottomSheetTheme: const BottomSheetThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
+      drawerTheme: const DrawerThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
+      dialogTheme: const DialogThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
 
       // Typography using Google Fonts Poppins
       textTheme: GoogleFonts.poppinsTextTheme().copyWith(
@@ -75,7 +92,7 @@ class AppTheme {
         ),
         bodyMedium: GoogleFonts.poppins(
           fontSize: 14,
-          color: AppColors.textSecondary,
+          color: AppColors.textPrimary,
         ),
         bodySmall: GoogleFonts.poppins(
           fontSize: 12,
@@ -90,6 +107,7 @@ class AppTheme {
 
       // AppBar theme matching Stitch designs
       appBarTheme: AppBarTheme(
+        surfaceTintColor: Colors.transparent,
         backgroundColor: Colors.white,
         foregroundColor: AppColors.textPrimary,
         elevation: 0,

@@ -21,6 +21,7 @@ const {
   approveOrder,
   rejectOrder,
   updateVendorLocation,
+  cancelLocationRequest,
   getInventoryLedger,
   markOrderPreparing,
   markOrderReadyForPickup,
@@ -54,6 +55,7 @@ router.put('/orders/:id/deliver', markVendorOrderDelivered);
 
 // Location
 router.put('/location', updateVendorLocation);
+router.delete('/location/request', cancelLocationRequest);
 
 // Inventory ledger
 router.get('/inventory/ledger', getInventoryLedger);

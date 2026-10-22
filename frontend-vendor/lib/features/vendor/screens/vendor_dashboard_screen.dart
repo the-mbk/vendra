@@ -10,6 +10,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import 'package:vendra_vendor/vendra_core.dart';
 import '../../../config/app_routes.dart';
 import '../../auth/bloc/auth_bloc.dart';
@@ -18,14 +19,26 @@ import '../../auth/bloc/auth_state.dart' as auth_state;
 import '../bloc/pos_bloc.dart';
 import '../bloc/vendor_product_bloc.dart';
 import '../bloc/vendor_order_bloc.dart';
+import '../bloc/store_location_bloc.dart';
 import 'pos_screen.dart';
 import 'vendor_orders_screen.dart';
 import 'stock_ledger_screen.dart';
 import 'vendor_profile_screen.dart';
 import 'vendor_disputes_screen.dart';
 import 'wallet_screen.dart';
+import '../widgets/wallet_widgets.dart';
 
 import 'vendor_location_screen.dart';
+
+final NumberFormat _money = NumberFormat('#,##0');
+
+/// Greeting that matches the time of day
+String _greeting() {
+  final h = DateTime.now().hour;
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
 
 class VendorDashboardScreen extends StatefulWidget {
   const VendorDashboardScreen({super.key});
@@ -45,21 +58,33 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
   int _currentIndex = _homeTab;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   StreamSubscription<OrderUpdateEvent>? _escrowSub;
+  StreamSubscription<NotificationModel>? _walletNotifSub;
 
   @override
   void initState() {
     super.initState();
     context.read<VendorProductBloc>().add(const FetchVendorProducts());
     context.read<VendorOrderBloc>().add(const FetchVendorOrders());
+    context.read<StoreLocationBloc>().add(const StoreLocationRequested());
     // Escrow released to the store → refresh the wallet chip
     _escrowSub = RealtimeService().orderUpdates.listen((e) {
       if (e.escrowStatus == 'released' && mounted) context.read<AuthBloc>().add(RefreshUserRequested());
+    });
+    // A bounced withdrawal puts the money back → refresh the balance
+    _walletNotifSub = RealtimeService().notifications.listen((n) {
+      if (isWalletNotification(n.type) && mounted) context.read<AuthBloc>().add(RefreshUserRequested());
+      // An admin approved / rejected a store location change → refresh the location card
+      if ((n.type == 'location_approved' || n.type == 'location_rejected') && mounted) {
+        context.read<StoreLocationBloc>().add(const StoreLocationRequested());
+        context.read<AuthBloc>().add(RefreshUserRequested());
+      }
     });
   }
 
   @override
   void dispose() {
     _escrowSub?.cancel();
+    _walletNotifSub?.cancel();
     super.dispose();
   }
 
@@ -69,14 +94,45 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
 
   void _openDisputes() => Navigator.push(context, MaterialPageRoute(builder: (_) => const VendorDisputesScreen()));
 
-  Widget _drawerItem(IconData icon, String title, VoidCallback onTap) {
-    return ListTile(
-      leading: Icon(icon),
-      title: Text(title),
-      onTap: () {
-        Navigator.pop(context);
-        onTap();
-      },
+  /// Opens the map on the live store location, then re-reads /me so the
+  /// location card shows a pending request (or the applied move)
+  Future<void> _openLocation() async {
+    final live = context.read<StoreLocationBloc>().state.status;
+    final auth = context.read<AuthBloc>().state;
+    final user = auth is auth_state.Authenticated ? auth.user : null;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VendorLocationScreen(
+          currentLat: live?.latitude ?? user?.storeLat,
+          currentLng: live?.longitude ?? user?.storeLng,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    context.read<StoreLocationBloc>().add(const StoreLocationRequested());
+    context.read<AuthBloc>().add(RefreshUserRequested());
+  }
+
+  Widget _drawerItem(IconData icon, String title, VoidCallback onTap, {int? tab}) {
+    final selected = tab != null && tab == _currentIndex;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      child: ListTile(
+        selected: selected,
+        selectedTileColor: AppColors.primary.withValues(alpha: 0.08),
+        selectedColor: AppColors.primary,
+        iconColor: AppColors.textSecondary,
+        textColor: AppColors.textPrimary,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        leading: Icon(icon, size: 22),
+        title: Text(title,
+            style: GoogleFonts.poppins(fontSize: 14, fontWeight: selected ? FontWeight.w600 : FontWeight.w500)),
+        onTap: () {
+          Navigator.pop(context);
+          onTap();
+        },
+      ),
     );
   }
 
@@ -90,29 +146,55 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
           child: ListView(
             padding: EdgeInsets.zero,
             children: [
-              DrawerHeader(
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 28, 20, 20),
+                margin: const EdgeInsets.only(bottom: 8),
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(colors: [Color(0xFF0D2137), Color(0xFF1565C0)]),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Vendor Panel', style: GoogleFonts.poppins(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 4),
-                    Text('Manage store & orders', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12)),
-                  ],
+                child: BlocBuilder<AuthBloc, auth_state.AuthState>(
+                  builder: (context, state) {
+                    final user = state is auth_state.Authenticated ? state.user : null;
+                    return Row(
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.storefront, color: Colors.white, size: 26),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(user?.storeName ?? 'Vendor Panel',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
+                              Text(user?.fullName ?? 'Manage store & orders',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ),
-              _drawerItem(Icons.dashboard_outlined, 'Home', () => _goToTab(_homeTab)),
-              _drawerItem(Icons.point_of_sale, 'Walk-in POS', () => _goToTab(_posTab)),
-              _drawerItem(Icons.receipt_long_outlined, 'Orders', () => _goToTab(_ordersTab)),
-              _drawerItem(Icons.inventory_2_outlined, 'Stock ledger', () => _goToTab(_ledgerTab)),
-              _drawerItem(Icons.person_outline, 'Profile', () => _goToTab(_profileTab)),
-              const Divider(),
+              _drawerItem(Icons.dashboard_outlined, 'Home', () => _goToTab(_homeTab), tab: _homeTab),
+              _drawerItem(Icons.point_of_sale, 'Walk-in POS', () => _goToTab(_posTab), tab: _posTab),
+              _drawerItem(Icons.receipt_long_outlined, 'Orders', () => _goToTab(_ordersTab), tab: _ordersTab),
+              _drawerItem(Icons.inventory_2_outlined, 'Stock ledger', () => _goToTab(_ledgerTab), tab: _ledgerTab),
+              _drawerItem(Icons.person_outline, 'Profile', () => _goToTab(_profileTab), tab: _profileTab),
+              const Divider(indent: 16, endIndent: 16, height: 24),
               _drawerItem(Icons.account_balance_wallet_outlined, 'Wallet', _openWallet),
               _drawerItem(Icons.gavel_outlined, 'Disputes', _openDisputes),
-              _drawerItem(Icons.map_outlined, 'Store location',
-                  () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VendorLocationScreen()))),
+              _drawerItem(Icons.map_outlined, 'Store location', _openLocation),
               _drawerItem(Icons.add_circle_outline, 'Add product', () => Navigator.pushNamed(context, AppRoutes.addProduct)),
             ],
           ),
@@ -153,6 +235,86 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
     );
   }
 
+  /// Home card that opens the location screen; shows a change waiting for the admin
+  /// and the reason the last one was rejected
+  Widget _locationCard() {
+    return BlocBuilder<StoreLocationBloc, StoreLocationState>(
+      builder: (context, state) {
+        final status = state.status;
+        final pending = status?.pending;
+        final rejection = pending == null ? status?.rejectionReason : null;
+
+        final String title;
+        final String subtitle;
+        final IconData icon;
+        final List<Color> colors;
+        if (pending != null) {
+          final when = pending.requestedAt != null ? DateFormat('MMM dd').format(pending.requestedAt!) : 'recently';
+          title = 'Location change pending approval';
+          subtitle = 'Requested $when · customers still see your current location';
+          icon = Icons.hourglass_top;
+          colors = const [Color(0xFF8A6D00), AppColors.reservedAmber];
+        } else {
+          title = 'Set Store Location';
+          subtitle = 'Pin your shop on the map for customers';
+          icon = Icons.map;
+          colors = const [Color(0xFF0D2137), Color(0xFF1565C0)];
+        }
+
+        return GestureDetector(
+          onTap: _openLocation,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: colors),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40, height: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, color: Colors.white, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white)),
+                      Text(subtitle, style: GoogleFonts.poppins(fontSize: 11, color: Colors.white70)),
+                      if (rejection != null) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.warning_amber_rounded, size: 14, color: Colors.red.shade100),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                'Last change rejected: $rejection',
+                                style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w500, color: Colors.red.shade100),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 16),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   /// Orders tab icon with a badge for orders waiting for approval
   Widget _ordersIcon(IconData icon) {
     return BlocBuilder<VendorOrderBloc, VendorOrderState>(
@@ -189,9 +351,12 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Good morning! 👋',
-                      style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary, fontWeight: FontWeight.w400)),
-                  Text(storeName, style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.secondary)),
+                  Text(_greeting(),
+                      style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary, fontWeight: FontWeight.w400)),
+                  Text(storeName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.secondary)),
                 ],
               );
             },
@@ -200,31 +365,10 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
             BlocBuilder<AuthBloc, auth_state.AuthState>(
               builder: (context, state) {
                 if (state is auth_state.Authenticated) {
-                  return GestureDetector(
-                    onTap: _openWallet,
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.green.shade50,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.green.shade200),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.account_balance_wallet, size: 16, color: Colors.green.shade700),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Rs. ${state.user.walletBalance.toStringAsFixed(0)}',
-                            style: GoogleFonts.poppins(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.green.shade800,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                  return IconButton(
+                    tooltip: 'Wallet · Rs. ${_money.format(state.user.walletBalance)}',
+                    onPressed: _openWallet,
+                    icon: Icon(Icons.account_balance_wallet_outlined, color: Colors.green.shade700),
                   );
                 }
                 return const SizedBox.shrink();
@@ -274,7 +418,7 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                       children: [
                         _statCard(
                           'Walk-in Today',
-                          'Rs. ${pos.todayTotal.toStringAsFixed(0)}',
+                          'Rs. ${_money.format(pos.todayTotal)}',
                           Icons.point_of_sale,
                           AppColors.primary,
                           subtitle: '${pos.todayCount} sale${pos.todayCount == 1 ? '' : 's'} · open POS',
@@ -285,6 +429,8 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                             subtitle: 'Locked by online orders'),
                       ],
                     ),
+                    const SizedBox(height: 12),
+                    _walletCard(),
                     if (awaitingApproval > 0) ...[
                       const SizedBox(height: 12),
                       Container(
@@ -312,48 +458,8 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                       ),
                     ],
                     const SizedBox(height: 12),
-                    // Set Store Location button
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (_) => const VendorLocationScreen()),
-                        );
-                      },
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFF0D2137), Color(0xFF1565C0)],
-                          ),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 40, height: 40,
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: const Icon(Icons.map, color: Colors.white, size: 22),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Set Store Location', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white)),
-                                  Text('Pin your shop on the map for customers', style: GoogleFonts.poppins(fontSize: 11, color: Colors.white70)),
-                                ],
-                              ),
-                            ),
-                            const Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 16),
-                          ],
-                        ),
-                      ),
-                    ),
+                    // Set Store Location button (shows a change waiting for admin approval)
+                    _locationCard(),
                   ],
                 );
               },
@@ -368,10 +474,12 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('My Products', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)),
-                TextButton(
+                Text('My Products',
+                    style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                TextButton.icon(
                   onPressed: () => context.read<VendorProductBloc>().add(const FetchVendorProducts(silent: true)),
-                  child: const Text('Refresh'),
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Refresh'),
                 ),
               ],
             ),
@@ -460,6 +568,69 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
     );
   }
 
+  /// Wallet balance (escrow releases) with a Withdraw shortcut; tap opens the wallet
+  Widget _walletCard() {
+    return BlocBuilder<AuthBloc, auth_state.AuthState>(
+      builder: (context, state) {
+        if (state is! auth_state.Authenticated) return const SizedBox.shrink();
+        final balance = state.user.walletBalance;
+        return Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
+          ),
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: _openWallet,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(10)),
+                      child: Icon(Icons.account_balance_wallet, color: Colors.green.shade700, size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Wallet balance', style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text('Rs. ${_money.format(balance)}',
+                                style: GoogleFonts.poppins(
+                                    fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.secondary,
+                        side: const BorderSide(color: AppColors.secondary),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      icon: const Icon(Icons.north_east, size: 18),
+                      label: Text('Withdraw', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600)),
+                      onPressed: () => startWithdrawal(context, balance: balance),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _statCard(String title, String value, IconData icon, Color color, {VoidCallback? onTap, String? subtitle}) {
     return Expanded(
       child: GestureDetector(
@@ -477,8 +648,15 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Expanded(child: Text(title, style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary))),
-                  Icon(icon, color: color, size: 22),
+                  Expanded(
+                    child: Text(title,
+                        style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.textSecondary)),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                    child: Icon(icon, color: color, size: 18),
+                  ),
                 ],
               ),
               const SizedBox(height: 8),

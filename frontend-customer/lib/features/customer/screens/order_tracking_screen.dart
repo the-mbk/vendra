@@ -2,6 +2,8 @@
 // Order tracking (FR03/FR04/FR07/FR08)
 // - Live map: store, the customer's drop-off pin, the rider's position
 //   (rider:location events) and the trip path so far
+// - One order at a time: with several orders on their way, chips at the
+//   top switch which one is tracked
 // - Status timeline incl. ready_for_pickup (finding / assigned rider),
 //   picked and on_the_way
 // - Rider details, escrow state, dispute status / "Report an issue"
@@ -34,7 +36,115 @@ class OrderTrackingScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocProvider(
       create: (_) => OrderTrackingBloc(orderId: orderId, initialOrder: initialOrder)..add(const LoadOrderTracking()),
-      child: const _OrderTrackingView(),
+      child: const _TrackingLifecycle(child: _OrderTrackingView()),
+    );
+  }
+}
+
+/// Pauses live tracking while the app is in the background
+class _TrackingLifecycle extends StatefulWidget {
+  final Widget child;
+  const _TrackingLifecycle({required this.child});
+
+  @override
+  State<_TrackingLifecycle> createState() => _TrackingLifecycleState();
+}
+
+class _TrackingLifecycleState extends State<_TrackingLifecycle> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final bloc = context.read<OrderTrackingBloc>();
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      bloc.add(const TrackingPaused());
+    } else if (state == AppLifecycleState.resumed) {
+      bloc.add(const TrackingResumed());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+/// The customer's other orders on their way: tap one to track it instead
+class _ActiveOrderSwitcher extends StatefulWidget {
+  final int currentId;
+  const _ActiveOrderSwitcher({required this.currentId});
+
+  @override
+  State<_ActiveOrderSwitcher> createState() => _ActiveOrderSwitcherState();
+}
+
+class _ActiveOrderSwitcherState extends State<_ActiveOrderSwitcher> {
+  List<OrderModel> _orders = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final res = await ApiService().get(ApiConfig.customerOrders, queryParams: {'scope': 'active', 'limit': 20});
+      final list = (res.data['data'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map((m) => OrderModel.fromJson(Map<String, dynamic>.from(m)))
+          .toList();
+      if (mounted) setState(() => _orders = list);
+    } catch (_) {
+      // The switcher is a shortcut; the order being tracked still shows
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_orders.length < 2) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${_orders.length} orders on their way · tracking one at a time',
+              style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 40,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _orders.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (context, i) {
+                final o = _orders[i];
+                final selected = o.id == widget.currentId;
+                return ChoiceChip(
+                  selected: selected,
+                  showCheckmark: false,
+                  avatar: Icon(o.isDelivery ? Icons.delivery_dining : Icons.storefront_outlined,
+                      size: 16, color: selected ? Colors.white : AppColors.secondary),
+                  label: Text('#${o.id} · ${o.storeName ?? 'Store'}', overflow: TextOverflow.ellipsis),
+                  labelStyle: GoogleFonts.poppins(fontSize: 12, color: selected ? Colors.white : AppColors.textPrimary),
+                  selectedColor: AppColors.secondary,
+                  onSelected: selected
+                      ? null
+                      : (_) => Navigator.pushReplacementNamed(context, AppRoutes.orderTracking, arguments: o),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -94,6 +204,7 @@ class _OrderTrackingView extends StatelessWidget {
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(16),
                 children: [
+                  _ActiveOrderSwitcher(currentId: order.id),
                   _header(order),
                   const SizedBox(height: 16),
                   if (_hasMap(order)) ...[
@@ -434,17 +545,17 @@ class _OrderTrackingView extends StatelessWidget {
                     ),
                     const SizedBox(width: 12),
                     Expanded(child: Text(item.productName ?? '', style: GoogleFonts.poppins(fontSize: 14))),
-                    Text('Rs. ${item.total.toStringAsFixed(0)}',
+                    Text(formatRupees(item.total),
                         style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500)),
                   ],
                 ),
               )),
           const Divider(height: 20),
-          row('Subtotal', 'Rs. ${order.subtotal.toStringAsFixed(0)}'),
+          row('Subtotal', formatRupees(order.subtotal)),
           row(order.isDelivery ? 'Delivery fee' : 'Self pickup',
-              order.isDelivery ? 'Rs. ${order.deliveryFee.toStringAsFixed(0)}' : 'Free'),
+              order.isDelivery ? formatRupees(order.deliveryFee) : 'Free'),
           const Divider(height: 20),
-          row('Total charged', 'Rs. ${order.totalAmount.toStringAsFixed(0)}', bold: true),
+          row('Total charged', formatRupees(order.totalAmount), bold: true),
           if (order.isDelivery && order.deliveryAddress != null) ...[
             const SizedBox(height: 12),
             Row(

@@ -157,19 +157,46 @@ class _HomeTab extends StatelessWidget {
                               title: 'Could not load',
                               body: state.loadError!,
                               actionLabel: 'Retry',
+                              actionIcon: Icons.refresh,
                               onAction: () => context.read<RiderHomeBloc>().add(RiderHomeStarted()),
                             ),
                           _EarningsCard(earnings: state.earnings, onDetails: onShowEarnings),
                           const SizedBox(height: 20),
                           Row(
                             children: [
-                              Expanded(
-                                child: Text('Delivery requests',
-                                    style: GoogleFonts.poppins(fontSize: 17, fontWeight: FontWeight.w700)),
-                              ),
+                              Text('Delivery requests',
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                              if (state.isOnline && state.tasks.isNotEmpty && state.activeOrderId == null) ...[
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(
+                                      color: AppColors.primary, borderRadius: BorderRadius.circular(10)),
+                                  child: Text('${state.tasks.length}',
+                                      style: GoogleFonts.poppins(
+                                          fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white)),
+                                ),
+                              ],
+                              const Spacer(),
                               if (state.radiusKm != null)
-                                Text('within ${state.radiusKm!.toStringAsFixed(0)} km',
-                                    style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.secondary.withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.radar, size: 14, color: AppColors.secondary),
+                                      const SizedBox(width: 4),
+                                      Text('within ${state.radiusKm!.toStringAsFixed(0)} km',
+                                          style: GoogleFonts.poppins(
+                                              fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.secondary)),
+                                    ],
+                                  ),
+                                ),
                             ],
                           ),
                           const SizedBox(height: 12),
@@ -194,6 +221,7 @@ class _HomeTab extends StatelessWidget {
           title: 'Delivery in progress${state.activeOrderId != null ? ' · #${state.activeOrderId}' : ''}',
           body: 'Finish your current delivery to receive new requests.',
           actionLabel: 'Open delivery',
+          actionIcon: Icons.arrow_forward,
           onAction: state.activeOrderId != null ? () => onOpenDelivery(state.activeOrderId!) : null,
         ),
       ];
@@ -206,6 +234,7 @@ class _HomeTab extends StatelessWidget {
           title: 'You are offline',
           body: 'Go online to receive delivery requests from stores near you.',
           actionLabel: 'Go online',
+          actionIcon: Icons.power_settings_new,
           onAction: state.togglingStatus ? null : () => bloc.add(const RiderOnlineToggled(true)),
         ),
       ];
@@ -217,8 +246,9 @@ class _HomeTab extends StatelessWidget {
           color: AppColors.reservedAmber,
           title: 'Waiting for your location',
           body: 'Nearby requests appear once your location reaches the server. '
-              'Check GPS, or turn on "Simulate location".',
+              '${AppConfig.current.features.manualLocation ? 'Check GPS, or turn on "Simulate location".' : 'Check that GPS is on.'}',
           actionLabel: 'Location settings',
+          actionIcon: Icons.my_location,
           onAction: () => showLocationSettings(context),
         ),
       ];
@@ -463,8 +493,11 @@ class _Stat extends StatelessWidget {
                 Text(value,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700)),
-                Text(label, style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary)),
+                    style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary)),
               ],
             ),
           ),
@@ -480,6 +513,7 @@ class _InfoCard extends StatelessWidget {
   final String title;
   final String body;
   final String? actionLabel;
+  final IconData? actionIcon;
   final VoidCallback? onAction;
 
   const _InfoCard({
@@ -488,6 +522,7 @@ class _InfoCard extends StatelessWidget {
     required this.title,
     required this.body,
     this.actionLabel,
+    this.actionIcon,
     this.onAction,
   });
 
@@ -495,27 +530,32 @@ class _InfoCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 12, offset: const Offset(0, 4))],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(icon, color: color),
-              const SizedBox(width: 10),
-              Expanded(child: Text(title, style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600))),
-            ],
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.12), shape: BoxShape.circle),
+            child: Icon(icon, color: color, size: 32),
           ),
+          const SizedBox(height: 14),
+          Text(title,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
           const SizedBox(height: 6),
-          Text(body, style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
+          Text(body,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(fontSize: 13, height: 1.45, color: AppColors.textSecondary)),
           if (actionLabel != null) ...[
-            const SizedBox(height: 12),
-            VendraButton(text: actionLabel!, onPressed: onAction),
+            const SizedBox(height: 18),
+            VendraButton(text: actionLabel!, icon: actionIcon, onPressed: onAction),
           ],
         ],
       ),

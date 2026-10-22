@@ -264,6 +264,7 @@ const getMe = async (req, res) => {
     const result = await pool.query(
       `SELECT u.id, u.full_name, u.email, u.phone, u.role, u.vendor_id, u.wallet_balance, u.created_at, u.must_change_password,
               v.store_name, v.store_address, v.is_approved, v.cnic, v.latitude AS store_lat, v.longitude AS store_lng,
+              v.pending_latitude, v.pending_longitude, v.pending_address, v.location_requested_at, v.location_rejection_reason,
               r.vehicle_type, r.is_online
        FROM users u
        LEFT JOIN vendors v ON u.vendor_id = v.id
@@ -299,6 +300,10 @@ const getMe = async (req, res) => {
         cnic: user.cnic || null,
         storeLat: user.store_lat != null ? Number(user.store_lat) : null,
         storeLng: user.store_lng != null ? Number(user.store_lng) : null,
+        pendingLocation: user.location_requested_at
+          ? { latitude: user.pending_latitude, longitude: user.pending_longitude, address: user.pending_address, requestedAt: user.location_requested_at }
+          : null,
+        locationRejectionReason: user.location_rejection_reason || null,
         vehicleType: user.vehicle_type || null,
         isOnline: user.is_online ?? null,
         mustChangePassword: user.must_change_password,

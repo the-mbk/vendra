@@ -16,6 +16,7 @@ import 'package:vendra_customer/vendra_core.dart';
 import '../../../config/app_routes.dart';
 import '../../../core/services/customer_location_storage.dart';
 import '../bloc/cart_bloc.dart';
+import 'cart_screen.dart';
 import 'dart:math';
 
 class StoreScreen extends StatefulWidget {
@@ -124,6 +125,7 @@ class _StoreScreenState extends State<StoreScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -154,6 +156,29 @@ class _StoreScreenState extends State<StoreScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
+      // This store's own cart (every store has a separate cart)
+      bottomNavigationBar: BlocBuilder<CartBloc, CartState>(
+        builder: (context, cart) {
+          final mine = cart.forStore(widget.vendorId);
+          if (mine.isEmpty) return const SizedBox.shrink();
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: ElevatedButton.icon(
+                onPressed: () => openStoreCart(context, widget.vendorId),
+                icon: const Icon(Icons.shopping_cart_checkout),
+                label: Text('View cart · ${mine.totalItems} item${mine.totalItems == 1 ? '' : 's'} · ${formatRupees(mine.totalAmount)}'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
           : _error != null
@@ -174,10 +199,23 @@ class _StoreScreenState extends State<StoreScreen> {
                       expandedHeight: 200,
                       pinned: true,
                       backgroundColor: AppColors.secondary,
+                      foregroundColor: Colors.white,
+                      iconTheme: const IconThemeData(color: Colors.white),
+                      surfaceTintColor: Colors.transparent,
                       flexibleSpace: FlexibleSpaceBar(
+                        centerTitle: true,
+                        titlePadding: const EdgeInsets.fromLTRB(56, 0, 56, 14),
                         title: Text(
                           _vendorData?['storeName'] ?? widget.storeName,
-                          style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 16),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                            color: Colors.white,
+                            shadows: const [Shadow(color: Colors.black26, blurRadius: 4)],
+                          ),
                         ),
                         background: Container(
                           decoration: const BoxDecoration(
@@ -194,7 +232,7 @@ class _StoreScreenState extends State<StoreScreen> {
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    const SizedBox(height: 30),
+                                    const SizedBox(height: 8),
                                     Container(
                                       width: 72, height: 72,
                                       decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), shape: BoxShape.circle, border: Border.all(color: Colors.white24, width: 2)),
@@ -425,11 +463,11 @@ class _ProductQuickSheet extends StatelessWidget {
             ),
             Row(
               children: [
-                Expanded(child: Text(product.name, style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600))),
+                Expanded(child: Text(product.name, style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
                 IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
               ],
             ),
-            Text('Rs. ${product.price.toStringAsFixed(0)}',
+            Text(formatRupees(product.price),
                 style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.primary)),
             if (product.description != null && product.description!.isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -449,8 +487,12 @@ class _ProductQuickSheet extends StatelessWidget {
                       Navigator.pop(context);
                       Navigator.pushNamed(context, AppRoutes.productDetail, arguments: product);
                     },
-                    icon: const Icon(Icons.info_outline, size: 20),
-                    label: const Text('View details'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+                      textStyle: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                    icon: const Icon(Icons.info_outline, size: 18),
+                    label: const Text('View details', maxLines: 1),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -463,8 +505,12 @@ class _ProductQuickSheet extends StatelessWidget {
                         SnackBar(content: Text('${product.name} added to cart'), backgroundColor: AppColors.success, behavior: SnackBarBehavior.floating),
                       );
                     },
-                    icon: const Icon(Icons.add_shopping_cart, size: 20),
-                    label: const Text('Add to cart'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+                      textStyle: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                    icon: const Icon(Icons.add_shopping_cart, size: 18),
+                    label: const Text('Add to cart', maxLines: 1),
                   ),
                 ),
               ],
@@ -473,11 +519,15 @@ class _ProductQuickSheet extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.secondary, foregroundColor: Colors.white),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.secondary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
                 onPressed: () {
                   context.read<CartBloc>().add(AddToCart(product: product));
                   Navigator.pop(context);
-                  Navigator.pushNamed(context, AppRoutes.cart);
+                  openStoreCart(context, product.vendorId);
                 },
                 child: const Text('Go to checkout'),
               ),

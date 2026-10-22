@@ -1,6 +1,7 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Vendor App - Main Entry Point
-// Initializes BLoC providers, theme, and routes
+// Loads the platform config (mode, features, card gateway) first, then
+// initializes BLoC providers, theme, and routes
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -23,12 +24,17 @@ import 'features/auth/screens/login_screen.dart';
 import 'features/vendor/bloc/vendor_product_bloc.dart';
 import 'features/vendor/bloc/vendor_order_bloc.dart';
 import 'features/vendor/bloc/pos_bloc.dart';
+import 'features/vendor/bloc/store_location_bloc.dart';
 import 'features/vendor/screens/vendor_dashboard_screen.dart';
 import 'features/vendor/screens/add_edit_product_screen.dart';
 import 'features/vendor/screens/pending_approval_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Never throws and gives up after a few seconds: if the backend is down the
+  // app starts on production-safe defaults and retries when a value is needed
+  await AppConfig.load(role: 'vendor');
+  AppConfig.startLiveUpdates(); // admin policy changes reach the app straight away
   runApp(const VendraVendorApp());
 }
 
@@ -93,6 +99,7 @@ class _VendraVendorAppState extends State<VendraVendorApp> {
         BlocProvider<VendorProductBloc>(create: (_) => VendorProductBloc()),
         BlocProvider<VendorOrderBloc>(create: (_) => VendorOrderBloc()),
         BlocProvider<PosBloc>(create: (_) => PosBloc()),
+        BlocProvider<StoreLocationBloc>(create: (_) => StoreLocationBloc()),
       ],
       child: MaterialApp(
         title: 'Vendra Vendor',
@@ -100,7 +107,9 @@ class _VendraVendorAppState extends State<VendraVendorApp> {
         // FR09: NotificationCenter shows a banner for every new notification
         scaffoldMessengerKey: NotificationCenter.messengerKey,
         navigatorKey: appNavigatorKey,
-        theme: AppTheme.lightTheme,
+        theme: _vendorTheme(),
+        // "DEVELOPMENT" badge on every screen while the backend runs in development mode
+        builder: (context, child) => DevBanner(child: child ?? const SizedBox.shrink()),
 
         initialRoute: AppRoutes.splash,
 
@@ -127,4 +136,20 @@ class _VendraVendorAppState extends State<VendraVendorApp> {
       ),
     );
   }
+}
+
+/// The shared theme plus a few vendor-app touches: un-styled text (headings,
+/// card titles) uses the dark text colour instead of the muted grey, and
+/// drawers / sheets / dialogs stay white instead of the orange-tinted surface
+ThemeData _vendorTheme() {
+  final base = AppTheme.lightTheme;
+  return base.copyWith(
+    textTheme: base.textTheme.copyWith(
+      bodyMedium: base.textTheme.bodyMedium?.copyWith(color: AppColors.textPrimary),
+    ),
+    drawerTheme: const DrawerThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
+    bottomSheetTheme: const BottomSheetThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
+    dialogTheme: const DialogThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
+    dividerTheme: DividerThemeData(color: Colors.grey.shade200, thickness: 1),
+  );
 }

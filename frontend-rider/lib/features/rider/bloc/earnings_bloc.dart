@@ -1,6 +1,7 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Rider App - Earnings BLoC
-// Earnings totals, paged delivery history, and wallet transactions.
+// Earnings totals, paged delivery history, wallet transactions, and
+// the balance after a withdrawal.
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -33,6 +34,15 @@ class EarningsHistoryMoreRequested extends EarningsEvent {
   const EarningsHistoryMoreRequested();
 }
 
+/// A withdrawal was sent: show the [walletBalance] the API returned right
+/// away, refresh the withdrawal list, then reload the wallet rows.
+class EarningsWithdrawalCompleted extends EarningsEvent {
+  final double? walletBalance;
+  const EarningsWithdrawalCompleted({this.walletBalance});
+  @override
+  List<Object?> get props => [walletBalance];
+}
+
 // States
 abstract class EarningsState extends Equatable {
   const EarningsState();
@@ -56,6 +66,9 @@ class EarningsLoaded extends EarningsState {
   /// Set when the last "load more" failed; the list shows a retry row
   final String? historyError;
 
+  /// Bumped after each withdrawal (refresh key for the withdrawal list)
+  final int withdrawalsVersion;
+
   const EarningsLoaded({
     required this.earnings,
     required this.history,
@@ -63,11 +76,15 @@ class EarningsLoaded extends EarningsState {
     this.historyMeta = const PageMeta(),
     this.loadingMoreHistory = false,
     this.historyError,
+    this.withdrawalsVersion = 0,
   });
 
   bool get hasMoreHistory => historyMeta.hasMore && historyMeta.nextOffset != null;
 
   EarningsLoaded copyWith({
+    RiderEarnings? earnings,
+    WalletSummary? wallet,
+    int? withdrawalsVersion,
     List<RiderOrder>? history,
     PageMeta? historyMeta,
     bool? loadingMoreHistory,
@@ -75,8 +92,9 @@ class EarningsLoaded extends EarningsState {
     bool clearHistoryError = false,
   }) =>
       EarningsLoaded(
-        earnings: earnings,
-        wallet: wallet,
+        earnings: earnings ?? this.earnings,
+        wallet: wallet ?? this.wallet,
+        withdrawalsVersion: withdrawalsVersion ?? this.withdrawalsVersion,
         history: history ?? this.history,
         historyMeta: historyMeta ?? this.historyMeta,
         loadingMoreHistory: loadingMoreHistory ?? this.loadingMoreHistory,
@@ -94,7 +112,9 @@ class EarningsLoaded extends EarningsState {
         loadingMoreHistory,
         historyError,
         wallet.transactions.length,
+        wallet.transactions.isEmpty ? null : wallet.transactions.first.id,
         wallet.balance,
+        withdrawalsVersion,
       ];
 }
 
@@ -114,9 +134,13 @@ class EarningsBloc extends Bloc<EarningsEvent, EarningsState> {
   /// a refresh doesn't append a stale page to the fresh list
   int _generation = 0;
 
+  /// Survives full reloads so the withdrawal list's refresh key only moves on a withdrawal
+  int _withdrawalsVersion = 0;
+
   EarningsBloc() : super(EarningsInitial()) {
     on<EarningsRequested>(_onRequested);
     on<EarningsHistoryMoreRequested>(_onHistoryMore);
+    on<EarningsWithdrawalCompleted>(_onWithdrawal);
   }
 
   Future<Response> _historyPage(int offset) => _api.get(ApiConfig.riderOrders,
@@ -141,6 +165,7 @@ class EarningsBloc extends Bloc<EarningsEvent, EarningsState> {
         history: _orders(results[1].data),
         historyMeta: PageMeta.fromResponse(results[1].data),
         wallet: WalletSummary.fromJson(Map<String, dynamic>.from(results[2].data['data'])),
+        withdrawalsVersion: _withdrawalsVersion,
       ));
     } catch (e) {
       if (generation != _generation) return;
@@ -148,6 +173,34 @@ class EarningsBloc extends Bloc<EarningsEvent, EarningsState> {
     } finally {
       event.done?.complete();
     }
+  }
+
+  void _onWithdrawal(EarningsWithdrawalCompleted event, Emitter<EarningsState> emit) {
+    _withdrawalsVersion++;
+    final current = state;
+    final balance = event.walletBalance;
+    if (current is EarningsLoaded) {
+      final e = current.earnings;
+      emit(current.copyWith(
+        withdrawalsVersion: _withdrawalsVersion,
+        wallet: balance == null ? null : WalletSummary(balance: balance, transactions: current.wallet.transactions),
+        earnings: balance == null
+            ? null
+            : RiderEarnings(
+                today: e.today,
+                todayCount: e.todayCount,
+                week: e.week,
+                weekCount: e.weekCount,
+                allTime: e.allTime,
+                allTimeCount: e.allTimeCount,
+                totalKm: e.totalKm,
+                walletBalance: balance,
+                recent: e.recent,
+              ),
+      ));
+    }
+    // The new "Withdrawal" wallet row
+    add(const EarningsRequested());
   }
 
   Future<void> _onHistoryMore(EarningsHistoryMoreRequested event, Emitter<EarningsState> emit) async {

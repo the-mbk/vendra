@@ -1,6 +1,7 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Rider App - Location settings sheet + status banner
-// GPS status, and the "Simulate location" debug mode where the
+// GPS status, and — only when the server runs in development
+// (`features.manualLocation`) — the "Simulate location" mode where the
 // rider taps a point on the map that is sent instead of GPS.
 // ══════════════════════════════════════════════════════════════
 
@@ -12,6 +13,7 @@ import 'package:vendra_rider/vendra_core.dart';
 
 import '../models/rider_models.dart';
 import '../services/rider_location_service.dart';
+import '../services/simulated_drive.dart';
 
 /// Opens the location settings. Pass the active [order] to show its store and
 /// customer pins and "jump to" shortcuts.
@@ -50,9 +52,11 @@ class _LocationSettingsSheetState extends State<LocationSettingsSheet> {
       initialChildSize: 0.85,
       maxChildSize: 0.95,
       builder: (context, scroll) => ListenableBuilder(
-        listenable: _service,
+        listenable: Listenable.merge([_service, AppConfig.notifier]),
         builder: (context, _) {
+          final allowed = _service.manualAllowed;
           final sim = _service.simulate;
+          final drive = _service.drive;
           final point = _service.simulatedPoint ?? RiderLocationService.defaultPoint;
           return ListView(
             controller: scroll,
@@ -66,7 +70,7 @@ class _LocationSettingsSheetState extends State<LocationSettingsSheet> {
                 ),
               ),
               const SizedBox(height: 16),
-              Text('Location settings', style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700)),
+              Text('Location settings', style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
               const SizedBox(height: 4),
               Text(
                 _service.isTracking
@@ -76,27 +80,35 @@ class _LocationSettingsSheetState extends State<LocationSettingsSheet> {
                 style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
               ),
               const SizedBox(height: 12),
-              Container(
-                decoration: BoxDecoration(
-                  color: sim ? AppColors.reservedAmber.withValues(alpha: 0.12) : AppColors.background,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: sim ? AppColors.reservedAmber : Colors.grey.shade300),
-                ),
-                child: SwitchListTile(
-                  value: sim,
-                  onChanged: (v) => _service.setSimulate(v),
-                  activeThumbColor: AppColors.reservedAmber,
-                  title: Text('Simulate location', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                  subtitle: Text(
-                    'For testing indoors or on web/desktop: tap the map to set where you are. '
-                    'That point is sent instead of GPS.',
-                    style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
+              if (allowed) ...[
+                Container(
+                  decoration: BoxDecoration(
+                    color: sim ? AppColors.reservedAmber.withValues(alpha: 0.12) : AppColors.background,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: sim ? AppColors.reservedAmber : Colors.grey.shade300),
+                  ),
+                  child: SwitchListTile(
+                    value: sim,
+                    onChanged: (v) => _service.setSimulate(v),
+                    activeThumbColor: AppColors.reservedAmber,
+                    title: Text('Simulate location', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    subtitle: Text(
+                      'Development only. For testing indoors or on web/desktop: tap the map to set where you are. '
+                      'That point is sent instead of GPS.',
+                      style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
+                const SizedBox(height: 16),
+              ],
               if (sim) ...[
-                Text('Tap the map to move', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                Text('Tap the map to move', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                if (drive != null)
+                  Text(
+                    'Simulated drive in progress (${SimulatedDrive.formatDistance(drive.remainingMeters)} left) — '
+                    'moving the point by hand stops it.',
+                    style: GoogleFonts.poppins(fontSize: 12, color: AppColors.reservedAmber),
+                  ),
                 const SizedBox(height: 8),
                 MapPickerWidget(
                   key: ValueKey(_mapVersion),
@@ -129,6 +141,7 @@ class _LocationSettingsSheetState extends State<LocationSettingsSheet> {
                         Expanded(
                           child: OutlinedButton.icon(
                             onPressed: () => _jumpTo(order.storePoint!),
+                            style: _compactButton,
                             icon: const Icon(Icons.storefront, size: 18),
                             label: const Text('At store'),
                           ),
@@ -138,6 +151,7 @@ class _LocationSettingsSheetState extends State<LocationSettingsSheet> {
                         Expanded(
                           child: OutlinedButton.icon(
                             onPressed: () => _jumpTo(order.customerPoint!),
+                            style: _compactButton,
                             icon: const Icon(Icons.home, size: 18),
                             label: const Text('At customer'),
                           ),
@@ -159,6 +173,11 @@ class _LocationSettingsSheetState extends State<LocationSettingsSheet> {
   }
 }
 
+final _compactButton = OutlinedButton.styleFrom(
+  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+  textStyle: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
+);
+
 class _GpsStatus extends StatelessWidget {
   final RiderLocationService service;
   const _GpsStatus({required this.service});
@@ -172,7 +191,7 @@ class _GpsStatus extends StatelessWidget {
         ListTile(
           contentPadding: EdgeInsets.zero,
           leading: Icon(Icons.gps_fixed, color: p != null ? AppColors.success : AppColors.textLight),
-          title: Text('Device GPS', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+          title: Text('Device GPS', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
           subtitle: Text(
             p != null
                 ? '${p.latitude.toStringAsFixed(5)}, ${p.longitude.toStringAsFixed(5)}'
@@ -189,16 +208,18 @@ class _GpsStatus extends StatelessWidget {
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: service.retryGps,
+                style: _compactButton,
                 icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('Retry GPS'),
+                label: const Text('Retry GPS', maxLines: 1),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: service.openSettings,
+                style: _compactButton,
                 icon: const Icon(Icons.settings, size: 18),
-                label: const Text('App settings'),
+                label: const Text('App settings', maxLines: 1),
               ),
             ),
           ],
@@ -232,6 +253,9 @@ class _ErrorBox extends StatelessWidget {
   }
 }
 
+/// Darker than reservedAmber so white text on the banner stays readable
+const _bannerAmber = Color(0xFFB9650B);
+
 /// Strip shown on the home and delivery screens: amber while simulating,
 /// red when GPS is failing. Tap to open the settings sheet.
 class LocationStatusBanner extends StatelessWidget {
@@ -242,16 +266,22 @@ class LocationStatusBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final service = RiderLocationService();
     return ListenableBuilder(
-      listenable: service,
+      listenable: Listenable.merge([service, AppConfig.notifier]),
       builder: (context, _) {
         final String text;
         final Color color;
         final IconData icon;
-        if (service.simulate) {
+        final drive = service.drive;
+        if (service.simulate && drive != null) {
+          text = 'SIMULATED DRIVE · ${SimulatedDrive.formatDistance(drive.remainingMeters)} to the '
+              '${drive.targetKind == DriveTarget.store ? 'store' : 'customer'} · ${SimulatedDrive.formatEta(drive.eta)}';
+          color = _bannerAmber;
+          icon = Icons.route;
+        } else if (service.simulate) {
           final p = service.simulatedPoint;
           text = 'SIMULATED LOCATION${p != null ? ' · ${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}' : ''}'
               ' — tap to change';
-          color = AppColors.reservedAmber;
+          color = _bannerAmber;
           icon = Icons.science_outlined;
         } else if (service.error != null) {
           text = service.error!;

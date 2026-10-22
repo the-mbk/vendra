@@ -3,7 +3,10 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getProducts, approveProduct, hideProduct, fileUrl, isAuthError } from "../../lib/api";
-import { PageLoader, ErrorBox, Spinner, Th, TabButton, formatRs, formatDate, notifyCountsChanged } from "../../lib/ui";
+import {
+  PageLoader, ErrorBox, Spinner, Th, TabButton, SearchBox, NoSearchResults,
+  formatRs, formatDate, matchesSearch, notifyCountsChanged,
+} from "../../lib/ui";
 
 const tabs = [
   { key: "pending", label: "Pending" },
@@ -19,11 +22,11 @@ function StockCell({ product }) {
     { label: "Public", value: product.publicStock, className: "text-emerald-700" },
   ];
   return (
-    <div className="grid grid-cols-4 gap-3 min-w-[240px]">
+    <div className="grid grid-cols-2 gap-x-4 gap-y-1 min-w-[150px]">
       {items.map((i) => (
-        <div key={i.label}>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-outline">{i.label}</p>
-          <p className={`text-sm font-bold ${i.className}`}>{i.value ?? 0}</p>
+        <div key={i.label} className="flex items-baseline justify-between gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-outline">{i.label}</span>
+          <span className={`text-sm font-bold tabular-nums ${i.className}`}>{i.value ?? 0}</span>
         </div>
       ))}
     </div>
@@ -80,6 +83,7 @@ export default function ProductsPage() {
   const [actionLoading, setActionLoading] = useState(null);
   const [confirmHideId, setConfirmHideId] = useState(null);
   const [message, setMessage] = useState(null); // { type: "success" | "error", text }
+  const [search, setSearch] = useState("");
   const router = useRouter();
 
   useEffect(() => {
@@ -143,6 +147,9 @@ export default function ProductsPage() {
   }
 
   const pendingCount = tab === "pending" ? products.length : products.filter((p) => !p.isApproved).length;
+  const filteredProducts = products.filter((p) =>
+    matchesSearch(search, p.name, p.storeName, p.barcode, p.categoryName)
+  );
 
   return (
     <div>
@@ -167,18 +174,27 @@ export default function ProductsPage() {
         </p>
       </div>
 
-      {/* Filter Tabs */}
-      <div className="flex gap-2 mb-6">
-        {tabs.map((t) => (
-          <TabButton
-            key={t.key}
-            active={tab === t.key}
-            onClick={() => changeTab(t.key)}
-            count={t.key === "pending" && tab === "pending" ? pendingCount : 0}
-          >
-            {t.label}
-          </TabButton>
-        ))}
+      {/* Filter Tabs + Search */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div className="flex gap-2">
+          {tabs.map((t) => (
+            <TabButton
+              key={t.key}
+              active={tab === t.key}
+              onClick={() => changeTab(t.key)}
+              count={t.key === "pending" && tab === "pending" ? pendingCount : 0}
+            >
+              {t.label}
+            </TabButton>
+          ))}
+        </div>
+        <SearchBox
+          value={search}
+          onChange={setSearch}
+          placeholder="Search product, store, barcode or category"
+          count={loading || error ? undefined : filteredProducts.length}
+          total={loading || error ? undefined : products.length}
+        />
       </div>
 
       {message && (
@@ -206,7 +222,7 @@ export default function ProductsPage() {
       ) : (
         <div className="bg-white rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full sticky-actions">
               <thead>
                 <tr className="bg-surface-container-low/50 border-b border-outline-variant/20">
                   <Th>Product</Th>
@@ -219,33 +235,33 @@ export default function ProductsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/10">
-                {products.map((product) => (
+                {filteredProducts.map((product) => (
                   <tr key={product.id} className="hover:bg-surface-container-low/30 transition-colors align-top">
-                    <td className="px-5 py-4 max-w-[340px]">
+                    <td className="px-4 py-3.5 min-w-[240px] max-w-[320px]">
                       <div className="flex items-start gap-3">
                         <ProductThumb imageUrl={product.imageUrl} name={product.name} />
                         <div className="min-w-0">
-                          <p className="text-sm font-semibold text-on-surface">{product.name}</p>
+                          <p className="text-sm font-semibold text-on-surface line-clamp-2" title={product.name}>{product.name}</p>
                           {product.description && (
-                            <p className="text-xs text-outline mt-0.5 line-clamp-2">{product.description}</p>
+                            <p className="text-xs text-outline mt-0.5 line-clamp-1" title={product.description}>{product.description}</p>
                           )}
-                          <p className="text-[11px] text-outline mt-1">
+                          <p className="text-[11px] text-outline mt-1 whitespace-nowrap">
                             {product.barcode ? <>Barcode <code className="font-mono">{product.barcode}</code> • </> : null}
                             Added {formatDate(product.createdAt)}
                           </p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-5 py-4 text-sm text-on-surface whitespace-nowrap">{product.storeName}</td>
-                    <td className="px-5 py-4">
+                    <td className="px-4 py-3.5 text-sm text-on-surface min-w-[130px] max-w-[170px]">{product.storeName}</td>
+                    <td className="px-4 py-3.5">
                       <span className="text-xs font-medium bg-surface-container-low text-on-surface-variant px-2 py-1 rounded-lg whitespace-nowrap">
                         {product.categoryName || "Uncategorised"}
                       </span>
                     </td>
-                    <td className="px-5 py-4 text-sm font-semibold text-on-surface whitespace-nowrap">{formatRs(product.price)}</td>
-                    <td className="px-5 py-4"><StockCell product={product} /></td>
-                    <td className="px-5 py-4"><ApprovalBadge approved={product.isApproved} /></td>
-                    <td className="px-5 py-4 text-right whitespace-nowrap">
+                    <td className="px-4 py-3.5 text-sm font-semibold text-on-surface whitespace-nowrap">{formatRs(product.price)}</td>
+                    <td className="px-4 py-3.5"><StockCell product={product} /></td>
+                    <td className="px-4 py-3.5"><ApprovalBadge approved={product.isApproved} /></td>
+                    <td className="px-4 py-3.5 text-right whitespace-nowrap">
                       {actionLoading === product.id ? (
                         <Spinner className="w-5 h-5 inline-block" />
                       ) : !product.isApproved ? (
@@ -283,13 +299,19 @@ export default function ProductsPage() {
                   </tr>
                 ))}
 
-                {products.length === 0 && (
+                {filteredProducts.length === 0 && (
                   <tr>
                     <td colSpan={7} className="text-center py-12 text-on-surface-variant">
-                      <span className="material-symbols-outlined text-[48px] text-outline-variant block mb-2">
-                        {tab === "pending" ? "task_alt" : "search_off"}
-                      </span>
-                      {tab === "pending" ? "No products are waiting for approval." : "No products found for this filter."}
+                      {products.length > 0 ? (
+                        <NoSearchResults query={search} onClear={() => setSearch("")} />
+                      ) : (
+                        <>
+                          <span className="material-symbols-outlined text-[48px] text-outline-variant block mb-2">
+                            {tab === "pending" ? "task_alt" : "search_off"}
+                          </span>
+                          {tab === "pending" ? "No products are waiting for approval." : "No products found for this filter."}
+                        </>
+                      )}
                     </td>
                   </tr>
                 )}

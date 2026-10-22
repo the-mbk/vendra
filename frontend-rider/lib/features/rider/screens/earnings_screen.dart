@@ -1,5 +1,6 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Rider App - Earnings, delivery history and wallet (FR04)
+// The wallet holds delivery payouts; "Withdraw" sends them to a card.
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -12,6 +13,7 @@ import 'package:vendra_rider/vendra_core.dart';
 
 import '../bloc/earnings_bloc.dart';
 import '../models/rider_models.dart';
+import '../widgets/withdraw_action.dart';
 
 final _dateFmt = DateFormat('d MMM yyyy, h:mm a');
 
@@ -27,11 +29,14 @@ class EarningsScreen extends StatelessWidget {
         appBar: AppBar(
           title: const Text('Earnings'),
           automaticallyImplyLeading: false,
-          bottom: const TabBar(
+          bottom: TabBar(
             labelColor: AppColors.primary,
             indicatorColor: AppColors.primary,
             unselectedLabelColor: AppColors.textSecondary,
-            tabs: [Tab(text: 'Summary'), Tab(text: 'History'), Tab(text: 'Wallet')],
+            labelStyle: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w700),
+            unselectedLabelStyle: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500),
+            indicatorWeight: 3,
+            tabs: const [Tab(text: 'Summary'), Tab(text: 'History'), Tab(text: 'Wallet')],
           ),
         ),
         body: BlocBuilder<EarningsBloc, EarningsState>(
@@ -54,9 +59,9 @@ class EarningsScreen extends StatelessWidget {
 
             return TabBarView(
               children: [
-                RefreshIndicator(onRefresh: refresh, child: _Summary(earnings: state.earnings)),
+                RefreshIndicator(onRefresh: refresh, child: _Summary(earnings: state.earnings, balance: state.wallet.balance)),
                 RefreshIndicator(onRefresh: refresh, child: _History(state: state)),
-                RefreshIndicator(onRefresh: refresh, child: _Wallet(wallet: state.wallet)),
+                RefreshIndicator(onRefresh: refresh, child: _Wallet(state: state)),
               ],
             );
           },
@@ -68,7 +73,10 @@ class EarningsScreen extends StatelessWidget {
 
 class _Summary extends StatelessWidget {
   final RiderEarnings earnings;
-  const _Summary({required this.earnings});
+
+  /// From GET /api/wallet (the freshest balance)
+  final double balance;
+  const _Summary({required this.earnings, required this.balance});
 
   @override
   Widget build(BuildContext context) {
@@ -87,8 +95,20 @@ class _Summary extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Wallet balance', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 13)),
-              Text(rs(e.walletBalance),
-                  style: GoogleFonts.poppins(color: Colors.white, fontSize: 30, fontWeight: FontWeight.w700)),
+              Row(
+                children: [
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(rs(balance),
+                          style: GoogleFonts.poppins(color: Colors.white, fontSize: 30, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  WithdrawButton(balance: balance, onDark: true),
+                ],
+              ),
               const SizedBox(height: 6),
               Text('${e.allTimeCount} deliveries · ${km(e.totalKm)} ridden',
                   style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12)),
@@ -102,9 +122,13 @@ class _Summary extends StatelessWidget {
         Card(
           margin: const EdgeInsets.only(bottom: 10),
           child: ListTile(
-            leading: const Icon(Icons.route, color: AppColors.secondary),
-            title: Text('Total distance', style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
-            trailing: Text(km(e.totalKm), style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700)),
+            leading: CircleAvatar(
+              backgroundColor: AppColors.secondary.withValues(alpha: 0.1),
+              child: const Icon(Icons.route, color: AppColors.secondary, size: 20),
+            ),
+            title: Text('Total distance', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            trailing: Text(km(e.totalKm),
+                style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.secondary)),
           ),
         ),
         const SizedBox(height: 8),
@@ -133,7 +157,7 @@ class _PeriodTile extends StatelessWidget {
           backgroundColor: AppColors.primary.withValues(alpha: 0.12),
           child: Icon(icon, color: AppColors.primary, size: 20),
         ),
-        title: Text(label, style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
+        title: Text(label, style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
         subtitle: Text('$count deliver${count == 1 ? 'y' : 'ies'}',
             style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
         trailing: Text(rs(amount),
@@ -182,7 +206,9 @@ class _History extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text('#${o.id} · ${o.storeName ?? 'Store'}',
-                          style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                     ),
                     _StatusChip(text: o.statusText, color: delivered ? AppColors.success : AppColors.error),
                   ],
@@ -203,7 +229,7 @@ class _History extends StatelessWidget {
                           text: '${(o.waitMinutes ?? 0).toStringAsFixed(0)} min wait'),
                       const Spacer(),
                       Text(rs(o.payout),
-                          style: GoogleFonts.poppins(fontWeight: FontWeight.w700, color: AppColors.success)),
+                          style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.success)),
                     ],
                   ),
                 ],
@@ -257,54 +283,99 @@ class _HistoryFooter extends StatelessWidget {
 }
 
 class _Wallet extends StatelessWidget {
-  final WalletSummary wallet;
-  const _Wallet({required this.wallet});
+  final EarningsLoaded state;
+  const _Wallet({required this.state});
 
   @override
   Widget build(BuildContext context) {
+    final wallet = state.wallet;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
         Card(
-          child: ListTile(
-            leading: const Icon(Icons.account_balance_wallet, color: AppColors.secondary),
-            title: Text('Balance', style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
-            trailing: Text(rs(wallet.balance),
-                style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+            child: Row(
+              children: [
+                const Icon(Icons.account_balance_wallet, color: AppColors.secondary),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Balance', style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
+                      Text(rs(wallet.balance),
+                          style: GoogleFonts.poppins(
+                              fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    ],
+                  ),
+                ),
+                WithdrawButton(balance: wallet.balance),
+              ],
+            ),
           ),
         ),
-        const SizedBox(height: 12),
-        Text('Transactions', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 16),
+        Text('Withdrawals', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        const SizedBox(height: 8),
+        WithdrawalHistoryList(
+          refreshKey: state.withdrawalsVersion,
+          emptyText: 'No withdrawals yet. Use Withdraw to send your earnings to a card.',
+        ),
+        const SizedBox(height: 16),
+        Text('Transactions', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
         const SizedBox(height: 8),
         if (wallet.transactions.isEmpty)
           const _Message(icon: Icons.receipt_long, text: 'No wallet transactions yet.'),
-        for (final t in wallet.transactions)
-          Card(
-            margin: const EdgeInsets.only(bottom: 8),
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: (t.isDebit ? AppColors.error : AppColors.success).withValues(alpha: 0.12),
-                child: Icon(t.isDebit ? Icons.arrow_upward : Icons.arrow_downward,
-                    size: 18, color: t.isDebit ? AppColors.error : AppColors.success),
-              ),
-              title: Text(t.label, style: GoogleFonts.poppins(fontWeight: FontWeight.w500, fontSize: 14)),
-              subtitle: Text(
-                [
-                  if (t.description != null && t.description!.isNotEmpty) t.description!,
-                  if (t.createdAt != null) _dateFmt.format(t.createdAt!),
-                ].join('\n'),
-                style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary),
-              ),
-              isThreeLine: t.description != null && t.description!.isNotEmpty && t.createdAt != null,
-              trailing: Text(
-                '${t.isDebit ? '−' : '+'}${rs(t.amount.abs())}',
-                style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w700, color: t.isDebit ? AppColors.error : AppColors.success),
+        for (final t in wallet.transactions) _TransactionTile(t: t),
+      ],
+    );
+  }
+}
+
+class _TransactionTile extends StatelessWidget {
+  final WalletTransaction t;
+  const _TransactionTile({required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = t.isDebit ? AppColors.error : AppColors.success;
+    final lines = [
+      if (t.description != null && t.description!.isNotEmpty) t.description!,
+      if (t.reference != null) 'Ref: ${t.reference}',
+      if (t.createdAt != null) _dateFmt.format(t.createdAt!),
+    ];
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 16, 12),
+        child: Row(
+          children: [
+            CircleAvatar(
+              backgroundColor: color.withValues(alpha: 0.12),
+              child: Icon(t.icon, size: 18, color: color),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(t.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14, color: AppColors.textPrimary)),
+                  if (lines.isNotEmpty)
+                    Text(lines.join('\n'),
+                        style: GoogleFonts.poppins(fontSize: 11, height: 1.4, color: AppColors.textSecondary)),
+                ],
               ),
             ),
-          ),
-      ],
+            const SizedBox(width: 10),
+            Text(t.amountText, style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700, color: color)),
+          ],
+        ),
+      ),
     );
   }
 }
