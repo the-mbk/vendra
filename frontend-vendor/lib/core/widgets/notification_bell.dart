@@ -1,6 +1,8 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra App - Notification bell + inbox screen (FR09)
 // Drop NotificationBell() into any AppBar's actions.
+// The inbox keeps every alert: scroll to the end to load older ones,
+// filter to unread, tap one to mark it read and open its order.
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -48,50 +50,116 @@ class NotificationsScreen extends StatefulWidget {
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
   final _center = NotificationCenter();
+  bool _unreadOnly = false;
 
   @override
   void initState() {
     super.initState();
-    _center.refresh().then((_) => _center.markAllRead());
+    _center.refresh();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Notifications')),
+      appBar: AppBar(
+        title: const Text('Notifications'),
+        actions: [
+          AnimatedBuilder(
+            animation: _center,
+            builder: (context, _) => TextButton(
+              onPressed: _center.unreadCount > 0 ? _center.markAllRead : null,
+              child: const Text('Mark all read'),
+            ),
+          ),
+        ],
+      ),
       body: AnimatedBuilder(
         animation: _center,
         builder: (context, _) {
-          final items = _center.items;
+          final all = _center.items;
+          final items = _unreadOnly ? all.where((n) => !n.isRead).toList() : all;
+          final filters = Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: Wrap(spacing: 8, children: [
+              ChoiceChip(label: const Text('All'), selected: !_unreadOnly, onSelected: (_) => setState(() => _unreadOnly = false)),
+              ChoiceChip(
+                label: Text('Unread (${_center.unreadCount})'),
+                selected: _unreadOnly,
+                onSelected: (_) => setState(() => _unreadOnly = true),
+              ),
+            ]),
+          );
           if (_center.isLoading && items.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
-          if (items.isEmpty) {
-            return const Center(
-              child: Padding(
-                padding: EdgeInsets.all(32),
-                child: Text(
-                  'No notifications yet. Order updates will show up here.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: AppColors.textSecondary),
+          if (items.isEmpty && !_center.hasMore) {
+            return Column(children: [
+              filters,
+              Expanded(
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Text(
+                      _unreadOnly ? "You're all caught up." : 'No notifications yet. Order updates will show up here.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: AppColors.textSecondary),
+                    ),
+                  ),
                 ),
               ),
-            );
+            ]);
           }
           return RefreshIndicator(
             onRefresh: _center.refresh,
             child: ListView.separated(
-              itemCount: items.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (context, i) => _NotificationTile(
-                n: items[i],
-                onTap: items[i].orderId != null && widget.onOpenOrder != null
-                    ? () => widget.onOpenOrder!(context, items[i].orderId!)
-                    : null,
-              ),
+              itemCount: items.length + 2,
+              separatorBuilder: (_, i) => i == 0 ? const SizedBox.shrink() : const Divider(height: 1),
+              itemBuilder: (context, i) {
+                if (i == 0) return filters;
+                if (i == items.length + 1) return _OlderButton(center: _center);
+                final n = items[i - 1];
+                return _NotificationTile(
+                  n: n,
+                  onTap: () {
+                    _center.markRead(n);
+                    if (n.orderId != null && widget.onOpenOrder != null) widget.onOpenOrder!(context, n.orderId!);
+                  },
+                );
+              },
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// "Load older" at the end of the list (or a spinner while it loads)
+class _OlderButton extends StatelessWidget {
+  final NotificationCenter center;
+  const _OlderButton({required this.center});
+
+  @override
+  Widget build(BuildContext context) {
+    if (center.isLoadingMore) {
+      return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
+    }
+    if (!center.hasMore) {
+      return center.items.isEmpty
+          ? const SizedBox.shrink()
+          : const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: Text("That's everything.", style: TextStyle(color: AppColors.textLight, fontSize: 12))),
+            );
+    }
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Center(
+        child: OutlinedButton.icon(
+          onPressed: center.loadMore,
+          icon: const Icon(Icons.history, size: 18),
+          label: const Text('Load older notifications'),
+        ),
       ),
     );
   }
@@ -107,6 +175,8 @@ class _NotificationTile extends StatelessWidget {
     if (n.type.startsWith('escrow')) return Icons.account_balance_wallet_outlined;
     if (n.type.startsWith('task') || n.type.startsWith('rider')) return Icons.delivery_dining_outlined;
     if (n.type.startsWith('product') || n.type.startsWith('vendor')) return Icons.storefront_outlined;
+    if (n.type.startsWith('review')) return Icons.star_outline_rounded;
+    if (n.type.startsWith('otp')) return Icons.lock_outline;
     return Icons.receipt_long_outlined;
   }
 

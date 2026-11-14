@@ -213,6 +213,19 @@ export async function getRiders() {
   return apiFetch("/admin/riders");
 }
 
+/** The rider can go online and take deliveries (:id is the rider's user id) */
+export async function approveRider(userId) {
+  return apiFetch(`/admin/riders/${userId}/approve`, { method: "PUT" });
+}
+
+/** Sends the rider's documents back with `reason` (required, max 300 chars); takes them offline */
+export async function rejectRider(userId, reason) {
+  return apiFetch(`/admin/riders/${userId}/reject`, {
+    method: "PUT",
+    body: JSON.stringify({ reason }),
+  });
+}
+
 export async function getFinance() {
   return apiFetch("/admin/finance");
 }

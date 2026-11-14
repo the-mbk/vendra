@@ -12,6 +12,7 @@ import 'package:vendra_vendor/vendra_core.dart';
 import '../bloc/auth_bloc.dart';
 import '../bloc/auth_event.dart';
 import '../bloc/auth_state.dart';
+import '../../staff/services/owner_email_store.dart';
 import 'post_sign_in.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -32,6 +33,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _isSignup = false;
   bool _obscurePassword = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // Shop device: the owner's email from the last sign-in (e.g. after a staff session ended)
+    OwnerEmailStore.read().then((email) {
+      if (mounted && email != null && _emailController.text.isEmpty) _emailController.text = email;
+    });
+  }
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;

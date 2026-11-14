@@ -43,9 +43,11 @@ INSERT INTO users (id, full_name, email, phone, password_hash, role) VALUES
 (6, 'Bilal Hussain', 'bilal@rider.pk', '0301-2223344', '$2b$10$wxA3oAhNajZeHYp3m8a.YeMXgbOYx0QlSIDZlgWPJtW2le7OWS2se', 'rider'),
 (7, 'Hamza Sheikh', 'hamza@rider.pk', '0302-6667788', '$2b$10$wxA3oAhNajZeHYp3m8a.YeMXgbOYx0QlSIDZlgWPJtW2le7OWS2se', 'rider');
 
-INSERT INTO riders (id, user_id, vehicle_type, is_online, current_lat, current_lng, last_location_at) VALUES
-(1, 6, 'motorbike', false, 24.8600, 67.0250, NOW()),
-(2, 7, 'motorbike', false, 31.5100, 74.3450, NOW());
+-- Both already checked by an admin (documents on file)
+INSERT INTO riders (id, user_id, vehicle_type, is_online, current_lat, current_lng, last_location_at,
+                    cnic, license_number, vehicle_number, approval_status, reviewed_at) VALUES
+(1, 6, 'motorbike', false, 24.8600, 67.0250, NOW(), '42101-1234567-1', 'KHI-DL-445566', 'KHI-4521', 'approved', NOW()),
+(2, 7, 'motorbike', false, 31.5100, 74.3450, NOW(), '35202-7654321-3', 'LHR-DL-112233', 'LEA-9087', 'approved', NOW());
 
 -- ──────────────────────────────────────
 -- 5. PRODUCTS (approved, categorised) + 1 awaiting admin approval
@@ -157,6 +159,9 @@ INSERT INTO platform_ledger (order_id, entry_type, amount) VALUES (3, 'commissio
 UPDATE users SET wallet_balance = 113353.00 WHERE id = 4;
 UPDATE users SET wallet_balance = 40350.00 WHERE id = 5;
 UPDATE users SET wallet_balance = 7649.10 WHERE id = 2;
+
+-- Handover codes for the open fixture orders (new orders get a random one at checkout)
+UPDATE orders SET delivery_otp = '1234' WHERE status NOT IN ('delivered', 'cancelled');
 
 INSERT INTO platform_escrow_wallet (id, balance) VALUES (1, 0.00) ON CONFLICT (id) DO NOTHING;
 UPDATE platform_escrow_wallet

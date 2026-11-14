@@ -1,6 +1,7 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra App - Product Card Widget
-// Matches the product card design from customer homepage
+// Matches the product card design from customer homepage, with the
+// product's RatingBadge over the photo once it has reviews
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import '../../config/app_theme.dart';
 import '../models/json_utils.dart';
 import '../models/product_model.dart';
 import 'product_image.dart';
+import 'rating_stars.dart';
 
 class ProductCard extends StatelessWidget {
   final ProductModel product;
@@ -83,6 +85,20 @@ class ProductCard extends StatelessWidget {
                               color: Colors.white,
                             ),
                           ),
+                        ),
+                      ),
+                    // Customer rating (hidden until the first review)
+                    if (product.ratingCount > 0 && product.averageRating != null)
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.92),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: RatingBadge(average: product.averageRating, count: product.ratingCount, fontSize: 10),
                         ),
                       ),
                   ],

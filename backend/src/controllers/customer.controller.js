@@ -10,6 +10,7 @@ const { announceOrder } = require('../services/notification.service');
 const { getPolicies } = require('../services/policy.service');
 const { httpError, asyncHandler, withTransaction, intParam, paging, pageOf, searchPattern } = require('../utils/http');
 const { readCheckoutInput, quoteCheckout, placeOrder } = require('../services/checkout.service');
+const { submitOrderReview, formatReview } = require('../services/review.service');
 const { haversineKm, isValidCoordinate } = require('../utils/geo');
 const { paisaToNumber } = require('../utils/money');
 const { publicGatewayConfig } = require('../services/gateway.client');
@@ -35,8 +36,19 @@ function formatProduct(p) {
     publicStock: p.public_stock,
     barcode: p.barcode,
     imageUrl: p.image_url,
+    averageRating: p.rating_count > 0 ? Math.round((p.rating_sum / p.rating_count) * 10) / 10 : null,
+    ratingCount: p.rating_count ?? 0,
     createdAt: p.created_at,
   };
+}
+
+/** Average and count of a store's product reviews */
+async function storeRating(db, vendorId) {
+  const r = await db.query(
+    'SELECT COUNT(*)::int AS count, ROUND(AVG(rating), 1)::float8 AS average FROM product_reviews WHERE vendor_id = $1',
+    [vendorId]
+  );
+  return { averageRating: r.rows[0].average, ratingCount: r.rows[0].count };
 }
 
 const PRODUCT_SELECT = `
@@ -134,7 +146,10 @@ const getVendorDetails = asyncHandler(async (req, res) => {
   if (vendorResult.rows.length === 0) throw httpError(404, 'Vendor not found');
 
   const vendor = vendorResult.rows[0];
-  const productsResult = await pool.query(`${PRODUCT_SELECT} AND p.vendor_id = $1 ORDER BY p.created_at DESC`, [vendorId]);
+  const [productsResult, rating] = await Promise.all([
+    pool.query(`${PRODUCT_SELECT} AND p.vendor_id = $1 ORDER BY p.created_at DESC`, [vendorId]),
+    storeRating(pool, vendorId),
+  ]);
 
   res.json({
     success: true,
@@ -146,9 +161,60 @@ const getVendorDetails = asyncHandler(async (req, res) => {
       ownerPhone: vendor.owner_phone,
       latitude: num(vendor.latitude),
       longitude: num(vendor.longitude),
+      ...rating,
       products: productsResult.rows.map(formatProduct),
     },
   });
+});
+
+/**
+ * GET /api/products/:id — one product with its photo gallery, rating summary and
+ * latest reviews. Out-of-stock products still open (shown as sold out).
+ */
+const getProduct = asyncHandler(async (req, res) => {
+  const productId = intParam(req.params.id);
+  const r = await pool.query(
+    `SELECT p.*, v.store_name, v.store_address, v.latitude AS vendor_lat, v.longitude AS vendor_lng, c.name AS category_name
+     FROM products p JOIN vendors v ON v.id = p.vendor_id LEFT JOIN categories c ON c.id = p.category_id
+     WHERE p.id = $1 AND p.is_active AND p.is_approved AND v.is_approved`,
+    [productId]
+  );
+  if (r.rows.length === 0) throw httpError(404, 'Product not found.');
+  const [gallery, stars, latest] = await Promise.all([
+    pool.query('SELECT url FROM product_images WHERE product_id = $1 ORDER BY position, id', [productId]),
+    pool.query('SELECT rating, COUNT(*)::int AS n FROM product_reviews WHERE product_id = $1 GROUP BY rating', [productId]),
+    pool.query(
+      `SELECT pr.*, u.full_name AS customer_name FROM product_reviews pr JOIN users u ON u.id = pr.customer_id
+       WHERE pr.product_id = $1 ORDER BY pr.created_at DESC, pr.id DESC LIMIT 3`,
+      [productId]
+    ),
+  ]);
+  const product = formatProduct(r.rows[0]);
+  const images = [product.imageUrl, ...gallery.rows.map((g) => g.url)].filter(Boolean);
+  const distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+  for (const row of stars.rows) distribution[row.rating] = row.n;
+  res.json({
+    success: true,
+    data: {
+      ...product,
+      images: [...new Set(images)],
+      ratingDistribution: distribution,
+      latestReviews: latest.rows.map(formatReview),
+    },
+  });
+});
+
+/** GET /api/products/:id/reviews?limit=&offset= — newest first */
+const getProductReviews = asyncHandler(async (req, res) => {
+  const productId = intParam(req.params.id);
+  const page = paging(req.query);
+  const r = await pool.query(
+    `SELECT pr.*, u.full_name AS customer_name FROM product_reviews pr JOIN users u ON u.id = pr.customer_id
+     WHERE pr.product_id = $1 ORDER BY pr.created_at DESC, pr.id DESC LIMIT $2 OFFSET $3`,
+    [productId, page.limit + 1, page.offset]
+  );
+  const { items, meta } = pageOf(r.rows, page);
+  res.json({ success: true, data: items.map(formatReview), meta });
 });
 
 /**
@@ -225,14 +291,26 @@ const ORDER_SELECT = `
             FROM disputes d WHERE d.order_id = o.id ORDER BY d.created_at DESC LIMIT 1) AS latest_dispute,
          COALESCE((SELECT json_agg(json_build_object(
               'id', oi.id, 'productId', oi.product_id, 'productName', p.name,
-              'quantity', oi.quantity, 'unitPrice', oi.unit_price, 'imageUrl', p.image_url) ORDER BY oi.id)
+              'quantity', oi.quantity, 'unitPrice', oi.unit_price, 'imageUrl', p.image_url,
+              'myRating', pr.rating, 'myComment', pr.comment) ORDER BY oi.id)
             FROM order_items oi JOIN products p ON p.id = oi.product_id
+            LEFT JOIN product_reviews pr ON pr.order_id = oi.order_id AND pr.product_id = oi.product_id
             WHERE oi.order_id = o.id), '[]') AS items
   FROM orders o
   JOIN vendors v ON o.vendor_id = v.id
   LEFT JOIN users r ON r.id = o.rider_user_id`;
 
-function formatCustomerOrder(o) {
+const isOpen = (status) => !['delivered', 'cancelled'].includes(status);
+
+/**
+ * policies (optional) lets a pending order carry reservationExpiresAt: the
+ * moment its reserved stock is released if the store hasn't accepted it.
+ */
+function formatCustomerOrder(o, policies = null) {
+  const reservationExpiresAt = o.status === 'pending' && policies
+    ? new Date(new Date(o.created_at).getTime() + policies.vendor_accept_timeout_min * 60000)
+    : null;
+  const otpLocked = o.otp_locked_until && new Date(o.otp_locked_until) > new Date();
   return {
     id: o.id,
     vendorId: o.vendor_id,
@@ -258,6 +336,14 @@ function formatCustomerOrder(o) {
     assignedAt: o.assigned_at,
     pickedAt: o.picked_at,
     deliveredAt: o.delivered_at,
+    reservationExpiresAt,
+    paymentMethod: o.payment_method,
+    // Handover code: shown to the customer only, until the order is handed over
+    deliveryOtp: isOpen(o.status) ? o.delivery_otp : null,
+    otpLockedUntil: otpLocked ? o.otp_locked_until : null,
+    reviewedAt: o.reviewed_at,
+    canReview: o.status === 'delivered' && !o.reviewed_at,
+    riderRating: o.rider_rating,
     items: o.items.map((i) => ({ ...i, unitPrice: Number(i.unitPrice) })),
   };
 }
@@ -273,15 +359,16 @@ const getCustomerOrders = asyncHandler(async (req, res) => {
   const filter = scope === 'active'
     ? `AND o.status NOT IN ('delivered', 'cancelled')`
     : scope === 'past' ? `AND o.status IN ('delivered', 'cancelled')` : '';
-  const [r, active] = await Promise.all([
+  const [r, active, policies] = await Promise.all([
     pool.query(
       `${ORDER_SELECT} WHERE o.customer_id = $1 ${filter} ORDER BY o.created_at DESC, o.id DESC LIMIT $2 OFFSET $3`,
       [req.user.userId, page.limit + 1, page.offset]
     ),
     pool.query(`SELECT COUNT(*)::int AS n FROM orders WHERE customer_id = $1 AND status NOT IN ('delivered', 'cancelled')`, [req.user.userId]),
+    getPolicies(),
   ]);
   const { items, meta } = pageOf(r.rows, page);
-  res.json({ success: true, data: items.map(formatCustomerOrder), meta: { ...meta, activeCount: active.rows[0].n } });
+  res.json({ success: true, data: items.map((o) => formatCustomerOrder(o, policies)), meta: { ...meta, activeCount: active.rows[0].n } });
 });
 
 /**
@@ -290,7 +377,7 @@ const getCustomerOrders = asyncHandler(async (req, res) => {
 const getCustomerOrder = asyncHandler(async (req, res) => {
   const r = await pool.query(`${ORDER_SELECT} WHERE o.id = $1 AND o.customer_id = $2`, [intParam(req.params.id), req.user.userId]);
   if (r.rows.length === 0) throw httpError(404, 'Order not found.');
-  res.json({ success: true, data: formatCustomerOrder(r.rows[0]) });
+  res.json({ success: true, data: formatCustomerOrder(r.rows[0], await getPolicies()) });
 });
 
 /**
@@ -324,7 +411,7 @@ const getOrderTracking = asyncHandler(async (req, res) => {
     path = pings.rows;
   }
 
-  res.json({ success: true, data: { order: formatCustomerOrder(order), riderLocation, path } });
+  res.json({ success: true, data: { order: formatCustomerOrder(order, await getPolicies()), riderLocation, path } });
 });
 
 /**
@@ -405,13 +492,26 @@ const customerConfirmOrderDelivered = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Thank you! Order completed. Payment will be released to the store after the dispute window.' });
 });
 
+/**
+ * POST /api/customer/orders/:id/review  Body: { items: [{ productId, rating, comment? }], riderRating? }
+ * Once per delivered order.
+ */
+const reviewOrder = asyncHandler(async (req, res) => {
+  const orderId = intParam(req.params.id);
+  const data = await withTransaction((client, afterCommit) => submitOrderReview(client, afterCommit, req.user.userId, orderId, req.body));
+  res.status(201).json({ success: true, message: 'Thanks for your review!', data });
+});
+
 module.exports = {
   getPublicConfig,
   quoteCart,
   getStores,
   getCategories,
   getProducts,
+  getProduct,
+  getProductReviews,
   getVendorDetails,
+  reviewOrder,
   checkout,
   getCustomerOrders,
   getCustomerOrder,

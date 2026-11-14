@@ -9,6 +9,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:vendra_customer/vendra_core.dart';
 
+import 'trust_badges.dart';
+
 final _when = DateFormat('d MMM, h:mm a');
 
 /// Colour for an order status chip
@@ -125,7 +127,8 @@ class EscrowStatusLine extends StatelessWidget {
   }
 }
 
-/// Escrow card for the tracking screen (mirrors the "Secure Escrow Payment" mockup card)
+/// Escrow card for the tracking screen (mirrors the "Secure Escrow Payment" mockup card).
+/// The headline follows escrowStatus (held / disputed / released / refunded).
 class EscrowStatusCard extends StatelessWidget {
   final OrderModel order;
   const EscrowStatusCard({super.key, required this.order});
@@ -154,10 +157,11 @@ class EscrowStatusCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        order.escrowStatusText,
+                        escrowTrustHeadline(order),
                         style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Text(
                       formatRupees(order.totalAmount),
                       style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.primary),
@@ -166,6 +170,25 @@ class EscrowStatusCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(escrowDetailText(order), style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                const SizedBox(height: 6),
+                InkWell(
+                  onTap: () => showEscrowExplainer(context),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.info_outline, size: 14, color: color),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text('How Vendra Escrow protects you',
+                              style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),

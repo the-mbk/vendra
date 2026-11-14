@@ -1,6 +1,7 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Rider App - Auth BLoC (FR05)
-// Login / signup / auto-login / logout for rider accounts.
+// Login / signup (with CNIC, licence and vehicle documents) /
+// auto-login / logout for rider accounts.
 // Also starts notifications after sign-in and tears everything
 // down (location tracking, socket, inbox) on logout.
 // ══════════════════════════════════════════════════════════════
@@ -88,6 +89,10 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
           'phone': event.phone,
           'role': 'rider',
           'vehicleType': event.vehicleType,
+          // Documents for the admin review; a 400 explains what's wrong with them
+          'cnic': event.cnic,
+          if (event.licenseNumber != null) 'licenseNumber': event.licenseNumber,
+          if (event.vehicleNumber != null) 'vehicleNumber': event.vehicleNumber,
         },
       );
       await _handleAuthResponse(response.data, emit, 'Sign-up failed');

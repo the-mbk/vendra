@@ -1,7 +1,9 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra App - Vendor Profile Screen
 // Shows vendor info, wallet (+ withdraw to card) / disputes / change-password
-// shortcuts and logout
+// shortcuts and logout, plus the shop-staff tools: who is signed in on this
+// device, Switch user / Back to owner, and (owner only) Shop staff and
+// Receipt settings. Customer reviews are open to everyone.
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -17,6 +19,11 @@ import '../../auth/bloc/auth_state.dart';
 import 'vendor_disputes_screen.dart';
 import 'wallet_screen.dart';
 import '../widgets/wallet_widgets.dart';
+import '../../staff/permissions.dart';
+import '../../staff/screens/staff_screen.dart';
+import '../../staff/widgets/switch_user.dart';
+import 'receipt_settings_screen.dart';
+import 'vendor_reviews_screen.dart';
 
 class VendorProfileScreen extends StatelessWidget {
   const VendorProfileScreen({super.key});
@@ -34,6 +41,8 @@ class VendorProfileScreen extends StatelessWidget {
             builder: (context, state) {
               if (state is Authenticated) {
                 final user = state.user;
+                final staff = user.staff;
+                final isOwner = user.can(Perm.owner);
                 return SingleChildScrollView(
                   padding: const EdgeInsets.all(20),
                   child: Column(
@@ -43,15 +52,20 @@ class VendorProfileScreen extends StatelessWidget {
                     radius: 48,
                     backgroundColor: AppColors.secondary,
                     child: Text(
-                      user.fullName.isNotEmpty ? user.fullName[0].toUpperCase() : 'V',
+                      (staff?.fullName ?? user.fullName).isNotEmpty
+                          ? (staff?.fullName ?? user.fullName)[0].toUpperCase()
+                          : 'V',
                       style: GoogleFonts.poppins(fontSize: 36, fontWeight: FontWeight.w600, color: Colors.white),
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Text(user.fullName,
+                  Text(staff?.fullName ?? user.fullName,
+                      textAlign: TextAlign.center,
                       style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                   const SizedBox(height: 4),
-                  Text(user.email, style: GoogleFonts.poppins(color: AppColors.textSecondary)),
+                  Text(staff != null ? 'Staff at ${user.storeName ?? 'this store'}' : user.email,
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.poppins(color: AppColors.textSecondary)),
                   const SizedBox(height: 4),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -59,7 +73,8 @@ class VendorProfileScreen extends StatelessWidget {
                       color: AppColors.secondary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text('Vendor', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.secondary)),
+                    child: Text(staff?.roleLabel ?? 'Owner',
+                        style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.secondary)),
                   ),
 
                   const SizedBox(height: 24),
@@ -89,13 +104,27 @@ class VendorProfileScreen extends StatelessWidget {
                   ),
 
                   const SizedBox(height: 16),
-                  _linkTile(context, Icons.account_balance_wallet_outlined, 'Wallet',
-                      'Rs. ${NumberFormat('#,##0').format(user.walletBalance)} · escrow releases', const WalletScreen()),
-                  _actionTile(Icons.north_east, 'Withdraw to card', 'Send your wallet balance to a debit card',
-                      () => startWithdrawal(context, balance: user.walletBalance)),
-                  _linkTile(context, Icons.gavel_outlined, 'Disputes', 'Disputes on your orders', const VendorDisputesScreen()),
-                  _linkTile(context, Icons.lock_reset, 'Change password', 'Choose a new sign-in password',
-                      const ChangePasswordScreen()),
+                  // Shop device: anyone can hand over to someone else with a PIN
+                  _actionTile(Icons.switch_account_outlined, 'Switch user', 'Signed in: ${signedInLabel(user)}',
+                      () => showSwitchUser(context)),
+                  if (staff != null)
+                    _actionTile(Icons.storefront_outlined, 'Back to owner', "Needs the owner's password",
+                        () => backToOwner(context)),
+                  _linkTile(context, Icons.star_outline_rounded, 'Customer reviews', 'What customers say about your products',
+                      const VendorReviewsScreen()),
+                  if (isOwner) ...[
+                    _linkTile(context, Icons.groups_outlined, 'Shop staff', 'Cashiers, packers and inventory managers',
+                        const StaffScreen()),
+                    _linkTile(context, Icons.receipt_outlined, 'Receipt settings', 'Slip header, footer and scan-to-pay account',
+                        const ReceiptSettingsScreen()),
+                    _linkTile(context, Icons.account_balance_wallet_outlined, 'Wallet',
+                        'Rs. ${NumberFormat('#,##0').format(user.walletBalance)} · escrow releases', const WalletScreen()),
+                    _actionTile(Icons.north_east, 'Withdraw to card', 'Send your wallet balance to a debit card',
+                        () => startWithdrawal(context, balance: user.walletBalance)),
+                    _linkTile(context, Icons.gavel_outlined, 'Disputes', 'Disputes on your orders', const VendorDisputesScreen()),
+                    _linkTile(context, Icons.lock_reset, 'Change password', 'Choose a new sign-in password',
+                        const ChangePasswordScreen()),
+                  ],
 
                   const SizedBox(height: 16),
 
@@ -108,7 +137,7 @@ class VendorProfileScreen extends StatelessWidget {
                         Navigator.pushNamedAndRemoveUntil(context, AppRoutes.login, (route) => false);
                       },
                       icon: const Icon(Icons.logout),
-                      label: const Text('Logout'),
+                      label: Text(staff != null ? 'Sign out of this device' : 'Logout'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.error,
                         foregroundColor: Colors.white,
@@ -158,7 +187,10 @@ class VendorProfileScreen extends StatelessWidget {
         Icon(icon, size: 18, color: AppColors.textSecondary),
         const SizedBox(width: 10),
         Text('$label: ', style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
-        Text(value, style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
+        Expanded(
+          child: Text(value,
+              overflow: TextOverflow.ellipsis, style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
+        ),
       ],
     );
   }

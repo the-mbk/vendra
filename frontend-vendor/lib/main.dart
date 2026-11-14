@@ -73,20 +73,26 @@ class _VendraVendorAppState extends State<VendraVendorApp> {
     super.dispose();
   }
 
-  /// The server rejected the stored token (TOKEN_EXPIRED / INVALID_TOKEN)
+  /// The server rejected the stored token (TOKEN_EXPIRED / INVALID_TOKEN, or
+  /// STAFF_INACTIVE when the owner removed the staff member signed in here)
   void _onSessionExpired() {
     if (_handlingSessionExpiry) return;
     // Only a signed-in session can expire; the splash check handles a stale token itself
-    if (_authBloc.state is! Authenticated) return;
+    final state = _authBloc.state;
+    if (state is! Authenticated) return;
     _handlingSessionExpiry = true;
+    // A staff session drops to the owner's sign-in (the email is prefilled there)
+    final wasStaff = state.user.staff != null;
 
     // Clears storage, stops the notification inbox + socket, emits Unauthenticated
     _authBloc.add(LogoutRequested());
     appNavigatorKey.currentState?.pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
     NotificationCenter.messengerKey.currentState
       ?..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(
-        content: Text('Your session has expired. Please sign in again.'),
+      ..showSnackBar(SnackBar(
+        content: Text(wasStaff
+            ? 'Your staff session has ended. Ask the store owner to sign in.'
+            : 'Your session has expired. Please sign in again.'),
         behavior: SnackBarBehavior.floating,
       ));
   }

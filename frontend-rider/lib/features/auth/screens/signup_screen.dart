@@ -1,6 +1,8 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Rider App - Sign-up Screen (FR05)
-// Full name, email, phone, password and vehicle type.
+// Full name, email, phone, password, plus the documents an admin checks
+// before the rider can go online: CNIC, vehicle type, driving licence
+// and vehicle registration (neither needed for a bicycle).
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -13,6 +15,8 @@ import '../bloc/auth_bloc.dart';
 import '../bloc/auth_event.dart';
 import '../bloc/auth_state.dart';
 import '../widgets/vendra_logo.dart';
+import '../../rider/models/rider_documents_rules.dart';
+import '../../rider/widgets/rider_documents_fields.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -27,23 +31,24 @@ class _SignupScreenState extends State<SignupScreen> {
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _cnicController = TextEditingController();
+  final _licenceController = TextEditingController();
+  final _vehicleNumberController = TextEditingController();
   bool _obscurePassword = true;
-  String _vehicleType = 'motorbike';
-
-  static const _vehicles = [
-    ('motorbike', 'Motorbike', Icons.two_wheeler),
-    ('bicycle', 'Bicycle', Icons.pedal_bike),
-    ('car', 'Car', Icons.directions_car),
-  ];
+  String _vehicleType = 'motorcycle';
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
+    final motorised = vehicleNeedsLicence(_vehicleType);
     context.read<AuthBloc>().add(SignupRequested(
           fullName: _nameController.text.trim(),
           email: _emailController.text.trim(),
           phone: _phoneController.text.trim(),
           password: _passwordController.text,
           vehicleType: _vehicleType,
+          cnic: formatCnic(_cnicController.text),
+          licenseNumber: motorised ? normalizeDocumentCode(_licenceController.text) : null,
+          vehicleNumber: motorised ? normalizeDocumentCode(_vehicleNumberController.text) : null,
         ));
   }
 
@@ -53,6 +58,9 @@ class _SignupScreenState extends State<SignupScreen> {
     _emailController.dispose();
     _phoneController.dispose();
     _passwordController.dispose();
+    _cnicController.dispose();
+    _licenceController.dispose();
+    _vehicleNumberController.dispose();
     super.dispose();
   }
 
@@ -150,25 +158,20 @@ class _SignupScreenState extends State<SignupScreen> {
                               return null;
                             },
                           ),
-                          const SizedBox(height: 16),
-                          Text('Vehicle',
-                              style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              for (final (value, label, icon) in _vehicles)
-                                Expanded(
-                                  child: Padding(
-                                    padding: EdgeInsets.only(right: value == 'car' ? 0 : 8),
-                                    child: _VehicleOption(
-                                      label: label,
-                                      icon: icon,
-                                      selected: _vehicleType == value,
-                                      onTap: () => setState(() => _vehicleType = value),
-                                    ),
-                                  ),
-                                ),
-                            ],
+                          const SizedBox(height: 24),
+                          Text('Rider documents',
+                              style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                          const SizedBox(height: 4),
+                          Text('An admin checks these before you can go online.',
+                              style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                          const SizedBox(height: 14),
+                          RiderDocumentsFields(
+                            cnicController: _cnicController,
+                            licenceController: _licenceController,
+                            vehicleNumberController: _vehicleNumberController,
+                            vehicleType: _vehicleType,
+                            enabled: !isLoading,
+                            onVehicleChanged: (v) => setState(() => _vehicleType = v),
                           ),
                           const SizedBox(height: 24),
                           VendraButton(text: 'Sign Up', icon: Icons.arrow_forward, isLoading: isLoading, onPressed: _submit),
@@ -194,43 +197,6 @@ class _SignupScreenState extends State<SignupScreen> {
           ),
         );
       },
-    );
-  }
-}
-
-class _VehicleOption extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _VehicleOption({required this.label, required this.icon, required this.selected, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.secondary.withValues(alpha: 0.08) : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: selected ? AppColors.secondary : Colors.grey.shade300, width: selected ? 1.5 : 1),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: selected ? AppColors.secondary : AppColors.textSecondary),
-            const SizedBox(height: 4),
-            Text(label,
-                style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                    color: selected ? AppColors.secondary : AppColors.textSecondary)),
-          ],
-        ),
-      ),
     );
   }
 }

@@ -12,11 +12,17 @@ function computePublicStock({ private_stock, buffer, reserved_quantity }) {
   return Math.max(0, private_stock - buffer - reserved_quantity);
 }
 
-/** SELECT ... FOR UPDATE on the given product ids, returned as a map by id */
+/**
+ * Row-locks the given products (returned as a map by id). FOR NO KEY UPDATE still
+ * excludes every other stock writer, but unlike FOR UPDATE it doesn't conflict
+ * with the FOR KEY SHARE locks that inserting order_items / pos_sale_items
+ * (foreign keys to products) take — so a checkout that has already written its
+ * order lines can't deadlock with another one waiting for the same product.
+ */
 async function lockProducts(client, productIds) {
   const ids = [...new Set(productIds.map(Number))].sort((a, b) => a - b);
   const r = await client.query(
-    'SELECT * FROM products WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE',
+    'SELECT * FROM products WHERE id = ANY($1::int[]) ORDER BY id FOR NO KEY UPDATE',
     [ids]
   );
   const map = new Map();

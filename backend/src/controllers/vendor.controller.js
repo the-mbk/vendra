@@ -12,13 +12,20 @@ const { getPolicies } = require('../services/policy.service');
 const { emitToRiders, emitStock, broadcast } = require('../realtime');
 const { httpError, asyncHandler, withTransaction, intParam, paging, pageOf } = require('../utils/http');
 const { productImageUrl, removeProductImage } = require('../services/storage.service');
+const { verifyHandoverOtp, withHandoverOtp } = require('../services/handoverOtp.service');
+const { formatReview } = require('../services/review.service');
 const { haversineKm, isValidCoordinate } = require('../utils/geo');
 const { toPaisa, paisaToString, paisaToNumber } = require('../utils/money');
+
+const MAX_GALLERY_PHOTOS = 5; // besides the cover photo
 
 function vendorIdOf(req) {
   if (!req.user.vendorId) throw httpError(400, 'User is not linked to a vendor account.');
   return req.user.vendorId;
 }
+
+/** The staff member behind this request, or null for the store owner */
+const staffIdOf = (req) => req.user.staff?.id ?? null;
 
 function wholeNumber(value, field, { min = 0 } = {}) {
   const n = Number(value);
@@ -35,7 +42,10 @@ async function assertCategory(db, categoryId) {
 }
 
 const PRODUCT_SELECT = `
-  SELECT p.*, c.name AS category_name, v.store_name
+  SELECT p.*, c.name AS category_name, v.store_name,
+         CASE WHEN p.rating_count > 0 THEN ROUND(p.rating_sum::numeric / p.rating_count, 1)::float8 END AS average_rating,
+         COALESCE((SELECT json_agg(json_build_object('id', pi.id, 'url', pi.url) ORDER BY pi.position, pi.id)
+                   FROM product_images pi WHERE pi.product_id = p.id), '[]') AS gallery
   FROM products p
   JOIN vendors v ON v.id = p.vendor_id
   LEFT JOIN categories c ON c.id = p.category_id`;
@@ -199,7 +209,7 @@ const uploadProductImage = asyncHandler(async (req, res) => {
   try {
     const r = await pool.query(
       `UPDATE products p SET image_url = $1, updated_at = NOW()
-       FROM (SELECT image_url AS old_url FROM products WHERE id = $2 AND vendor_id = $3 AND is_active FOR UPDATE) prev
+       FROM (SELECT image_url AS old_url FROM products WHERE id = $2 AND vendor_id = $3 AND is_active FOR NO KEY UPDATE) prev
        WHERE p.id = $2 RETURNING prev.old_url`,
       [productImageUrl(req.file), productId, vendorId]
     );
@@ -222,7 +232,7 @@ const deleteProductImage = asyncHandler(async (req, res) => {
   const productId = intParam(req.params.id);
   const r = await pool.query(
     `UPDATE products p SET image_url = NULL, updated_at = NOW()
-     FROM (SELECT image_url AS old_url FROM products WHERE id = $1 AND vendor_id = $2 AND is_active FOR UPDATE) prev
+     FROM (SELECT image_url AS old_url FROM products WHERE id = $1 AND vendor_id = $2 AND is_active FOR NO KEY UPDATE) prev
      WHERE p.id = $1 RETURNING prev.old_url`,
     [productId, vendorId]
   );
@@ -230,6 +240,77 @@ const deleteProductImage = asyncHandler(async (req, res) => {
   removeProductImage(r.rows[0].old_url);
   broadcast('catalog:update', { productId, vendorId });
   res.json({ success: true, message: 'Photo removed.' });
+});
+
+/** POST /api/vendor/products/:id/images  (multipart, field "image") — adds a gallery photo after the cover */
+const addGalleryImage = asyncHandler(async (req, res) => {
+  const vendorId = vendorIdOf(req);
+  const productId = intParam(req.params.id);
+  if (!req.file) throw httpError(400, 'Attach a photo in the "image" field.');
+  const url = productImageUrl(req.file);
+
+  try {
+    await withTransaction(async (client) => {
+      const p = await client.query('SELECT id FROM products WHERE id = $1 AND vendor_id = $2 AND is_active FOR NO KEY UPDATE', [productId, vendorId]);
+      if (p.rows.length === 0) throw httpError(404, 'Product not found');
+      const n = (await client.query('SELECT COUNT(*)::int AS n, COALESCE(MAX(position), -1) AS last FROM product_images WHERE product_id = $1', [productId])).rows[0];
+      if (n.n >= MAX_GALLERY_PHOTOS) throw httpError(409, `A product can have up to ${MAX_GALLERY_PHOTOS} extra photos besides the cover.`);
+      await client.query('INSERT INTO product_images (product_id, url, position) VALUES ($1, $2, $3)', [productId, url, n.last + 1]);
+      // The first photo of a product without a cover becomes the cover
+      await client.query('UPDATE products SET image_url = COALESCE(image_url, $1), updated_at = NOW() WHERE id = $2', [url, productId]);
+    });
+  } catch (err) {
+    removeProductImage(url);
+    throw err;
+  }
+
+  const product = (await pool.query(`${PRODUCT_SELECT} WHERE p.id = $1`, [productId])).rows[0];
+  broadcast('catalog:update', { productId, vendorId });
+  res.status(201).json({ success: true, message: 'Photo added to the gallery.', data: product });
+});
+
+/** DELETE /api/vendor/products/:id/images/:imageId */
+const deleteGalleryImage = asyncHandler(async (req, res) => {
+  const vendorId = vendorIdOf(req);
+  const productId = intParam(req.params.id);
+  const r = await pool.query(
+    `DELETE FROM product_images pi USING products p
+     WHERE pi.id = $1 AND pi.product_id = $2 AND p.id = pi.product_id AND p.vendor_id = $3
+     RETURNING pi.url`,
+    [intParam(req.params.imageId, 'imageId'), productId, vendorId]
+  );
+  if (r.rows.length === 0) throw httpError(404, 'Photo not found.');
+  // The cover may point at the same file; keep it if so
+  const stillCover = await pool.query('SELECT 1 FROM products WHERE id = $1 AND image_url = $2', [productId, r.rows[0].url]);
+  if (stillCover.rows.length === 0) removeProductImage(r.rows[0].url);
+  const product = (await pool.query(`${PRODUCT_SELECT} WHERE p.id = $1`, [productId])).rows[0];
+  broadcast('catalog:update', { productId, vendorId });
+  res.json({ success: true, message: 'Photo removed.', data: product });
+});
+
+/** GET /api/vendor/reviews?limit=&offset= — what customers say about this store's products */
+const getVendorReviews = asyncHandler(async (req, res) => {
+  const vendorId = vendorIdOf(req);
+  const page = paging(req.query);
+  const [r, summary] = await Promise.all([
+    pool.query(
+      `SELECT pr.id, pr.order_id, pr.product_id, p.name AS product_name, pr.rating, pr.comment, pr.created_at,
+              u.full_name AS customer_name
+       FROM product_reviews pr JOIN products p ON p.id = pr.product_id JOIN users u ON u.id = pr.customer_id
+       WHERE pr.vendor_id = $1 ORDER BY pr.created_at DESC, pr.id DESC LIMIT $2 OFFSET $3`,
+      [vendorId, page.limit + 1, page.offset]
+    ),
+    pool.query(
+      `SELECT COUNT(*)::int AS count, ROUND(AVG(rating), 1)::float8 AS average FROM product_reviews WHERE vendor_id = $1`,
+      [vendorId]
+    ),
+  ]);
+  const { items, meta } = pageOf(r.rows, page);
+  res.json({
+    success: true,
+    data: items.map(formatReview),
+    meta: { ...meta, count: summary.rows[0].count, average: summary.rows[0].average },
+  });
 });
 
 // ──────────────────────────────────────
@@ -274,8 +355,8 @@ const createPosSale = asyncHandler(async (req, res) => {
     }
 
     const saleRow = (await client.query(
-      `INSERT INTO pos_sales (vendor_id, cashier_user_id, total_amount) VALUES ($1, $2, $3) RETURNING *`,
-      [vendorId, req.user.userId, paisaToString(total)]
+      `INSERT INTO pos_sales (vendor_id, cashier_user_id, staff_id, total_amount) VALUES ($1, $2, $3, $4) RETURNING *`,
+      [vendorId, req.user.userId, staffIdOf(req), paisaToString(total)]
     )).rows[0];
 
     const soldItems = [];
@@ -302,21 +383,64 @@ const createPosSale = asyncHandler(async (req, res) => {
     return { id: saleRow.id, total_amount: paisaToNumber(total), created_at: saleRow.created_at, items: soldItems };
   });
 
+  sale.receipt = await receiptFor(pool, vendorId, sale.id);
   res.status(201).json({ success: true, message: `Sale #${sale.id} completed.`, data: sale });
 });
+
+const SALE_SELECT = `
+  SELECT s.id, s.total_amount::float8 AS total_amount, s.created_at,
+         COALESCE(st.full_name, cu.full_name) AS cashier_name, st.role AS cashier_role,
+         json_agg(json_build_object('product_id', i.product_id, 'product_name', p.name, 'barcode', p.barcode,
+                  'quantity', i.quantity, 'unit_price', i.unit_price::float8) ORDER BY i.id) AS items
+  FROM pos_sales s
+  JOIN pos_sale_items i ON i.sale_id = s.id
+  JOIN products p ON p.id = i.product_id
+  LEFT JOIN vendor_staff st ON st.id = s.staff_id
+  LEFT JOIN users cu ON cu.id = s.cashier_user_id`;
+
+/** Everything a printed slip needs: store header/footer, payment QR account, who rang it up */
+async function receiptFor(db, vendorId, saleId) {
+  const [store, sale] = await Promise.all([
+    db.query(
+      `SELECT v.store_name, v.store_address, v.receipt_header, v.receipt_footer, v.payment_account, v.payment_account_title,
+              u.phone FROM vendors v JOIN users u ON u.id = v.user_id WHERE v.id = $1`,
+      [vendorId]
+    ),
+    db.query(`${SALE_SELECT} WHERE s.id = $1 AND s.vendor_id = $2 GROUP BY s.id, st.id, cu.id`, [saleId, vendorId]),
+  ]);
+  const v = store.rows[0];
+  const s = sale.rows[0];
+  if (!s) return null;
+  return {
+    receipt_number: `POS-${String(s.id).padStart(6, '0')}`,
+    store: {
+      name: v.store_name,
+      address: v.store_address,
+      phone: v.phone,
+      header: v.receipt_header,
+      footer: v.receipt_footer || 'Thank you for shopping with us!',
+    },
+    sale: s,
+    cashier: s.cashier_name,
+    // Scan-to-pay: the QR on the slip carries the store's account and the amount
+    payment_qr: v.payment_account
+      ? {
+          account: v.payment_account,
+          title: v.payment_account_title || v.store_name,
+          payload: `vendra-pay:${encodeURIComponent(v.payment_account)}?name=${encodeURIComponent(v.payment_account_title || v.store_name)}`
+            + `&amount=${s.total_amount.toFixed(2)}&ref=POS-${s.id}`,
+        }
+      : null,
+  };
+}
 
 /** GET /api/vendor/pos/sales — today's walk-in sales + totals */
 const getPosSales = asyncHandler(async (req, res) => {
   const vendorId = vendorIdOf(req);
   const r = await pool.query(
-    `SELECT s.id, s.total_amount, s.created_at,
-            json_agg(json_build_object('product_id', i.product_id, 'product_name', p.name,
-                     'quantity', i.quantity, 'unit_price', i.unit_price) ORDER BY i.id) AS items
-     FROM pos_sales s
-     JOIN pos_sale_items i ON i.sale_id = s.id
-     JOIN products p ON p.id = i.product_id
+    `${SALE_SELECT}
      WHERE s.vendor_id = $1 AND s.created_at::date = CURRENT_DATE
-     GROUP BY s.id
+     GROUP BY s.id, st.id, cu.id
      ORDER BY s.created_at DESC`,
     [vendorId]
   );
@@ -325,6 +449,52 @@ const getPosSales = asyncHandler(async (req, res) => {
     success: true,
     data: { sales: r.rows, today_count: r.rows.length, today_total: paisaToNumber(todayTotal) },
   });
+});
+
+/** GET /api/vendor/pos/sales/:id — one sale with its receipt (reprint / share) */
+const getPosSale = asyncHandler(async (req, res) => {
+  const receipt = await receiptFor(pool, vendorIdOf(req), intParam(req.params.id));
+  if (!receipt) throw httpError(404, 'Sale not found.');
+  res.json({ success: true, data: receipt });
+});
+
+const RECEIPT_FIELDS = {
+  receiptHeader: ['receipt_header', 200],
+  receiptFooter: ['receipt_footer', 200],
+  paymentAccount: ['payment_account', 60],
+  paymentAccountTitle: ['payment_account_title', 100],
+};
+
+function receiptSettingsView(v) {
+  return {
+    receiptHeader: v.receipt_header,
+    receiptFooter: v.receipt_footer,
+    paymentAccount: v.payment_account,
+    paymentAccountTitle: v.payment_account_title,
+  };
+}
+
+/** GET /api/vendor/receipt-settings */
+const getReceiptSettings = asyncHandler(async (req, res) => {
+  const r = await pool.query('SELECT * FROM vendors WHERE id = $1', [vendorIdOf(req)]);
+  res.json({ success: true, data: receiptSettingsView(r.rows[0]) });
+});
+
+/** PUT /api/vendor/receipt-settings  Body: { receiptHeader?, receiptFooter?, paymentAccount?, paymentAccountTitle? } ('' clears) */
+const updateReceiptSettings = asyncHandler(async (req, res) => {
+  const sets = [];
+  const params = [];
+  for (const [field, [column, max]] of Object.entries(RECEIPT_FIELDS)) {
+    if (req.body[field] === undefined) continue;
+    const value = req.body[field] === null ? '' : String(req.body[field]).trim();
+    if (value.length > max) throw httpError(400, `${field} must be at most ${max} characters.`);
+    params.push(value || null);
+    sets.push(`${column} = $${params.length}`);
+  }
+  if (sets.length === 0) throw httpError(400, 'Nothing to update.');
+  params.push(vendorIdOf(req));
+  const r = await pool.query(`UPDATE vendors SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+  res.json({ success: true, message: 'Receipt settings saved.', data: receiptSettingsView(r.rows[0]) });
 });
 
 // ──────────────────────────────────────
@@ -341,14 +511,24 @@ const VENDOR_ORDER_SELECT = `
          (SELECT json_agg(json_build_object(
              'id', oi.id, 'product_id', oi.product_id, 'product_name', p.name,
              'quantity', oi.quantity, 'unit_price', oi.unit_price, 'image_url', p.image_url,
+             'barcode', p.barcode, 'packed_quantity', oi.packed_quantity,
              'subtotal', COALESCE(oi.subtotal, oi.unit_price * oi.quantity)) ORDER BY oi.id)
-            FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE oi.order_id = o.id) AS items
+            FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE oi.order_id = o.id) AS items,
+         pk.full_name AS packed_by_name
   FROM orders o
   JOIN users u ON u.id = o.customer_id
   JOIN vendors v ON v.id = o.vendor_id
-  LEFT JOIN users rd ON rd.id = o.rider_user_id`;
+  LEFT JOIN users rd ON rd.id = o.rider_user_id
+  LEFT JOIN vendor_staff pk ON pk.id = o.packed_by_staff_id`;
 
 const FINAL_STATUSES = ['delivered', 'cancelled'];
+
+/** The handover code is the customer's alone: never send it (or its counters) to the store */
+function vendorOrderView(o) {
+  if (!o) return o;
+  const { delivery_otp: _otp, otp_failed_attempts: _tries, otp_locked_until: _lock, ...rest } = o;
+  return { ...rest, otp_required: Boolean(_otp) && !o.otp_verified_at };
+}
 
 /**
  * GET /api/vendor/orders?scope=active|history|all&limit=&offset=
@@ -366,7 +546,7 @@ const getVendorOrders = asyncHandler(async (req, res) => {
        ORDER BY o.created_at DESC, o.id DESC`,
       [vendorId, FINAL_STATUSES]
     );
-    return res.json({ success: true, data: r.rows, meta: { scope, hasMore: false, nextOffset: null } });
+    return res.json({ success: true, data: r.rows.map(vendorOrderView), meta: { scope, hasMore: false, nextOffset: null } });
   }
 
   const page = paging(req.query, { defaultLimit: 30 });
@@ -379,7 +559,7 @@ const getVendorOrders = asyncHandler(async (req, res) => {
     params
   );
   const { items, meta } = pageOf(r.rows, page);
-  res.json({ success: true, data: items, meta: { scope, ...meta } });
+  res.json({ success: true, data: items.map(vendorOrderView), meta: { scope, ...meta } });
 });
 
 /** GET /api/vendor/orders/:id — one order (refresh after an order:update event) */
@@ -387,7 +567,7 @@ const getVendorOrder = asyncHandler(async (req, res) => {
   const vendorId = vendorIdOf(req);
   const r = await pool.query(`${VENDOR_ORDER_SELECT} WHERE o.id = $1 AND o.vendor_id = $2`, [intParam(req.params.id), vendorId]);
   if (r.rows.length === 0) throw httpError(404, 'Order not found.');
-  res.json({ success: true, data: r.rows[0] });
+  res.json({ success: true, data: vendorOrderView(r.rows[0]) });
 });
 
 /** Moves an order from one status to the next, or throws 404/409 */
@@ -417,7 +597,7 @@ const approveOrder = asyncHandler(async (req, res) => {
     });
     return o;
   });
-  res.json({ success: true, message: 'Order approved!', data: order });
+  res.json({ success: true, message: 'Order approved!', data: vendorOrderView(order) });
 });
 
 /** PUT /api/vendor/orders/:id/reject — pending → cancelled, stock released, full refund */
@@ -435,18 +615,103 @@ const rejectOrder = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Order rejected. Stock has been released.' });
 });
 
-/** PUT /api/vendor/orders/:id/prepare — confirmed → packed */
+// ── Packing checklist: every line ticked (or scanned) before the order can be "packed"
+
+/** Locks a confirmed order of this store for packing */
+async function lockForPacking(client, orderId, vendorId) {
+  const r = await client.query('SELECT id, status FROM orders WHERE id = $1 AND vendor_id = $2 FOR UPDATE', [orderId, vendorId]);
+  if (r.rows.length === 0) throw httpError(404, 'Order not found.');
+  if (r.rows[0].status !== 'confirmed') throw httpError(409, `Packing is done on accepted orders; this one is ${r.rows[0].status}.`);
+}
+
+async function packingView(db, orderId) {
+  const r = await db.query(
+    `SELECT oi.id, oi.product_id, p.name AS product_name, p.barcode, p.image_url, oi.quantity, oi.packed_quantity
+     FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE oi.order_id = $1 ORDER BY oi.id`,
+    [orderId]
+  );
+  const items = r.rows;
+  return {
+    order_id: orderId,
+    items,
+    packed_units: items.reduce((s, i) => s + i.packed_quantity, 0),
+    total_units: items.reduce((s, i) => s + i.quantity, 0),
+    complete: items.every((i) => i.packed_quantity >= i.quantity),
+  };
+}
+
+/** PUT /api/vendor/orders/:id/items/:itemId/pack  Body: { packed: bool } or { packedQuantity } */
+const setItemPacked = asyncHandler(async (req, res) => {
+  const vendorId = vendorIdOf(req);
+  const orderId = intParam(req.params.id);
+  const itemId = intParam(req.params.itemId, 'itemId');
+  const view = await withTransaction(async (client) => {
+    await lockForPacking(client, orderId, vendorId);
+    const item = (await client.query('SELECT quantity FROM order_items WHERE id = $1 AND order_id = $2', [itemId, orderId])).rows[0];
+    if (!item) throw httpError(404, 'That item is not part of this order.');
+    let packed;
+    if (req.body.packedQuantity !== undefined) {
+      packed = wholeNumber(req.body.packedQuantity, 'packedQuantity');
+      if (packed > item.quantity) throw httpError(400, `Only ${item.quantity} of this item were ordered.`);
+    } else {
+      packed = req.body.packed === false ? 0 : item.quantity;
+    }
+    await client.query('UPDATE order_items SET packed_quantity = $1 WHERE id = $2', [packed, itemId]);
+    return packingView(client, orderId);
+  });
+  res.json({ success: true, data: view });
+});
+
+/**
+ * POST /api/vendor/orders/:id/scan  Body: { barcode }
+ * Scanning an item packs one unit of it. A product that isn't in the order,
+ * or one already fully packed, is refused, so the wrong item can't go in the bag.
+ */
+const scanPackItem = asyncHandler(async (req, res) => {
+  const vendorId = vendorIdOf(req);
+  const orderId = intParam(req.params.id);
+  const barcode = typeof req.body.barcode === 'string' ? req.body.barcode.trim() : '';
+  if (!barcode) throw httpError(400, 'Scan a barcode.');
+
+  const result = await withTransaction(async (client) => {
+    await lockForPacking(client, orderId, vendorId);
+    const lines = (await client.query(
+      `SELECT oi.id, oi.quantity, oi.packed_quantity, p.name FROM order_items oi JOIN products p ON p.id = oi.product_id
+       WHERE oi.order_id = $1 AND p.barcode = $2 ORDER BY oi.id`,
+      [orderId, barcode]
+    )).rows;
+    if (lines.length === 0) {
+      throw httpError(422, `Barcode ${barcode} is not in Order #${orderId}. Check you picked the right item.`, { code: 'WRONG_ITEM' });
+    }
+    const line = lines.find((l) => l.packed_quantity < l.quantity);
+    if (!line) throw httpError(409, `All "${lines[0].name}" for this order are already packed.`, { code: 'ALREADY_PACKED' });
+    await client.query('UPDATE order_items SET packed_quantity = packed_quantity + 1 WHERE id = $1', [line.id]);
+    return { scanned: { item_id: line.id, product_name: line.name, packed_quantity: line.packed_quantity + 1, quantity: line.quantity }, ...(await packingView(client, orderId)) };
+  });
+  res.json({ success: true, message: `${result.scanned.product_name}: ${result.scanned.packed_quantity}/${result.scanned.quantity} packed.`, data: result });
+});
+
+/** PUT /api/vendor/orders/:id/prepare — confirmed → packed, once the packing checklist is complete */
 const markOrderPreparing = asyncHandler(async (req, res) => {
   const vendorId = vendorIdOf(req);
   const orderId = intParam(req.params.id);
   const order = await withTransaction(async (client, afterCommit) => {
-    const o = await transition(client, orderId, vendorId, 'confirmed', 'packed');
+    await lockForPacking(client, orderId, vendorId);
+    const packing = await packingView(client, orderId);
+    if (!packing.complete) {
+      const missing = packing.items.filter((i) => i.packed_quantity < i.quantity)
+        .map((i) => ({ item_id: i.id, product_name: i.product_name, missing: i.quantity - i.packed_quantity }));
+      throw httpError(409, `Pack every item first: ${missing.map((m) => `${m.missing} × ${m.product_name}`).join(', ')} still missing.`, {
+        code: 'PACKING_INCOMPLETE', missing,
+      });
+    }
+    const o = await transition(client, orderId, vendorId, 'confirmed', 'packed', `, packed_by_staff_id = ${staffIdOf(req) ?? 'NULL'}`);
     await announceOrder(client, afterCommit, orderId, 'order_packed', {
       customer: { title: `Order #${orderId} packed`, body: 'Your items are packed.' },
     });
     return o;
   });
-  res.json({ success: true, message: 'Order marked as packed.', data: order });
+  res.json({ success: true, message: 'Order marked as packed.', data: vendorOrderView(order) });
 });
 
 /**
@@ -499,24 +764,28 @@ const markOrderReadyForPickup = asyncHandler(async (req, res) => {
     message: order.delivery_type === 'delivery'
       ? 'Order ready. Nearby riders have been notified.'
       : 'Order ready. The customer has been told to collect it.',
-    data: order,
+    data: vendorOrderView(order),
   });
 });
 
-/** PUT /api/vendor/orders/:id/deliver — self pickup handed over; dispute window starts */
+/**
+ * PUT /api/vendor/orders/:id/deliver  Body: { otp } — self pickup handed over; dispute window starts.
+ * The customer shows their 4-digit code at the counter.
+ */
 const markVendorOrderDelivered = asyncHandler(async (req, res) => {
   const vendorId = vendorIdOf(req);
   const orderId = intParam(req.params.id);
-  await withTransaction(async (client, afterCommit) => {
-    const r = await client.query(
-      `UPDATE orders SET status = 'delivered', delivered_at = NOW(), updated_at = NOW()
-       WHERE id = $1 AND vendor_id = $2 AND delivery_type = 'self_pickup' AND status IN ('ready_for_pickup', 'picked')
-       RETURNING id`,
+  await withHandoverOtp(async (client, afterCommit) => {
+    const o = (await client.query(
+      `SELECT * FROM orders WHERE id = $1 AND vendor_id = $2 AND delivery_type = 'self_pickup' AND status IN ('ready_for_pickup', 'picked')
+       FOR UPDATE`,
       [orderId, vendorId]
-    );
-    if (r.rows.length === 0) {
+    )).rows[0];
+    if (!o) {
       throw httpError(400, 'Mark as Delivered is only available for self pickup orders in Ready or Picked-up state.');
     }
+    await verifyHandoverOtp(client, o, req.body?.otp);
+    await client.query(`UPDATE orders SET status = 'delivered', delivered_at = NOW(), updated_at = NOW() WHERE id = $1`, [orderId]);
     await consumeOrderLocks(client, afterCommit, orderId, 'Self pickup handed over');
     await scheduleEscrowRelease(client, afterCommit, orderId);
     await announceOrder(client, afterCommit, orderId, 'order_delivered', {
@@ -630,12 +899,20 @@ module.exports = {
   deleteProduct,
   uploadProductImage,
   deleteProductImage,
+  addGalleryImage,
+  deleteGalleryImage,
+  getVendorReviews,
   createPosSale,
   getPosSales,
+  getPosSale,
+  getReceiptSettings,
+  updateReceiptSettings,
   getVendorOrders,
   getVendorOrder,
   approveOrder,
   rejectOrder,
+  setItemPacked,
+  scanPackItem,
   markOrderPreparing,
   markOrderReadyForPickup,
   markVendorOrderDelivered,

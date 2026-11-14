@@ -47,6 +47,15 @@ class _OrderChanged extends OrderEvent {
   List<Object?> get props => [orderId];
 }
 
+/// Refetches one order in place (after a review, or when its stock
+/// reservation ran out)
+class RefreshCustomerOrder extends OrderEvent {
+  final int orderId;
+  const RefreshCustomerOrder(this.orderId);
+  @override
+  List<Object?> get props => [orderId];
+}
+
 class CustomerMarkPickedUp extends OrderEvent {
   final int orderId;
   const CustomerMarkPickedUp({required this.orderId});
@@ -137,7 +146,8 @@ class OrdersLoaded extends OrderState {
   List<Object?> get props => [
         orders
             .map((o) => '${o.id}:${o.status}:${o.escrowStatus}:${o.rider?.id}:'
-                '${o.latestDispute?.status}:${o.latestDispute?.resolution}:${o.escrowReleaseDueAt}')
+                '${o.latestDispute?.status}:${o.latestDispute?.resolution}:${o.escrowReleaseDueAt}:'
+                '${o.deliveryOtp}:${o.otpLockedUntil}:${o.reservationExpiresAt}:${o.canReview}:${o.reviewedAt}')
             .join('|'),
         scope,
         activeCount,
@@ -183,6 +193,7 @@ class OrderBloc extends Bloc<OrderEvent, OrderState> {
     on<FetchCustomerOrders>(_onFetchOrders);
     on<LoadMoreCustomerOrders>(_onLoadMore);
     on<_OrderChanged>(_onOrderChanged);
+    on<RefreshCustomerOrder>((e, emit) => _onOrderChanged(_OrderChanged(e.orderId), emit));
     on<CustomerMarkPickedUp>(_onCustomerMarkPickedUp);
     on<CustomerConfirmDelivered>(_onCustomerConfirmDelivered);
     on<ClearOrderFeedback>(_onClearFeedback);

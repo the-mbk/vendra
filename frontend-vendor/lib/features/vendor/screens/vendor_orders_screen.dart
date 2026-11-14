@@ -1,14 +1,17 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra App - Vendor Orders Screen (FR07)
 // Two tabs:
-//   Active   every in-progress order, with approve/reject, pack and
-//            ready-for-pickup. Delivery orders are handed to riders (who
-//            mark them delivered); self-pickup orders can be marked
-//            delivered here.
+//   Active   every in-progress order, with approve/reject, the packing
+//            checklist (tick lines or scan units; "Mark as packed" opens up
+//            once everything is packed) and ready-for-pickup. Delivery
+//            orders are handed to riders (who mark them delivered);
+//            self-pickup orders are handed over here with the customer's
+//            4-digit code.
 //   History  delivered / cancelled orders, paged — more load as you scroll.
 // Cards show the customer and rider (tap to call), the escrow status and
 // any dispute. Orders update live: each order:update event or order
 // notification re-reads just that order and moves it between the tabs.
+// Staff without orders.fulfil (inventory manager) see orders read-only.
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -17,8 +20,13 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:vendra_vendor/vendra_core.dart';
 import '../bloc/vendor_order_bloc.dart';
+import '../models/packing.dart';
+import '../widgets/handover_code_dialog.dart';
+import '../widgets/packing_checklist.dart';
 import '../../auth/bloc/auth_bloc.dart';
 import '../../auth/bloc/auth_event.dart';
+import '../../auth/bloc/auth_state.dart';
+import '../../staff/permissions.dart';
 import 'vendor_disputes_screen.dart';
 
 final NumberFormat _money = NumberFormat('#,##0');
@@ -60,6 +68,11 @@ class VendorOrdersScreen extends StatelessWidget {
               context.read<AuthBloc>().add(RefreshUserRequested());
             }
             if (state is VendorOrderActionError) {
+              // Packing problems get a dialog so they can't be missed at the packing table
+              if (const {'WRONG_ITEM', 'ALREADY_PACKED', 'PACKING_INCOMPLETE'}.contains(state.code)) {
+                _showPackingProblem(context, state);
+                return;
+              }
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(state.message),
@@ -71,6 +84,8 @@ class VendorOrdersScreen extends StatelessWidget {
           },
           builder: (context, state) {
             final bloc = context.read<VendorOrderBloc>();
+            final auth = context.watch<AuthBloc>().state;
+            final canFulfil = auth is Authenticated && auth.user.can(Perm.ordersFulfil);
             final activeCount = bloc.hasLoaded ? bloc.activeOrders.length : null;
 
             return Column(
@@ -102,7 +117,7 @@ class VendorOrdersScreen extends StatelessWidget {
                                   Text('Orders',
                                       style: GoogleFonts.poppins(
                                           fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                                  Text('Accept → Pack → Ready for pickup',
+                                  Text(canFulfil ? 'Accept → Pack → Ready for pickup' : "View only · your role can't change orders",
                                       style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
                                 ],
                               ),
@@ -134,8 +149,8 @@ class VendorOrdersScreen extends StatelessWidget {
                           : const Center(child: CircularProgressIndicator(color: AppColors.primary)))
                       : TabBarView(
                           children: [
-                            _activeTab(context, bloc),
-                            _historyTab(context, bloc),
+                            _activeTab(context, bloc, canFulfil),
+                            _historyTab(context, bloc, canFulfil),
                           ],
                         ),
                 ),
@@ -203,7 +218,7 @@ class VendorOrdersScreen extends StatelessWidget {
     );
   }
 
-  Widget _activeTab(BuildContext context, VendorOrderBloc bloc) {
+  Widget _activeTab(BuildContext context, VendorOrderBloc bloc, bool canFulfil) {
     final orders = bloc.activeOrders;
     if (orders.isEmpty) {
       return _emptyList(context, 'No orders in progress',
@@ -215,12 +230,12 @@ class VendorOrdersScreen extends StatelessWidget {
         key: const PageStorageKey('vendor-orders-active'),
         padding: const EdgeInsets.all(16),
         itemCount: orders.length,
-        itemBuilder: (context, index) => _orderCard(context, orders[index]),
+        itemBuilder: (context, index) => _orderCard(context, orders[index], canFulfil),
       ),
     );
   }
 
-  Widget _historyTab(BuildContext context, VendorOrderBloc bloc) {
+  Widget _historyTab(BuildContext context, VendorOrderBloc bloc, bool canFulfil) {
     final orders = bloc.historyOrders;
     if (orders.isEmpty && !bloc.hasMoreHistory) {
       return _emptyList(context, 'No completed or cancelled orders yet',
@@ -241,7 +256,7 @@ class VendorOrdersScreen extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           itemCount: orders.length + 1,
           itemBuilder: (context, index) {
-            if (index < orders.length) return _orderCard(context, orders[index]);
+            if (index < orders.length) return _orderCard(context, orders[index], canFulfil);
             return _historyFooter(context, bloc);
           },
         ),
@@ -281,7 +296,7 @@ class VendorOrdersScreen extends StatelessWidget {
     return Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Center(child: child));
   }
 
-  Widget _orderCard(BuildContext context, OrderModel order) {
+  Widget _orderCard(BuildContext context, OrderModel order, bool canFulfil) {
     final isPending = order.status == 'pending';
 
     return Container(
@@ -387,12 +402,30 @@ class VendorOrdersScreen extends StatelessWidget {
 
           const SizedBox(height: 6),
 
-          // Items
-          for (final item in order.items)
+          // Items: a packing checklist while the order is being packed
+          if (order.status == 'confirmed')
+            PackingChecklist(order: order, canPack: canFulfil)
+          else
+            for (final item in order.items)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text('${item.quantity} × ${item.productName ?? 'Product #${item.productId}'}',
+                    style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
+              ),
+          if (order.packedByName != null && order.packedByName!.isNotEmpty && order.status != 'confirmed')
             Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text('${item.quantity} × ${item.productName ?? 'Product #${item.productId}'}',
-                  style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  const Icon(Icons.inventory_2_outlined, size: 14, color: AppColors.textLight),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text('Packed by ${order.packedByName}',
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary)),
+                  ),
+                ],
+              ),
             ),
 
           const Divider(height: 16),
@@ -415,7 +448,7 @@ class VendorOrdersScreen extends StatelessWidget {
             ],
           ),
 
-          ..._actions(context, order),
+          if (canFulfil) ..._actions(context, order),
         ],
       ),
     );
@@ -591,14 +624,17 @@ class VendorOrdersScreen extends StatelessWidget {
     }
 
     if (order.status == 'confirmed') {
+      final ready = canMarkPacked(order);
       return [
         const SizedBox(height: 12),
         _fullWidthButton(
           label: 'Mark as Packed',
           icon: Icons.inventory_outlined,
           color: Colors.indigo,
-          onPressed: () => bloc.add(MarkOrderPreparing(orderId: order.id)),
+          // The server refuses too (409 PACKING_INCOMPLETE) if a line is missing
+          onPressed: ready ? () => bloc.add(MarkOrderPreparing(orderId: order.id)) : null,
         ),
+        if (!ready) _hint('Tick or scan every item above to mark the order packed.'),
       ];
     }
 
@@ -622,12 +658,14 @@ class VendorOrdersScreen extends StatelessWidget {
       return [
         const SizedBox(height: 12),
         _fullWidthButton(
-          label: 'Mark as Delivered',
+          label: 'Hand over to customer',
           icon: Icons.done_all,
           color: Colors.teal.shade700,
-          onPressed: () => bloc.add(DeliverVendorOrder(orderId: order.id)),
+          onPressed: () => _handOver(context, order),
         ),
-        _hint('Completes the order. Payment is released to your wallet after the dispute window.'),
+        _hint(order.otpRequired
+            ? "Needs the customer's 4-digit handover code. Payment is released to your wallet after the dispute window."
+            : 'Completes the order. Payment is released to your wallet after the dispute window.'),
       ];
     }
 
@@ -650,7 +688,7 @@ class VendorOrdersScreen extends StatelessWidget {
     required String label,
     required IconData icon,
     required Color color,
-    required VoidCallback onPressed,
+    required VoidCallback? onPressed,
   }) {
     return SizedBox(
       width: double.infinity,
@@ -667,6 +705,53 @@ class VendorOrdersScreen extends StatelessWidget {
         padding: const EdgeInsets.only(top: 6),
         child: Text(text, style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary)),
       );
+
+  /// Self pickup: the customer's code (or a confirm) → delivered
+  Future<void> _handOver(BuildContext context, OrderModel order) async {
+    final bloc = context.read<VendorOrderBloc>();
+    final authBloc = context.read<AuthBloc>();
+    final messenger = ScaffoldMessenger.of(context);
+    final handedOver = await showHandoverDialog(context, order);
+    // Re-read either way: a wrong-code lockout also changes the order
+    bloc.add(RefreshVendorOrder(order.id));
+    if (!handedOver) return;
+    authBloc.add(RefreshUserRequested());
+    messenger.showSnackBar(const SnackBar(
+      content: Text('Handed over. Payment is released to your wallet after the dispute window.'),
+      backgroundColor: AppColors.success,
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  /// WRONG_ITEM / ALREADY_PACKED after a scan, PACKING_INCOMPLETE on "Mark as packed"
+  void _showPackingProblem(BuildContext context, VendorOrderActionError error) {
+    final (IconData icon, Color color, String title) = switch (error.code) {
+      'WRONG_ITEM' => (Icons.do_not_disturb_on_outlined, AppColors.stockRed, 'Not in this order'),
+      'ALREADY_PACKED' => (Icons.check_circle_outline, AppColors.reservedAmber, 'Already packed'),
+      _ => (Icons.checklist, Colors.indigo, 'Packing not finished'),
+    };
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        icon: Icon(icon, color: color, size: 36),
+        title: Text(title, style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(error.message, textAlign: TextAlign.center, style: GoogleFonts.poppins(fontSize: 13)),
+            if (error.missing.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              for (final line in error.missing)
+                Text('• $line still to pack',
+                    style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+            ],
+          ],
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+      ),
+    );
+  }
 
   void _showRejectConfirmation(BuildContext context, int orderId) {
     showDialog(

@@ -7,6 +7,9 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const pool = require('../db');
 const { getEscrowPoolBalanceReadOnly } = require('../services/escrowPool.service');
+const { readRiderDocuments } = require('../services/riderDocuments');
+const { permissionsOf } = require('../middleware/auth');
+const { notifyAdmins } = require('../services/notification.service');
 
 const SALT_ROUNDS = 10;
 const JWT_EXPIRY = '7d'; // Token valid for 7 days
@@ -15,6 +18,7 @@ const JWT_EXPIRY = '7d'; // Token valid for 7 days
  * POST /api/auth/signup
  * Register a new user. If role is 'vendor', auto-creates vendor record.
  * Body: { fullName, email, password, role, storeName?, cnic?, phone? }
+ * Riders also send { cnic, licenseNumber, vehicleNumber, vehicleType } and wait for admin approval.
  */
 const signup = async (req, res) => {
   const client = await pool.connect();
@@ -45,6 +49,16 @@ const signup = async (req, res) => {
         success: false,
         message: 'CNIC is required for vendor registration.',
       });
+    }
+
+    // Rider documents are checked by an admin before the first delivery
+    let riderDocs = null;
+    if (role === 'rider') {
+      try {
+        riderDocs = readRiderDocuments({ ...req.body, vehicleType: vehicleType || 'motorcycle' });
+      } catch (err) {
+        return res.status(err.statusCode || 400).json({ success: false, message: err.message });
+      }
     }
 
     // Check if email already exists
@@ -100,15 +114,23 @@ const signup = async (req, res) => {
       );
     }
 
-    // If rider, create rider record
+    // If rider, create rider record (pending approval)
+    const afterCommit = [];
     if (role === 'rider') {
       await client.query(
-        'INSERT INTO riders (user_id, vehicle_type) VALUES ($1, $2)',
-        [user.id, vehicleType || 'motorbike']
+        `INSERT INTO riders (user_id, vehicle_type, cnic, license_number, vehicle_number, approval_status)
+         VALUES ($1, $2, $3, $4, $5, 'pending')`,
+        [user.id, riderDocs.vehicleType, riderDocs.cnic, riderDocs.licenseNumber, riderDocs.vehicleNumber]
       );
+      await notifyAdmins(client, afterCommit, {
+        type: 'rider_pending',
+        title: `New rider: ${fullName}`,
+        body: 'Check the CNIC, licence and vehicle in Riders before they can deliver.',
+      });
     }
 
     await client.query('COMMIT');
+    afterCommit.forEach((cb) => cb());
 
     // Generate JWT token
     const token = jwt.sign(
@@ -125,7 +147,9 @@ const signup = async (req, res) => {
       success: true,
       message: role === 'vendor'
         ? 'Vendor account created! Awaiting admin approval.'
-        : 'Account created successfully.',
+        : role === 'rider'
+          ? 'Rider account created! An admin will check your documents before your first delivery.'
+          : 'Account created successfully.',
       data: {
         token,
         user: {
@@ -136,6 +160,7 @@ const signup = async (req, res) => {
           role: user.role,
           vendorId: vendorId,
           isApproved: isApproved,
+          riderApprovalStatus: role === 'rider' ? 'pending' : null,
           createdAt: user.created_at,
         },
       },
@@ -179,9 +204,10 @@ const login = async (req, res) => {
     // Find user by email
     const result = await pool.query(
       `SELECT u.id, u.full_name, u.email, u.phone, u.password_hash, u.role, u.vendor_id, u.wallet_balance,
-              u.must_change_password, v.store_name, v.is_approved, v.cnic
+              u.must_change_password, v.store_name, v.is_approved, v.cnic, r.approval_status AS rider_approval_status
        FROM users u
        LEFT JOIN vendors v ON u.vendor_id = v.id
+       LEFT JOIN riders r ON r.user_id = u.id
        WHERE u.email = $1`,
       [email.toLowerCase()]
     );
@@ -241,6 +267,7 @@ const login = async (req, res) => {
           storeName: user.store_name || null,
           isApproved: user.is_approved,
           cnic: user.cnic || null,
+          riderApprovalStatus: user.rider_approval_status || null,
           mustChangePassword: user.must_change_password,
           platformEscrowBalance,
         },
@@ -265,7 +292,8 @@ const getMe = async (req, res) => {
       `SELECT u.id, u.full_name, u.email, u.phone, u.role, u.vendor_id, u.wallet_balance, u.created_at, u.must_change_password,
               v.store_name, v.store_address, v.is_approved, v.cnic, v.latitude AS store_lat, v.longitude AS store_lng,
               v.pending_latitude, v.pending_longitude, v.pending_address, v.location_requested_at, v.location_rejection_reason,
-              r.vehicle_type, r.is_online
+              r.vehicle_type, r.is_online, r.approval_status AS rider_approval_status, r.rejection_reason AS rider_rejection_reason,
+              r.cnic AS rider_cnic, r.license_number, r.vehicle_number
        FROM users u
        LEFT JOIN vendors v ON u.vendor_id = v.id
        LEFT JOIN riders r ON r.user_id = u.id
@@ -306,6 +334,14 @@ const getMe = async (req, res) => {
         locationRejectionReason: user.location_rejection_reason || null,
         vehicleType: user.vehicle_type || null,
         isOnline: user.is_online ?? null,
+        riderApprovalStatus: user.rider_approval_status || null,
+        riderRejectionReason: user.rider_rejection_reason || null,
+        riderDocuments: user.role === 'rider'
+          ? { cnic: user.rider_cnic, licenseNumber: user.license_number, vehicleNumber: user.vehicle_number }
+          : null,
+        // Store staff signed in with a PIN: who they are and what they may do (owner: staff null)
+        staff: req.user.staff || null,
+        permissions: user.role === 'vendor' ? permissionsOf(req.user.staff?.role) : null,
         mustChangePassword: user.must_change_password,
         createdAt: user.created_at,
         platformEscrowBalance,

@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 import '../../config/api_config.dart';
 import '../../config/app_theme.dart';
 import '../models/notification_model.dart';
+import '../models/page_meta.dart';
 import 'api_service.dart';
 import 'realtime_service.dart';
 
@@ -29,13 +30,20 @@ class NotificationCenter extends ChangeNotifier {
   final ApiService _api = ApiService();
   StreamSubscription<NotificationModel>? _sub;
 
+  static const int _pageSize = 30;
+
   List<NotificationModel> _items = [];
   int _unread = 0;
   bool _loading = false;
+  bool _loadingMore = false;
+  PageMeta _meta = const PageMeta();
 
   List<NotificationModel> get items => List.unmodifiable(_items);
   int get unreadCount => _unread;
   bool get isLoading => _loading;
+  bool get isLoadingMore => _loadingMore;
+  /// Older notifications are waiting on the server
+  bool get hasMore => _meta.hasMore;
 
   /// Loads the inbox and listens for new notifications.
   Future<void> start() async {
@@ -49,6 +57,7 @@ class NotificationCenter extends ChangeNotifier {
     _sub = null;
     _items = [];
     _unread = 0;
+    _meta = const PageMeta();
     notifyListeners();
   }
 
@@ -56,18 +65,53 @@ class NotificationCenter extends ChangeNotifier {
     _loading = true;
     notifyListeners();
     try {
-      final res = await _api.get(ApiConfig.notifications);
+      final res = await _api.get(ApiConfig.notifications, queryParams: {'limit': _pageSize});
       final data = res.data['data'] as Map<String, dynamic>;
-      _items = (data['notifications'] as List<dynamic>)
-          .map((n) => NotificationModel.fromJson(Map<String, dynamic>.from(n)))
-          .toList();
+      _items = _parse(data);
       _unread = data['unreadCount'] ?? 0;
+      _meta = PageMeta.fromResponse(res.data);
     } catch (e) {
       debugPrint('Notifications load failed: ${ApiService.getErrorMessage(e)}');
     } finally {
       _loading = false;
       notifyListeners();
     }
+  }
+
+  /// Next page of older notifications (the inbox keeps every alert, not just the latest)
+  Future<void> loadMore() async {
+    if (_loadingMore || !_meta.hasMore || _meta.nextOffset == null) return;
+    _loadingMore = true;
+    notifyListeners();
+    try {
+      // Offset counts from the newest; realtime arrivals since the last page shift it, so skip repeats
+      final res = await _api.get(ApiConfig.notifications, queryParams: {'limit': _pageSize, 'offset': _meta.nextOffset});
+      final data = res.data['data'] as Map<String, dynamic>;
+      final known = _items.map((n) => n.id).toSet();
+      _items = [..._items, ..._parse(data).where((n) => !known.contains(n.id))];
+      _unread = data['unreadCount'] ?? _unread;
+      _meta = PageMeta.fromResponse(res.data);
+    } catch (e) {
+      debugPrint('Older notifications failed: ${ApiService.getErrorMessage(e)}');
+    } finally {
+      _loadingMore = false;
+      notifyListeners();
+    }
+  }
+
+  List<NotificationModel> _parse(Map<String, dynamic> data) => (data['notifications'] as List<dynamic>)
+      .map((n) => NotificationModel.fromJson(Map<String, dynamic>.from(n)))
+      .toList();
+
+  /// Marks one notification read (when it's opened)
+  Future<void> markRead(NotificationModel n) async {
+    if (n.isRead) return;
+    _items = _items.map((x) => x.id == n.id ? x.markRead() : x).toList();
+    if (_unread > 0) _unread -= 1;
+    notifyListeners();
+    try {
+      await _api.put(ApiConfig.notificationRead(n.id));
+    } catch (_) {}
   }
 
   Future<void> markAllRead() async {

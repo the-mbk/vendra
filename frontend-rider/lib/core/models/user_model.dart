@@ -23,6 +23,15 @@ class UserModel {
   final String? createdAt;
   /// Total Rs. currently held in the platform escrow pool (all users).
   final double platformEscrowBalance;
+  /// Riders: pending | approved | rejected (documents checked by an admin)
+  final String? riderApprovalStatus;
+  final String? riderRejectionReason;
+  final RiderDocuments? riderDocuments;
+  /// Vendors: the shop staff member using this session (null = the store owner)
+  final StaffInfo? staff;
+  /// Vendors: what this session may do (products.view, products.manage, pos,
+  /// orders.view, orders.fulfil, ledger, owner). Empty = not loaded / other roles
+  final List<String> permissions;
 
   UserModel({
     required this.id,
@@ -43,6 +52,11 @@ class UserModel {
     this.mustChangePassword = false,
     this.createdAt,
     this.platformEscrowBalance = 0,
+    this.riderApprovalStatus,
+    this.riderRejectionReason,
+    this.riderDocuments,
+    this.staff,
+    this.permissions = const [],
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
@@ -65,6 +79,13 @@ class UserModel {
       mustChangePassword: json['mustChangePassword'] ?? json['must_change_password'] ?? false,
       createdAt: json['createdAt'] ?? json['created_at'],
       platformEscrowBalance: _toDouble(json['platformEscrowBalance'] ?? json['platform_escrow_balance']),
+      riderApprovalStatus: json['riderApprovalStatus'],
+      riderRejectionReason: json['riderRejectionReason'],
+      riderDocuments: json['riderDocuments'] is Map
+          ? RiderDocuments.fromJson(Map<String, dynamic>.from(json['riderDocuments']))
+          : null,
+      staff: json['staff'] is Map ? StaffInfo.fromJson(Map<String, dynamic>.from(json['staff'])) : null,
+      permissions: (json['permissions'] as List?)?.map((p) => p.toString()).toList() ?? const [],
     );
   }
 
@@ -87,6 +108,13 @@ class UserModel {
   bool get isVendor => role == 'vendor';
   bool get isCustomer => role == 'customer';
   bool get isRider => role == 'rider';
+
+  /// Riders deliver only once an admin has approved their documents
+  bool get isRiderApproved => riderApprovalStatus == null || riderApprovalStatus == 'approved';
+
+  /// Vendor permission check: the owner (no staff) may do everything
+  bool can(String permission) => staff == null || permissions.contains(permission);
+  bool get isStoreOwner => isVendor && staff == null;
 
   UserModel copyWith({
     double? walletBalance,
@@ -111,6 +139,47 @@ class UserModel {
       mustChangePassword: mustChangePassword,
       createdAt: createdAt,
       platformEscrowBalance: platformEscrowBalance ?? this.platformEscrowBalance,
+      riderApprovalStatus: riderApprovalStatus,
+      riderRejectionReason: riderRejectionReason,
+      riderDocuments: riderDocuments,
+      staff: staff,
+      permissions: permissions,
     );
   }
+}
+
+class RiderDocuments {
+  final String? cnic;
+  final String? licenseNumber;
+  final String? vehicleNumber;
+
+  const RiderDocuments({this.cnic, this.licenseNumber, this.vehicleNumber});
+
+  factory RiderDocuments.fromJson(Map<String, dynamic> json) => RiderDocuments(
+        cnic: json['cnic'],
+        licenseNumber: json['licenseNumber'],
+        vehicleNumber: json['vehicleNumber'],
+      );
+}
+
+/// A cashier / packer / inventory manager signed in on the shop's device with a PIN
+class StaffInfo {
+  final int id;
+  final String fullName;
+  final String role; // cashier | packer | inventory_manager
+
+  const StaffInfo({required this.id, required this.fullName, required this.role});
+
+  factory StaffInfo.fromJson(Map<String, dynamic> json) => StaffInfo(
+        id: json['id'] is int ? json['id'] : int.tryParse('${json['id']}') ?? 0,
+        fullName: json['fullName'] ?? '',
+        role: json['role'] ?? '',
+      );
+
+  String get roleLabel => switch (role) {
+        'cashier' => 'Cashier',
+        'packer' => 'Packer',
+        'inventory_manager' => 'Inventory Manager',
+        _ => role,
+      };
 }

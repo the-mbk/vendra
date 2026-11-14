@@ -10,10 +10,11 @@ import 'storage_service.dart';
 
 class ApiService {
   /// Called when the server says the stored session is no longer valid
-  /// (expired or invalid token). Each app sets this in main.dart to sign the
+  /// (expired, invalid or removed-staff token). Each app sets this in main.dart to sign the
   /// user out and return to the login screen.
   static void Function()? onSessionExpired;
-  static const _sessionCodes = {'TOKEN_EXPIRED', 'INVALID_TOKEN'};
+  /// STAFF_INACTIVE: the vendor app's shop-staff session ended (the owner removed that staff member)
+  static const _sessionCodes = {'TOKEN_EXPIRED', 'INVALID_TOKEN', 'STAFF_INACTIVE'};
 
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;

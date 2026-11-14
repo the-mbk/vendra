@@ -3,7 +3,9 @@
 // Two lists (see VendorOrderLists):
 //   active   every in-progress order — GET /api/vendor/orders?scope=active
 //   history  delivered / cancelled — ?scope=history, paged (load more on scroll)
-// Approve/reject pending orders, pack → ready, self-pickup delivery.
+// Approve/reject pending orders, the packing checklist (tick a line or scan
+// a unit, FR07), packed → ready. Self-pickup handover needs the customer's
+// code and is done by the handover dialog (widgets/handover_code_dialog.dart).
 // Stays live: an `order:update` socket event or an order notification
 // (new order, rider accepted, dispute raised, escrow released…) re-reads
 // just that order via GET /api/vendor/orders/:id and moves it between the
@@ -47,6 +49,30 @@ class RefreshVendorOrder extends VendorOrderEvent {
   List<Object?> get props => [orderId];
 }
 
+/// Forget the loaded orders (a staff member who can't see orders switched in)
+class ClearVendorOrders extends VendorOrderEvent {
+  const ClearVendorOrders();
+}
+
+/// Packing checklist: tick / untick every unit of one line
+class PackOrderItem extends VendorOrderEvent {
+  final int orderId;
+  final int itemId;
+  final bool packed;
+  const PackOrderItem({required this.orderId, required this.itemId, required this.packed});
+  @override
+  List<Object?> get props => [orderId, itemId, packed];
+}
+
+/// Packing checklist: a scanned barcode packs one unit of that line
+class ScanPackOrder extends VendorOrderEvent {
+  final int orderId;
+  final String barcode;
+  const ScanPackOrder({required this.orderId, required this.barcode});
+  @override
+  List<Object?> get props => [orderId, barcode];
+}
+
 class ApproveVendorOrder extends VendorOrderEvent {
   final int orderId;
   const ApproveVendorOrder({required this.orderId});
@@ -73,13 +99,6 @@ class MarkOrderReadyForPickup extends VendorOrderEvent {
   /// Delivery orders are broadcast to nearby riders; self-pickup waits for the customer
   final bool isDelivery;
   const MarkOrderReadyForPickup({required this.orderId, this.isDelivery = false});
-  @override
-  List<Object?> get props => [orderId];
-}
-
-class DeliverVendorOrder extends VendorOrderEvent {
-  final int orderId;
-  const DeliverVendorOrder({required this.orderId});
   @override
   List<Object?> get props => [orderId];
 }
@@ -119,9 +138,26 @@ class VendorOrderActionSuccess extends VendorOrderState {
 
 class VendorOrderActionError extends VendorOrderState {
   final String message;
-  const VendorOrderActionError({required this.message});
+  /// API error code: WRONG_ITEM, ALREADY_PACKED, PACKING_INCOMPLETE, STAFF_FORBIDDEN…
+  final String? code;
+  /// PACKING_INCOMPLETE: "2 × Milk" lines still to pack
+  final List<String> missing;
+  const VendorOrderActionError({required this.message, this.code, this.missing = const []});
+
+  factory VendorOrderActionError.from(Object e) {
+    final data = ApiService.getErrorData(e);
+    return VendorOrderActionError(
+      message: ApiService.getErrorMessage(e),
+      code: data?['code'] as String?,
+      missing: (data?['missing'] as List? ?? const [])
+          .whereType<Map>()
+          .map((m) => '${toInt(m['missing'])} × ${m['product_name'] ?? 'item'}')
+          .toList(),
+    );
+  }
+
   @override
-  List<Object?> get props => [message, identityHashCode(this)];
+  List<Object?> get props => [message, code, identityHashCode(this)];
 }
 
 // BLoC
@@ -139,6 +175,12 @@ class VendorOrderBloc extends Bloc<VendorOrderEvent, VendorOrderState> {
   bool _loadingMoreHistory = false;
   String? _historyError;
   int _revision = 0;
+
+  /// Checklist lines with a pack request in flight, and orders being scanned
+  final Set<int> _packingItems = {};
+  final Set<int> _scanningOrders = {};
+  bool isPackingItem(int itemId) => _packingItems.contains(itemId);
+  bool isScanningOrder(int orderId) => _scanningOrders.contains(orderId);
 
   /// Orders re-read while a full fetch is in flight are newer than its
   /// snapshot, so they are re-applied on top of it (null = removed)
@@ -164,7 +206,9 @@ class VendorOrderBloc extends Bloc<VendorOrderEvent, VendorOrderState> {
     on<RejectVendorOrder>(_onReject);
     on<MarkOrderPreparing>(_onPrepare);
     on<MarkOrderReadyForPickup>(_onReadyPickup);
-    on<DeliverVendorOrder>(_onDeliver);
+    on<ClearVendorOrders>(_onClear);
+    on<PackOrderItem>(_onPackItem);
+    on<ScanPackOrder>(_onScanPack);
 
     // One order change usually arrives as both an order:update and a
     // notification — debounce so each order is re-read once.
@@ -318,9 +362,50 @@ class VendorOrderBloc extends Bloc<VendorOrderEvent, VendorOrderState> {
         emit(VendorOrderActionError(message: response.data['message'] ?? failureMessage));
       }
     } catch (e) {
-      emit(VendorOrderActionError(message: ApiService.getErrorMessage(e)));
+      emit(VendorOrderActionError.from(e));
     }
     await _refreshOrder(orderId, emit);
+  }
+
+  void _onClear(ClearVendorOrders event, Emitter<VendorOrderState> emit) {
+    _lists.clear();
+    _hasLoaded = false;
+    _historyError = null;
+    _pendingRefresh.clear();
+    emit(VendorOrderInitial());
+  }
+
+  /// PUT …/items/:itemId/pack — the order is then re-read for the new counts
+  Future<void> _onPackItem(PackOrderItem event, Emitter<VendorOrderState> emit) async {
+    if (!_packingItems.add(event.itemId)) return;
+    _emitLoaded(emit);
+    try {
+      await _api.put(ApiConfig.packOrderItem(event.orderId, event.itemId), data: {'packed': event.packed});
+    } catch (e) {
+      emit(VendorOrderActionError.from(e));
+    } finally {
+      _packingItems.remove(event.itemId);
+    }
+    await _refreshOrder(event.orderId, emit);
+    _emitLoaded(emit);
+  }
+
+  /// POST …/scan — 422 WRONG_ITEM (not in this order), 409 ALREADY_PACKED
+  Future<void> _onScanPack(ScanPackOrder event, Emitter<VendorOrderState> emit) async {
+    final code = event.barcode.trim();
+    if (code.isEmpty || !_scanningOrders.add(event.orderId)) return;
+    _emitLoaded(emit);
+    try {
+      final response = await _api.post(ApiConfig.scanPackOrder(event.orderId), data: {'barcode': code});
+      // e.g. "Milk 1L: 2/3 packed."
+      emit(VendorOrderActionSuccess(message: response.data['message'] ?? 'Packed one item.'));
+    } catch (e) {
+      emit(VendorOrderActionError.from(e));
+    } finally {
+      _scanningOrders.remove(event.orderId);
+    }
+    await _refreshOrder(event.orderId, emit);
+    _emitLoaded(emit);
   }
 
   Future<void> _onApprove(ApproveVendorOrder event, Emitter<VendorOrderState> emit) => _runAction(
@@ -354,14 +439,6 @@ class VendorOrderBloc extends Bloc<VendorOrderEvent, VendorOrderState> {
         successMessage: event.isDelivery
             ? 'Ready for pickup — nearby riders have been notified.'
             : 'Ready for pickup — the customer has been notified to collect it.',
-        failureMessage: 'Failed to update order',
-      );
-
-  Future<void> _onDeliver(DeliverVendorOrder event, Emitter<VendorOrderState> emit) => _runAction(
-        emit,
-        orderId: event.orderId,
-        request: () => _api.put(ApiConfig.deliverOrder(event.orderId)),
-        successMessage: 'Marked delivered. Payment is released to your wallet after the dispute window.',
         failureMessage: 'Failed to update order',
       );
 }

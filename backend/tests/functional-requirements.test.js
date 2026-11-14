@@ -33,6 +33,33 @@ async function assertMoneyBalanced() {
   assert.equal(m.pool.toFixed(2), m.held.toFixed(2), 'escrow pool must equal money held on open orders');
 }
 
+/** Ticks every line of the packing checklist (FR07) */
+async function packAll(orderId, token) {
+  const o = await api('GET', `/api/vendor/orders/${orderId}`, undefined, token);
+  assert.equal(o.status, 200, JSON.stringify(o.body));
+  for (const item of o.body.data.items) {
+    const r = await api('PUT', `/api/vendor/orders/${orderId}/items/${item.id}/pack`, { packed: true }, token);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+  }
+}
+
+/** The customer's handover code, as their app shows it */
+async function otpOf(orderId) {
+  return (await query('SELECT delivery_otp FROM orders WHERE id = $1', [orderId])).rows[0].delivery_otp;
+}
+
+/** A rider who signed up with documents and was approved by the admin */
+async function approvedRider(email, fullName) {
+  const r = await api('POST', '/api/auth/signup', {
+    fullName, email, password: 'secret123', role: 'rider',
+    vehicleType: 'motorcycle', cnic: '3520212345671', licenseNumber: 'LHR-DL-778899', vehicleNumber: 'LEB-1234',
+  });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  const approve = await api('PUT', `/api/admin/riders/${r.body.data.user.id}/approve`, undefined, tokens.admin);
+  assert.equal(approve.status, 200, JSON.stringify(approve.body));
+  return r.body.data.token;
+}
+
 async function setPolicies(values) {
   const r = await api('PUT', '/api/admin/policies', { values }, tokens.admin);
   assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -46,6 +73,7 @@ async function readyDeliveryOrder(items) {
   assert.equal(co.status, 201, JSON.stringify(co.body));
   const id = co.body.data.id;
   for (const step of ['approve', 'prepare', 'ready-for-pickup']) {
+    if (step === 'prepare') await packAll(id, tokens.usman);
     const r = await api('PUT', `/api/vendor/orders/${id}/${step}`, undefined, tokens.usman);
     assert.equal(r.status, 200, `${step}: ${JSON.stringify(r.body)}`);
   }
@@ -91,11 +119,12 @@ describe('FR05 — role-based login', () => {
 
   test('riders can sign up', async () => {
     const r = await api('POST', '/api/auth/signup', {
-      fullName: 'Test Rider', email: 'new@rider.pk', password: 'secret123', role: 'rider', vehicleType: 'bicycle',
+      fullName: 'Test Rider', email: 'new@rider.pk', password: 'secret123', role: 'rider', vehicleType: 'bicycle', cnic: '42101-9988776-5',
     });
     assert.equal(r.status, 201, JSON.stringify(r.body));
     const me = await api('GET', '/api/auth/me', undefined, r.body.data.token);
     assert.equal(me.body.data.vehicleType, 'bicycle');
+    assert.equal(me.body.data.riderApprovalStatus, 'pending');
   });
 });
 
@@ -263,10 +292,7 @@ describe('FR03 + FR04 + FR07 — rider delivery, geofence, payout, escrow', () =
 
   test('two riders racing for one task: exactly one wins', async () => {
     const race = await readyDeliveryOrder([{ productId: 4, quantity: 1 }]);
-    const extra = await api('POST', '/api/auth/signup', {
-      fullName: 'Race Rider', email: 'race@rider.pk', password: 'secret123', role: 'rider',
-    });
-    const raceToken = extra.body.data.token;
+    const raceToken = await approvedRider('race@rider.pk', 'Race Rider');
     await api('PUT', '/api/rider/status', { isOnline: true, ...SADDAR }, raceToken);
     await api('PUT', '/api/rider/status', { isOnline: true, ...SADDAR }, tokens.hamza);
     const results = await Promise.all([
@@ -277,7 +303,7 @@ describe('FR03 + FR04 + FR07 — rider delivery, geofence, payout, escrow', () =
     // Winner cancels out of the test by delivering nothing; free the rider for later tests
     const winner = results[0].status === 200 ? raceToken : tokens.hamza;
     await api('POST', `/api/rider/orders/${race.id}/picked`, SADDAR, winner);
-    const done = await api('POST', `/api/rider/orders/${race.id}/deliver`, CLIFTON, winner);
+    const done = await api('POST', `/api/rider/orders/${race.id}/deliver`, { ...CLIFTON, otp: await otpOf(race.id) }, winner);
     assert.equal(done.status, 200, JSON.stringify(done.body));
   });
 
@@ -366,7 +392,7 @@ describe('FR03 + FR04 + FR07 — rider delivery, geofence, payout, escrow', () =
 
   test('delivery at the door deducts stock, pays the rider, holds the rest', async () => {
     const before = await product(2);
-    const r = await api('POST', `/api/rider/orders/${order.id}/deliver`, CLIFTON, tokens.bilal);
+    const r = await api('POST', `/api/rider/orders/${order.id}/deliver`, { ...CLIFTON, otp: await otpOf(order.id) }, tokens.bilal);
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.data.distanceSource, 'gps');
     assert.ok(r.body.data.distanceKm > 4 && r.body.data.distanceKm < 6, `distance ${r.body.data.distanceKm}`);
@@ -420,7 +446,7 @@ describe('FR08 — disputes freeze escrow until an admin decides', () => {
     const order = await readyDeliveryOrder([{ productId: 4, quantity: 1 }]);
     await api('POST', `/api/rider/tasks/${order.id}/accept`, undefined, tokens.bilal);
     await api('POST', `/api/rider/orders/${order.id}/picked`, SADDAR, tokens.bilal);
-    const delivered = await api('POST', `/api/rider/orders/${order.id}/deliver`, CLIFTON, tokens.bilal);
+    const delivered = await api('POST', `/api/rider/orders/${order.id}/deliver`, { ...CLIFTON, otp: await otpOf(order.id) }, tokens.bilal);
     assert.equal(delivered.status, 200, JSON.stringify(delivered.body));
     assert.equal(delivered.body.data.distanceSource, 'straight_line', 'no GPS pings → straight-line fallback');
 
@@ -483,7 +509,9 @@ describe('Policy engine — rules change without a redeploy', () => {
     assert.equal(co.status, 201);
     const id = co.body.data.id;
     for (const step of ['approve', 'prepare', 'ready-for-pickup', 'deliver']) {
-      const r = await api('PUT', `/api/vendor/orders/${id}/${step}`, undefined, tokens.usman);
+      if (step === 'prepare') await packAll(id, tokens.usman);
+      const body = step === 'deliver' ? { otp: await otpOf(id) } : undefined;
+      const r = await api('PUT', `/api/vendor/orders/${id}/${step}`, body, tokens.usman);
       assert.equal(r.status, 200, `${step}: ${JSON.stringify(r.body)}`);
     }
     const o = (await query('SELECT escrow_status FROM orders WHERE id = $1', [id])).rows[0];

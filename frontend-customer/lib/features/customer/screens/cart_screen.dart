@@ -10,6 +10,7 @@
 //   cart asks POST /api/customer/checkout/quote whenever the items, the pin
 //   or an admin policy change, and shows exactly what checkout will charge
 // - Live stock (FR01) flags lines the store can no longer fill
+// - Escrow trust badge by the pay button (FR03)
 // - Pay from the wallet, or by card (shared CardPaymentFlow: card sheet →
 //   POST /api/payments/checkout → one-time password if asked)
 // - 409 INSUFFICIENT_STOCK / 400 INSUFFICIENT_BALANCE explained clearly;
@@ -36,6 +37,7 @@ import '../bloc/order_bloc.dart';
 import '../../auth/bloc/auth_bloc.dart';
 import '../../auth/bloc/auth_event.dart';
 import '../../auth/bloc/auth_state.dart';
+import '../widgets/trust_badges.dart';
 import '../widgets/wallet_actions.dart';
 
 /// Opens one store's cart
@@ -1073,6 +1075,11 @@ class _CartScreenState extends State<CartScreen> {
                   );
                 },
               ),
+            // Escrow trust badge right by the pay button (FR03)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 10),
+              child: EscrowTrustBadge(compact: true),
+            ),
             VendraButton(
               text: _isDelivery && !_hasPin
                   ? 'Set delivery pin'

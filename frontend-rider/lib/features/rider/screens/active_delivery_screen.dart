@@ -2,7 +2,8 @@
 // Vendra Rider App - Active Delivery
 // Map (store, customer pin + 200 m geofence, live rider position),
 // store/customer details (tap a phone number to call), and one primary button that walks the
-// delivery: Arrived at store → Picked up → On the way → Confirm delivery.
+// delivery: Arrived at store → Picked up → On the way → Confirm delivery
+// (with the customer's 4-digit handover code, entered in a dialog).
 // In development (`features.manualLocation`) a "Simulate drive" card moves
 // the simulated position to the store / customer, one ping every 10 s.
 // ══════════════════════════════════════════════════════════════
@@ -18,6 +19,7 @@ import '../bloc/delivery_bloc.dart';
 import '../models/rider_models.dart';
 import '../services/rider_location_service.dart';
 import '../services/simulated_drive.dart';
+import '../widgets/handover_code_dialog.dart';
 import '../widgets/location_settings_sheet.dart';
 import '../widgets/payout_summary_dialog.dart';
 
@@ -31,6 +33,9 @@ class ActiveDeliveryScreen extends StatefulWidget {
 class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
   int _handledMessageId = 0;
   bool _resultShown = false;
+
+  /// The handover code dialog is on top of this screen
+  bool _codeDialogOpen = false;
 
   @override
   void dispose() {
@@ -56,8 +61,22 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
     if (!stillValid) location.stopDrive();
   }
 
+  /// Opens / closes the handover code dialog to match the bloc. Runs before
+  /// the payout summary is pushed, so the pop below always hits the code dialog.
+  void _syncCodeDialog(BuildContext context, DeliveryState state) {
+    if (state.awaitingCode && !_codeDialogOpen) {
+      // Only this method closes it (no barrier dismiss; Back just cancels in the bloc)
+      _codeDialogOpen = true;
+      showHandoverCodeDialog(context, context.read<DeliveryBloc>());
+    } else if (!state.awaitingCode && _codeDialogOpen) {
+      _codeDialogOpen = false;
+      Navigator.of(context).pop();
+    }
+  }
+
   Future<void> _onState(BuildContext context, DeliveryState state) async {
     _checkDrive(state);
+    _syncCodeDialog(context, state);
     final m = state.message;
     if (m != null && m.id != _handledMessageId) {
       _handledMessageId = m.id;
@@ -744,7 +763,9 @@ class _PrimaryAction extends StatelessWidget {
       DeliveryStep.onTheWay => (
           'Confirm delivery',
           Icons.check_circle,
-          'Hand over the order. Your location is checked against the customer pin.'
+          order.otpRequired
+              ? 'Hand over the order, then enter the customer\'s delivery code. Your location is checked too.'
+              : 'Hand over the order. Your location is checked against the customer pin.'
         ),
       DeliveryStep.delivered => ('Delivered', Icons.check, 'This delivery is complete.'),
       DeliveryStep.closed => ('Closed', Icons.block, 'This order is ${order.statusText.toLowerCase()}.'),

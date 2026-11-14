@@ -293,6 +293,12 @@ describe('Stalled orders', () => {
     const co = await api('POST', '/api/customer/checkout', checkoutBody(), tokens.ahmed);
     const id = co.body.data.id;
     for (const step of ['approve', 'prepare', 'ready-for-pickup']) {
+      if (step === 'prepare') {
+        const o = await api('GET', `/api/vendor/orders/${id}`, undefined, tokens.usman);
+        for (const item of o.body.data.items) {
+          await api('PUT', `/api/vendor/orders/${id}/items/${item.id}/pack`, { packed: true }, tokens.usman);
+        }
+      }
       assert.equal((await api('PUT', `/api/vendor/orders/${id}/${step}`, undefined, tokens.usman)).status, 200);
     }
     await setPolicies({ rider_assign_timeout_min: 0 });

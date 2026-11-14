@@ -33,6 +33,9 @@ class ApiConfig {
   static const String vendorProducts = '/api/vendor/products';
   static String vendorProduct(int id) => '/api/vendor/products/$id';
   static String vendorProductImage(int id) => '/api/vendor/products/$id/image';
+  static String vendorProductGallery(int id) => '/api/vendor/products/$id/images'; // POST multipart "image"
+  static String vendorProductGalleryImage(int id, int imageId) => '/api/vendor/products/$id/images/$imageId';
+  static const String vendorReviews = '/api/vendor/reviews'; // paged
   static String vendorProductByBarcode(String code) =>
       '/api/vendor/products/barcode/${Uri.encodeComponent(code)}';
 
@@ -40,6 +43,16 @@ class ApiConfig {
   // Vendor Walk-in POS
   // ──────────────────────────────────────
   static const String posSales = '/api/vendor/pos/sales';
+  static String posSale(int id) => '/api/vendor/pos/sales/$id'; // the sale's receipt
+  static const String receiptSettings = '/api/vendor/receipt-settings';
+
+  // ──────────────────────────────────────
+  // Vendor Shop Staff (PIN switch)
+  // ──────────────────────────────────────
+  static const String staff = '/api/vendor/staff';
+  static String staffMember(int id) => '/api/vendor/staff/$id';
+  static const String staffRoster = '/api/vendor/staff/roster';
+  static const String staffSwitch = '/api/vendor/staff/switch'; // { staffId, pin } → staff token
 
   // ──────────────────────────────────────
   // Vendor Order Endpoints
@@ -48,6 +61,8 @@ class ApiConfig {
   static String vendorOrder(int id) => '/api/vendor/orders/$id';
   static String approveOrder(int id) => '/api/vendor/orders/$id/approve';
   static String rejectOrder(int id) => '/api/vendor/orders/$id/reject';
+  static String packOrderItem(int orderId, int itemId) => '/api/vendor/orders/$orderId/items/$itemId/pack';
+  static String scanPackOrder(int id) => '/api/vendor/orders/$id/scan'; // { barcode }
   static String prepareOrder(int id) => '/api/vendor/orders/$id/prepare';
   static String readyForPickupOrder(int id) => '/api/vendor/orders/$id/ready-for-pickup';
   static String deliverOrder(int id) => '/api/vendor/orders/$id/deliver';
@@ -68,6 +83,8 @@ class ApiConfig {
   static const String publicConfig = '/api/public-config'; // ?role=customer|vendor|rider
   static const String categories = '/api/categories';
   static const String products = '/api/products'; // paged: ?limit=&offset=
+  static String product(int id) => '/api/products/$id'; // with images, rating breakdown, latest reviews
+  static String productReviews(int id) => '/api/products/$id/reviews'; // paged
   static String vendorDetails(int id) => '/api/vendors/$id';
   static const String stores = '/api/stores'; // every open store for the map: ?lat=&lng= sorts nearest first
   static const String checkout = '/api/customer/checkout';
@@ -78,6 +95,7 @@ class ApiConfig {
   static String cancelOrder(int id) => '/api/customer/orders/$id/cancel';
   static String customerMarkPickedUp(int id) => '/api/customer/orders/$id/picked-up';
   static String customerConfirmReceived(int id) => '/api/customer/orders/$id/confirm-received';
+  static String reviewOrder(int id) => '/api/customer/orders/$id/review';
 
   // ──────────────────────────────────────
   // Card Payments (money in) — the card is tokenized at the gateway first,
@@ -98,6 +116,7 @@ class ApiConfig {
   // Rider Endpoints
   // ──────────────────────────────────────
   static const String riderProfile = '/api/rider/profile';
+  static const String riderDocuments = '/api/rider/documents';
   static const String riderStatus = '/api/rider/status';
   static const String riderLocation = '/api/rider/location';
   static const String riderTasks = '/api/rider/tasks';
@@ -112,7 +131,7 @@ class ApiConfig {
   // ──────────────────────────────────────
   // Account Endpoints (every role)
   // ──────────────────────────────────────
-  static const String notifications = '/api/notifications';
+  static const String notifications = '/api/notifications'; // paged: ?limit=&offset=&unread=true
   static const String notificationsReadAll = '/api/notifications/read-all';
   static String notificationRead(int id) => '/api/notifications/$id/read';
   static const String wallet = '/api/wallet';

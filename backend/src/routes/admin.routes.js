@@ -20,6 +20,8 @@ const {
   getPolicies,
   updatePolicies,
   getRiders,
+  approveRider,
+  rejectRider,
   getFinance,
   getAllOrders,
   getAllUsers,
@@ -56,6 +58,8 @@ router.put('/disputes/:id/resolve', adminResolveDispute);
 
 // Riders + finance
 router.get('/riders', getRiders);
+router.put('/riders/:id/approve', approveRider);
+router.put('/riders/:id/reject', rejectRider);
 router.get('/finance', getFinance);
 router.get('/finance/reconciliation', adminReconciliation);
 router.get('/payments', adminListPayments);

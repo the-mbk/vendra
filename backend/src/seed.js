@@ -19,6 +19,7 @@
 require('dotenv').config();
 
 const fs = require('fs');
+const bcrypt = require('bcrypt');
 const { Client } = require('pg');
 const { createRandom } = require('./demoData/random');
 const { MARKETS, NEIGHBOURHOODS, pointIn, homeAddress, shopAddress } = require('./demoData/places');
@@ -26,6 +27,7 @@ const { personName, phone, cnic, makeEmails, STORE_TYPES, STORE_PREFIXES } = req
 const { loadCatalog } = require('./demoData/catalog');
 const { haversineKm } = require('./utils/geo');
 const { deliveryFeePaisa } = require('./services/deliveryFee');
+const { payoutBreakdown } = require('./services/riderPayout.service');
 const { toPaisa, paisaToString, percentOf } = require('./utils/money');
 
 const PASSWORD_HASH = '$2b$10$wxA3oAhNajZeHYp3m8a.YeMXgbOYx0QlSIDZlgWPJtW2le7OWS2se'; // password123
@@ -338,6 +340,94 @@ function buildDataset({ users: totalUsers }, catalog, policy, now) {
 }
 
 // ──────────────────────────────────────
+// Rider documents, reviews, payout slips, shop staff
+// Drawn from their own random stream, so everything buildDataset makes
+// stays exactly as it was before these were added.
+// ──────────────────────────────────────
+
+const REVIEW_COMMENTS = {
+  5: ['Exactly as described, very happy.', 'Fast delivery and well packed.', 'Excellent quality for the price.', 'Original product, will order again.', 'Rider was polite and on time.'],
+  4: ['Good product, delivery took a little longer.', 'Nice quality, packaging could be better.', 'Works well so far.', 'Value for money.'],
+  3: ['Okay for the price.', 'Average quality, not bad.', 'Colour slightly different from the photo.'],
+  2: ['Box was damaged on arrival.', 'Smaller than I expected.'],
+  1: ['Not what I ordered, raised a dispute.', 'Stopped working after two days.'],
+};
+
+// The demo store's staff for the switch-user screen (PINs listed in the README)
+const DEMO_STAFF = [
+  { full: 'Ali Raza', role: 'cashier', pin: '1111' },
+  { full: 'Sana Iqbal', role: 'packer', pin: '2222' },
+  { full: 'Kashif Mehmood', role: 'inventory_manager', pin: '3333' },
+];
+
+function addTrustData(d, policy, now) {
+  const r = createRandom(20261114);
+
+  // Riders: documents for everyone already delivering
+  for (const rd of d.riders) {
+    const isb = rd.area.city === 'Islamabad';
+    const motorised = rd.vehicle !== 'bicycle';
+    rd.cnic = cnic(r, rd.area.city);
+    rd.license = motorised ? `${isb ? 'ICT' : 'RWP'}-DL-${r.digits(6)}` : null;
+    rd.plate = motorised ? `${isb ? 'ICT' : 'RWP'}-${r.digits(4)}` : null;
+    rd.approval = 'approved';
+    rd.rejection = null;
+    rd.reviewedAt = new Date(rd.user.created.getTime() + r.int(2, 30) * HOUR);
+  }
+  // New applicants from the last few days, with no deliveries yet (appended: existing ids don't move)
+  const emails = new Set(d.users.map((u) => u.email));
+  const nApplicants = Math.max(3, Math.round(d.riders.length * 0.05));
+  for (let i = 0; i < nApplicants; i++) {
+    const area = r.pick(NEIGHBOURHOODS);
+    const name = personName(r, { female: r.chance(0.04) });
+    let email = `${name.first}.${name.last}`.toLowerCase().replace(/[^a-z.]/g, '');
+    while (emails.has(`${email}@demo.vendra.pk`)) email += r.int(1, 9);
+    emails.add(`${email}@demo.vendra.pk`);
+    const user = { id: d.users.length + 1, wallet: 0, full: name.full, email: `${email}@demo.vendra.pk`, phone: phone(r), role: 'rider', created: new Date(now - r.int(2, 72) * HOUR) };
+    d.users.push(user);
+    const vehicle = r.weighted([['motorcycle', 85], ['bicycle', 9], ['car', 6]]);
+    const isb = area.city === 'Islamabad';
+    const rejected = i === 0;
+    d.riders.push({
+      id: d.riders.length + 1, user, area, vehicle, point: pointIn(r, area, 1.5), lastSeen: user.created,
+      cnic: cnic(r, area.city),
+      license: vehicle === 'bicycle' ? null : `${isb ? 'ICT' : 'RWP'}-DL-${r.digits(6)}`,
+      plate: vehicle === 'bicycle' ? null : `${isb ? 'ICT' : 'RWP'}-${r.digits(4)}`,
+      approval: rejected ? 'rejected' : 'pending',
+      rejection: rejected ? 'The CNIC number does not match the licence. Please check both and resubmit.' : null,
+      reviewedAt: rejected ? new Date(now - r.int(1, 20) * HOUR) : null,
+    });
+  }
+
+  // Payout slips for every past delivery
+  for (const o of d.orders) {
+    o.breakdown = o.rider && o.status === 'delivered' ? { ...payoutBreakdown(policy, o.km, o.wait), distanceSource: 'gps' } : null;
+  }
+
+  // About 40% of delivered orders got a review
+  const itemsByOrder = new Map();
+  for (const i of d.items) itemsByOrder.set(i.orderId, [...(itemsByOrder.get(i.orderId) || []), i]);
+  const productById = new Map(d.products.map((p) => [p.id, p]));
+  d.reviews = [];
+  for (const o of d.orders) {
+    if (o.status !== 'delivered' || !r.chance(0.4)) continue;
+    const at = new Date(Math.min(o.deliveredAt.getTime() + r.int(10, 900) * MIN, now - MIN));
+    o.reviewedAt = at;
+    o.riderRating = o.rider && r.chance(0.8) ? r.weighted([[5, 60], [4, 28], [3, 8], [2, 3], [1, 1]]) : null;
+    for (const line of itemsByOrder.get(o.id) || []) {
+      const rating = r.weighted([[5, 50], [4, 30], [3, 12], [2, 5], [1, 3]]);
+      d.reviews.push({
+        orderId: o.id, productId: line.productId, vendorId: o.vendor.id, customerId: o.customer.user.id,
+        rating, comment: r.chance(0.4) ? r.pick(REVIEW_COMMENTS[rating]) : null, at,
+      });
+      const p = productById.get(line.productId);
+      p.ratingSum = (p.ratingSum || 0) + rating;
+      p.ratingCount = (p.ratingCount || 0) + 1;
+    }
+  }
+}
+
+// ──────────────────────────────────────
 // Write it
 // ──────────────────────────────────────
 
@@ -361,18 +451,24 @@ async function writeDataset(client, d) {
   await bulkInsert(client, 'vendors', ['id', 'user_id', 'store_name', 'store_address', 'cnic', 'latitude', 'longitude', 'is_approved', 'created_at'],
     d.vendors.map((v) => [v.id, v.user.id, v.store, v.address, v.cnic, v.point.lat, v.point.lng, v.approved, v.created]));
   await client.query('UPDATE users u SET vendor_id = v.id FROM vendors v WHERE v.user_id = u.id');
-  await bulkInsert(client, 'riders', ['id', 'user_id', 'vehicle_type', 'is_online', 'current_lat', 'current_lng', 'last_location_at', 'created_at'],
-    d.riders.map((rd) => [rd.id, rd.user.id, rd.vehicle, false, rd.point.lat, rd.point.lng, rd.lastSeen, rd.user.created]));
+  await bulkInsert(client, 'riders', ['id', 'user_id', 'vehicle_type', 'is_online', 'current_lat', 'current_lng', 'last_location_at', 'created_at',
+    'cnic', 'license_number', 'vehicle_number', 'approval_status', 'rejection_reason', 'reviewed_at'],
+    d.riders.map((rd) => [rd.id, rd.user.id, rd.vehicle, false, rd.point.lat, rd.point.lng, rd.lastSeen, rd.user.created,
+      rd.cnic, rd.license, rd.plate, rd.approval, rd.rejection, rd.reviewedAt]));
   await bulkInsert(client, 'products',
-    ['id', 'vendor_id', 'name', 'description', 'price', 'private_stock', 'buffer', 'reserved_quantity', 'public_stock', 'barcode', 'image_url', 'category_id', 'is_approved', 'is_active', 'created_at', 'updated_at'],
+    ['id', 'vendor_id', 'name', 'description', 'price', 'private_stock', 'buffer', 'reserved_quantity', 'public_stock', 'barcode', 'image_url', 'category_id', 'is_approved', 'is_active', 'created_at', 'updated_at',
+      'rating_sum', 'rating_count'],
     d.products.map((p) => [p.id, p.vendor.id, p.name, p.description, money(p.pricePaisa), p.finalStock, p.buffer, 0,
       Math.max(0, p.finalStock - p.buffer), p.barcode, p.item.imageFile ? `/uploads/products/catalog-${p.item.key}.webp` : null,
-      p.item.categoryId, p.approved, true, p.created, p.created]));
+      p.item.categoryId, p.approved, true, p.created, p.created, p.ratingSum || 0, p.ratingCount || 0]));
+  await bulkInsert(client, 'product_images', ['product_id', 'url', 'position'],
+    d.products.flatMap((p) => p.item.extraImageFiles.map((file, n) => [p.id, `/uploads/products/catalog-${p.item.key}-${n + 2}.webp`, n])));
   await bulkInsert(client, 'orders',
     ['id', 'customer_id', 'vendor_id', 'status', 'subtotal', 'delivery_fee', 'total_amount', 'delivery_type', 'delivery_address',
       'customer_lat', 'customer_lng', 'estimated_minutes', 'payment_method', 'rider_user_id', 'ready_at', 'assigned_at', 'rider_arrived_at',
       'picked_at', 'delivered_at', 'delivery_lat', 'delivery_lng', 'distance_km', 'wait_minutes', 'rider_payout', 'escrow_status',
-      'escrow_release_due_at', 'escrow_settled_at', 'cancellation_reason', 'created_at', 'updated_at'],
+      'escrow_release_due_at', 'escrow_settled_at', 'cancellation_reason', 'created_at', 'updated_at',
+      'payout_breakdown', 'reviewed_at', 'rider_rating'],
     d.orders.map((o) => {
       const delivered = o.status === 'delivered';
       const pin = o.delivery ? o.customer.home : { lat: null, lng: null };
@@ -380,10 +476,27 @@ async function writeDataset(client, d) {
         o.delivery ? 'delivery' : 'self_pickup', o.delivery ? o.customer.address : null, pin.lat, pin.lng, o.estimated, 'wallet',
         o.rider?.user.id ?? null, o.readyAt, o.assignedAt, o.arrivedAt, delivered ? o.pickedAt : null, o.deliveredAt,
         delivered && o.delivery ? pin.lat : null, delivered && o.delivery ? pin.lng : null, o.km, o.wait, money(o.payout), o.escrow,
-        o.dueAt, o.settledAt, o.reason, o.created, o.settledAt ?? o.deliveredAt ?? o.created];
+        o.dueAt, o.settledAt, o.reason, o.created, o.settledAt ?? o.deliveredAt ?? o.created,
+        o.breakdown ? JSON.stringify(o.breakdown) : null, o.reviewedAt ?? null, o.riderRating ?? null];
     }));
-  await bulkInsert(client, 'order_items', ['id', 'order_id', 'product_id', 'quantity', 'unit_price', 'subtotal'],
-    d.items.map((i) => [i.id, i.orderId, i.productId, i.qty, money(i.unit), money(i.unit * i.qty)]));
+  // Every seeded order is finished, so its packing checklist is complete
+  await bulkInsert(client, 'order_items', ['id', 'order_id', 'product_id', 'quantity', 'unit_price', 'subtotal', 'packed_quantity'],
+    d.items.map((i) => [i.id, i.orderId, i.productId, i.qty, money(i.unit), money(i.unit * i.qty), i.qty]));
+  await bulkInsert(client, 'product_reviews', ['order_id', 'product_id', 'vendor_id', 'customer_id', 'rating', 'comment', 'created_at'],
+    d.reviews.map((x) => [x.orderId, x.productId, x.vendorId, x.customerId, x.rating, x.comment, x.at]));
+
+  // The first demo store: receipt slip settings and a team for the switch-user screen
+  const demoStore = d.vendors[0];
+  await client.query(
+    `UPDATE vendors SET receipt_header = $1, receipt_footer = $2, payment_account = $3, payment_account_title = $4 WHERE id = $5`,
+    ['NTN 4410023-7 · Open 10am–10pm', 'Exchange within 7 days with this receipt. Thank you!', 'PK36MEZN0001230104567890', DEMO.vendors[0].full, demoStore.id]
+  );
+  for (const st of DEMO_STAFF) {
+    await client.query(
+      'INSERT INTO vendor_staff (vendor_id, full_name, role, pin_hash, created_at) VALUES ($1, $2, $3, $4, $5)',
+      [demoStore.id, st.full, st.role, await bcrypt.hash(st.pin, 10), demoStore.created]
+    );
+  }
   await bulkInsert(client, 'inventory_ledger',
     ['id', 'product_id', 'vendor_id', 'change_type', 'quantity_change', 'private_stock_after', 'public_stock_after', 'reference_id', 'notes', 'created_at'],
     d.inventory.map((e, i) => [i + 1, e.p.id, e.p.vendor.id, e.type, e.change, e.privateAfter, e.publicAfter, e.ref, e.notes, e.at]));
@@ -408,11 +521,15 @@ async function uploadPhotos(products, log) {
   const { storageDriver, initStorage } = require('./services/storage.service');
   const where = await initStorage();
   const items = [...new Map(products.filter((p) => p.item.imageFile).map((p) => [p.item.key, p.item])).values()];
-  for (let i = 0; i < items.length; i += 8) {
-    await Promise.all(items.slice(i, i + 8).map((item) =>
-      storageDriver.save('products', `catalog-${item.key}.webp`, fs.readFileSync(item.imageFile), 'image/webp')));
+  const files = items.flatMap((item) => [
+    { name: `catalog-${item.key}.webp`, file: item.imageFile },
+    ...item.extraImageFiles.map((file, n) => ({ name: `catalog-${item.key}-${n + 2}.webp`, file })),
+  ]);
+  for (let i = 0; i < files.length; i += 8) {
+    await Promise.all(files.slice(i, i + 8).map((f) =>
+      storageDriver.save('products', f.name, fs.readFileSync(f.file), 'image/webp')));
   }
-  log(`  ${items.length} product photos stored in ${where}`);
+  log(`  ${files.length} product photos (${items.length} covers + gallery) stored in ${where}`);
 }
 
 async function seed(connectionString = process.env.DATABASE_URL, { users = 1000, log = console.log } = {}) {
@@ -430,7 +547,9 @@ async function seed(connectionString = process.env.DATABASE_URL, { users = 1000,
 
     log('Building the Islamabad & Rawalpindi demo marketplace…');
     const catalog = await loadCatalog({ log });
-    const d = buildDataset({ users }, catalog, policy, Date.now());
+    const now = Date.now();
+    const d = buildDataset({ users }, catalog, policy, now);
+    addTrustData(d, policy, now);
     await uploadPhotos(d.products, log);
 
     await client.query('BEGIN');
@@ -445,6 +564,8 @@ async function seed(connectionString = process.env.DATABASE_URL, { users = 1000,
     const delivered = d.orders.filter((o) => o.status === 'delivered').length;
     log(`✓ ${d.users.length} users: ${d.vendors.length} stores (${d.vendors.filter((v) => v.approved).length} approved), `
       + `${d.riders.length} riders, ${d.customers.length} customers, 1 admin`);
+    log(`✓ ${d.riders.filter((x) => x.approval !== 'approved').length} riders waiting for document review, `
+      + `${d.reviews.length} product reviews, ${DEMO_STAFF.length} staff at ${d.vendors[0].store}`);
     log(`✓ ${d.products.length} products, ${d.orders.length} orders over ${HISTORY_DAYS} days `
       + `(${delivered} delivered, ${d.orders.length - delivered} cancelled, ${d.orders.filter((o) => o.escrow === 'held').length} still in escrow)`);
     log('✓ Every account uses the password password123. Demo logins: admin@vendra.pk, usman@vendor.pk, ahmed@customer.pk, bilal@rider.pk');

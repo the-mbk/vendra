@@ -1,6 +1,7 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Rider App - Incoming task card (Stitch rider home mockup)
-// Pickup → drop-off route, distances, estimated payout, Accept/Decline.
+// Pickup → drop-off route, distances, estimated payout (with an
+// expandable estimated slip), Accept/Decline.
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:vendra_rider/vendra_core.dart';
 
 import '../models/rider_models.dart';
+import 'payout_slip.dart';
 
 class TaskCard extends StatelessWidget {
   final RiderOrder task;
@@ -118,7 +120,12 @@ class TaskCard extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 14),
+            if (task.estimatedPayoutBreakdown != null)
+              EstimatedSlipToggle(
+                breakdown: task.estimatedPayoutBreakdown!,
+                total: task.estimatedPayout ?? task.estimatedPayoutBreakdown!.total,
+              ),
+            SizedBox(height: task.estimatedPayoutBreakdown != null ? 6 : 14),
             Row(
               children: [
                 Expanded(
