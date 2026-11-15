@@ -1,50 +1,30 @@
 // ══════════════════════════════════════════════════════════════
-// Vendra Rider App - Wordmark with the Pakistan flag chip
+// Vendra Rider App - Wordmark with the Pakistan flag chip & Icon
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:vendra_rider/vendra_core.dart';
 
 class VendraLogo extends StatelessWidget {
   final String subtitle;
-  const VendraLogo({super.key, this.subtitle = 'Rider App'});
+  final bool isDark;
+  final double titleSize;
+
+  const VendraLogo({
+    super.key,
+    this.subtitle = 'Rider Portal · Delivery Partner',
+    this.isDark = false,
+    this.titleSize = 34,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              'Vendra',
-              style: GoogleFonts.poppins(fontSize: 36, fontWeight: FontWeight.w700, color: AppColors.secondary),
-            ),
-            const SizedBox(width: 8),
-            SizedBox(
-              width: 28,
-              height: 20,
-              child: Row(
-                children: [
-                  Expanded(flex: 1, child: Container(color: Colors.white)),
-                  Expanded(
-                    flex: 3,
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        color: AppColors.pakistanGreen,
-                        borderRadius: BorderRadius.horizontal(right: Radius.circular(2)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(subtitle, style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
-      ],
+    return VendraBrandHeader(
+      subtitle: subtitle,
+      icon: Icons.delivery_dining_rounded,
+      iconStyle: HeaderIconStyle.inline,
+      isDark: isDark,
+      titleSize: titleSize,
     );
   }
 }

@@ -101,46 +101,25 @@ class _LoginScreenState extends State<LoginScreen> {
         return Scaffold(
           backgroundColor: AppColors.background,
           body: SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Column(
-                children: [
-                  const SizedBox(height: 40),
-
-                  // ── Vendra Logo ──
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Column(
                     children: [
+                      const SizedBox(height: 36),
+
+                      const VendraBrandHeader(
+                        subtitle: 'Your Hyperlocal Marketplace',
+                        icon: Icons.storefront_rounded,
+                        titleSize: 34,
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      // ── Form Card ──
                       Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: AppColors.primary,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(Icons.storefront, color: Colors.white, size: 26),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        'Vendra',
-                        style: GoogleFonts.poppins(
-                          fontSize: 36,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.secondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    "Your hyperlocal marketplace",
-                    style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary),
-                  ),
-
-                  const SizedBox(height: 28),
-
-                  // ── Form Card ──
-                  Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
                       color: Colors.white,
@@ -279,8 +258,10 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
           ),
-        );
-      },
+        ),
+      ),
+    );
+  },
     );
   }
 }

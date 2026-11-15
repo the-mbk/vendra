@@ -44,3 +44,4 @@ export 'core/widgets/withdraw_sheet.dart';
 export 'core/widgets/withdrawal_history.dart';
 export 'core/widgets/demo_login_panel.dart';
 export 'core/widgets/dev_banner.dart';
+export 'core/widgets/vendra_brand_header.dart';

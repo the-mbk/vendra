@@ -78,9 +78,12 @@ class _SignupScreenState extends State<SignupScreen> {
           backgroundColor: AppColors.background,
           appBar: AppBar(backgroundColor: AppColors.background, elevation: 0, foregroundColor: AppColors.textPrimary),
           body: SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Column(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Column(
                 children: [
                   const VendraLogo(subtitle: 'Become a Vendra rider'),
                   const SizedBox(height: 24),
@@ -192,8 +195,10 @@ class _SignupScreenState extends State<SignupScreen> {
               ),
             ),
           ),
-        );
-      },
+        ),
+      ),
+    );
+  },
     );
   }
 }

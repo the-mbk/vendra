@@ -18,3 +18,4 @@ export 'core/widgets/vendra_text_field.dart';
 export 'core/widgets/loading_shimmer.dart';
 export 'core/widgets/product_card.dart';
 export 'core/widgets/map_picker_widget.dart';
+export 'core/widgets/vendra_brand_header.dart';

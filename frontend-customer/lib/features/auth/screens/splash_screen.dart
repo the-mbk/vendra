@@ -5,7 +5,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:vendra_customer/vendra_core.dart';
 import '../../../config/app_routes.dart';
 import '../bloc/auth_bloc.dart';
@@ -64,40 +63,42 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         }
       },
       child: Scaffold(
-        backgroundColor: AppColors.secondary,
-        body: Center(
-          child: FadeTransition(
-            opacity: _fadeAnimation,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Vendra', style: GoogleFonts.poppins(fontSize: 42, fontWeight: FontWeight.w700, color: Colors.white)),
-                    const SizedBox(width: 8),
-                    Container(
-                      width: 32,
-                      height: 22,
-                      decoration: BoxDecoration(borderRadius: BorderRadius.circular(3), border: Border.all(color: Colors.white24)),
-                      child: Row(
-                        children: [
-                          Expanded(flex: 1, child: Container(color: Colors.white)),
-                          Expanded(flex: 3, child: Container(color: AppColors.pakistanGreen)),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text("Your hyperlocal marketplace", style: GoogleFonts.poppins(fontSize: 14, color: Colors.white70)),
-                const SizedBox(height: 48),
-                const SizedBox(
-                  width: 28,
-                  height: 28,
-                  child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white70),
-                ),
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Color(0xFF10143E),
+                Color(0xFF1B2363),
+                Color(0xFF0D1B46),
               ],
+            ),
+          ),
+          child: Center(
+            child: FadeTransition(
+              opacity: _fadeAnimation,
+              child: const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  VendraBrandHeader(
+                    subtitle: 'Your Hyperlocal Marketplace',
+                    icon: Icons.storefront_rounded,
+                    iconStyle: HeaderIconStyle.top,
+                    titleSize: 40,
+                    isDark: true,
+                  ),
+                  SizedBox(height: 52),
+                  SizedBox(
+                    width: 32,
+                    height: 32,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.8,
+                      valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

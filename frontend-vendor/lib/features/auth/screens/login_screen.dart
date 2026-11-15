@@ -98,50 +98,24 @@ class _LoginScreenState extends State<LoginScreen> {
         return Scaffold(
           backgroundColor: AppColors.background,
           body: SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Column(
-                children: [
-                  const SizedBox(height: 40),
-
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Column(
                     children: [
-                      Text(
-                        'Vendra',
-                        style: GoogleFonts.poppins(fontSize: 36, fontWeight: FontWeight.w700, color: AppColors.secondary),
+                      const SizedBox(height: 36),
+
+                      const VendraBrandHeader(
+                        subtitle: 'Vendor Portal · Business & POS',
+                        icon: Icons.storefront_rounded,
+                        titleSize: 34,
                       ),
-                      const SizedBox(width: 8),
+
+                      const SizedBox(height: 24),
+
                       Container(
-                        width: 28,
-                        height: 20,
-                        decoration: BoxDecoration(borderRadius: BorderRadius.circular(2)),
-                        child: Row(
-                          children: [
-                            Expanded(flex: 1, child: Container(color: Colors.white)),
-                            Expanded(
-                              flex: 3,
-                              child: Container(
-                                decoration: const BoxDecoration(
-                                  color: AppColors.pakistanGreen,
-                                  borderRadius: BorderRadius.horizontal(right: Radius.circular(2)),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Vendor Portal',
-                    style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary),
-                  ),
-
-                  const SizedBox(height: 28),
-
-                  Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
                       color: Colors.white,
@@ -301,8 +275,10 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
           ),
-        );
-      },
+        ),
+      ),
+    );
+  },
     );
   }
 }
