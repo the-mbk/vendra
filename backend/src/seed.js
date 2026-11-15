@@ -536,7 +536,8 @@ async function seed(connectionString = process.env.DATABASE_URL, { users = 1000,
   if (require('./config/mode').isProduction) {
     throw new Error('Demo data is never loaded in production mode (APP_MODE=production).');
   }
-  const client = new Client({ connectionString });
+  const needsSsl = Boolean(connectionString && (connectionString.includes('sslmode') || connectionString.includes('neon.tech') || connectionString.includes('supabase') || connectionString.includes('render.com')));
+  const client = new Client({ connectionString, ssl: needsSsl ? { rejectUnauthorized: false } : undefined });
   await client.connect();
   try {
     const existing = await client.query('SELECT COUNT(*) FROM users');

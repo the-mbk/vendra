@@ -13,7 +13,8 @@ const { Client } = require('pg');
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations');
 
 async function migrate(connectionString = process.env.DATABASE_URL, { log = console.log } = {}) {
-  const client = new Client({ connectionString });
+  const needsSsl = Boolean(connectionString && (connectionString.includes('sslmode') || connectionString.includes('neon.tech') || connectionString.includes('supabase') || connectionString.includes('render.com')));
+  const client = new Client({ connectionString, ssl: needsSsl ? { rejectUnauthorized: false } : undefined });
   await client.connect();
 
   try {
