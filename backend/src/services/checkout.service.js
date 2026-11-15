@@ -8,6 +8,7 @@ const { lockEscrowRow, creditEscrowPool } = require('./escrowPool.service');
 const { lockProducts, applyStockChange } = require('./inventory.service');
 const { debitWallet } = require('./wallet.service');
 const { announceOrder } = require('./notification.service');
+const { generateOtp } = require('./handoverOtp.service');
 const { getPolicies } = require('./policy.service');
 const { httpError } = require('../utils/http');
 const { isValidCoordinate } = require('../utils/geo');
@@ -15,6 +16,12 @@ const { deliveryDistanceKm, deliveryFeePaisa, assertDeliversTo } = require('./de
 const { toPaisa, paisaToString, paisaToNumber } = require('../utils/money');
 
 const num = (v) => (v == null ? null : Number(v));
+
+function insufficient(p, requested) {
+  return httpError(409, `Insufficient stock for "${p.name}". Available: ${p.public_stock}, requested: ${requested}.`, {
+    code: 'INSUFFICIENT_STOCK', productId: p.id, available: p.public_stock,
+  });
+}
 
 function parseCheckoutItems(items) {
   if (!Array.isArray(items) || items.length === 0) {
@@ -100,22 +107,25 @@ async function placeOrder(client, afterCommit, customerId, input, { paymentMetho
   const { deliveryType, deliveryAddress, customerLat, customerLng, items } = input;
   const policies = await getPolicies(client);
 
-  // Step 1: lock every product row (id order → no deadlocks between concurrent checkouts)
-  const products = await lockProducts(client, items.map((i) => i.productId));
+  // The hot rows (each product, the escrow pool) are locked as late as possible and held
+  // only for the few statements that change them, so a popular product or a busy sale
+  // doesn't serialise more work than it must (PR 04). Lock order stays
+  // products → escrow pool → wallets everywhere.
 
-  // Step 2: validate stock and single-vendor rule
+  // Step 1: validate and price from a snapshot (no locks). A sold-out product is refused
+  // here without queueing for its row lock. Everything is re-checked under lock in step 4.
+  const snapshot = new Map((await client.query(
+    'SELECT * FROM products WHERE id = ANY($1::int[])', [items.map((i) => i.productId)]
+  )).rows.map((p) => [p.id, p]));
+
   let vendorId = null;
   let subtotal = 0;
   const lines = [];
   for (const item of items) {
-    const p = products.get(item.productId);
+    const p = snapshot.get(item.productId);
     if (!p) throw httpError(404, `Product ${item.productId} not found.`);
     if (!p.is_active || !p.is_approved) throw httpError(400, `"${p.name}" is no longer available.`);
-    if (p.public_stock < item.quantity) {
-      throw httpError(409, `Insufficient stock for "${p.name}". Available: ${p.public_stock}, requested: ${item.quantity}.`, {
-        code: 'INSUFFICIENT_STOCK', productId: p.id, available: p.public_stock,
-      });
-    }
+    if (p.public_stock < item.quantity) throw insufficient(p, item.quantity);
     if (vendorId === null) vendorId = p.vendor_id;
     else if (p.vendor_id !== vendorId) throw httpError(400, 'All items must be from the same vendor.');
 
@@ -137,19 +147,50 @@ async function placeOrder(client, afterCommit, customerId, input, { paymentMetho
     estimatedMinutes = Math.max(15, Math.round(km * 3));
   }
 
-  // Step 3: create the order (pending vendor approval)
+  // Step 2: create the order (pending vendor approval) with its handover code and lines
   const order = (await client.query(
     `INSERT INTO orders (customer_id, vendor_id, status, subtotal, delivery_fee, total_amount,
                          delivery_type, delivery_address, customer_lat, customer_lng, estimated_minutes, escrow_status,
-                         payment_method)
-     VALUES ($1, $2, 'pending', $3, $4, $5, $6, $7, $8, $9, $10, 'held', $11)
+                         payment_method, delivery_otp)
+     VALUES ($1, $2, 'pending', $3, $4, $5, $6, $7, $8, $9, $10, 'held', $11, $12)
      RETURNING *`,
     [customerId, vendorId, paisaToString(subtotal), paisaToString(deliveryFee), paisaToString(total),
-      deliveryType, deliveryAddress || null, customerLat, customerLng, estimatedMinutes, paymentMethod]
+      deliveryType, deliveryAddress || null, customerLat, customerLng, estimatedMinutes, paymentMethod, generateOtp()]
   )).rows[0];
+  for (const line of lines) {
+    await client.query(
+      `INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal) VALUES ($1, $2, $3, $4, $5)`,
+      [order.id, line.product.id, line.quantity, paisaToString(line.unitPaisa), paisaToString(line.unitPaisa * line.quantity)]
+    );
+  }
 
-  // Step 4: escrow hold — customer wallet → platform pool.
-  // Lock order everywhere is products → escrow pool → wallets, so the pool row is locked first.
+  // Step 3: notifications (written with the order, sent after commit)
+  await announceOrder(client, afterCommit, order.id, 'order_placed', {
+    vendor: { title: `New order #${order.id}`, body: `Rs. ${paisaToString(total)} · ${lines.length} item(s). Approve it to start packing.` },
+    customer: { title: `Order #${order.id} placed`, body: 'Payment is held in escrow until delivery. Waiting for the store to accept.' },
+  });
+
+  // Step 4: ATOMIC RESERVATION — lock every product row (id order → no deadlocks between
+  // concurrent checkouts), re-check against the locked values, reserve + ledger + lock rows
+  const locked = await lockProducts(client, items.map((i) => i.productId));
+  for (const line of lines) {
+    const p = locked.get(line.product.id);
+    if (!p.is_active || !p.is_approved) throw httpError(400, `"${p.name}" is no longer available.`);
+    if (p.public_stock < line.quantity) throw insufficient(p, line.quantity);
+    if (toPaisa(p.price) !== line.unitPaisa) {
+      throw httpError(409, `The price of "${p.name}" just changed. Please review your cart.`, { code: 'PRICE_CHANGED', productId: p.id });
+    }
+    await applyStockChange(client, afterCommit, p, {
+      reservedQuantity: p.reserved_quantity + line.quantity,
+      ledger: { type: 'reserve', quantityChange: -line.quantity, referenceId: order.id, notes: 'Online order reserved' },
+    });
+    await client.query(
+      `INSERT INTO inventory_locks (product_id, order_id, quantity, status) VALUES ($1, $2, $3, 'active')`,
+      [p.id, order.id, line.quantity]
+    );
+  }
+
+  // Step 5: ESCROW HOLD — customer wallet → platform pool (pool row before wallets)
   await lockEscrowRow(client);
   const walletAfter = await debitWallet(client, {
     userId: customerId,
@@ -159,27 +200,6 @@ async function placeOrder(client, afterCommit, customerId, input, { paymentMetho
     description: `Escrow hold for Order #${order.id}`,
   });
   await creditEscrowPool(client, paisaToString(total));
-
-  // Step 5: reserve stock + lock rows + ledger
-  for (const line of lines) {
-    await client.query(
-      `INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal) VALUES ($1, $2, $3, $4, $5)`,
-      [order.id, line.product.id, line.quantity, paisaToString(line.unitPaisa), paisaToString(line.unitPaisa * line.quantity)]
-    );
-    await applyStockChange(client, afterCommit, line.product, {
-      reservedQuantity: line.product.reserved_quantity + line.quantity,
-      ledger: { type: 'reserve', quantityChange: -line.quantity, referenceId: order.id, notes: 'Online order reserved' },
-    });
-    await client.query(
-      `INSERT INTO inventory_locks (product_id, order_id, quantity, status) VALUES ($1, $2, $3, 'active')`,
-      [line.product.id, order.id, line.quantity]
-    );
-  }
-
-  await announceOrder(client, afterCommit, order.id, 'order_placed', {
-    vendor: { title: `New order #${order.id}`, body: `Rs. ${paisaToString(total)} · ${lines.length} item(s). Approve it to start packing.` },
-    customer: { title: `Order #${order.id} placed`, body: 'Payment is held in escrow until delivery. Waiting for the store to accept.' },
-  });
 
   return {
     id: order.id,
@@ -194,6 +214,7 @@ async function placeOrder(client, afterCommit, customerId, input, { paymentMetho
     createdAt: order.created_at,
     escrowStatus: 'held',
     paymentMethod,
+    deliveryOtp: order.delivery_otp,
     walletBalance: paisaToNumber(walletAfter),
     items: lines.map((l) => ({
       productId: l.product.id,

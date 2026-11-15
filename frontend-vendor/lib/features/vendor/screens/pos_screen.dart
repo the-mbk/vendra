@@ -9,6 +9,10 @@
 // live (VendorProductBloc patches them from `stock:vendor` socket
 // events), so when a customer orders online the reserved units show up
 // here within seconds and the cashier can't sell them.
+//
+// After "Complete sale" the sale pane shows the 80 mm thermal receipt
+// (with the store's scan-to-pay QR) with Print and Share; today's sales
+// list can reopen any receipt for a reprint.
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -22,7 +26,9 @@ import '../../auth/bloc/auth_state.dart' as auth_state;
 import '../bloc/pos_bloc.dart';
 import '../bloc/vendor_product_bloc.dart';
 import '../models/pos_sale_model.dart';
+import '../widgets/receipt_slip.dart';
 import 'barcode_scanner_screen.dart';
+import 'receipt_screen.dart';
 
 final NumberFormat _money = NumberFormat('#,##0.##');
 String _rs(double v) => 'Rs. ${_money.format(v)}';
@@ -902,8 +908,8 @@ class _ReceiptView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final receipt = sale.receipt;
     return ListView(
-      shrinkWrap: true,
       padding: const EdgeInsets.all(16),
       children: [
         Row(
@@ -916,7 +922,7 @@ class _ReceiptView extends StatelessWidget {
                 children: [
                   Text('Sale #${sale.id} completed', style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600)),
                   Text(
-                    DateFormat('d MMM yyyy, h:mm a').format(sale.createdAt ?? DateTime.now()),
+                    '${_rs(sale.totalAmount)} · ${DateFormat('d MMM yyyy, h:mm a').format(sale.createdAt ?? DateTime.now())}',
                     style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
                   ),
                 ],
@@ -924,41 +930,31 @@ class _ReceiptView extends StatelessWidget {
             ),
           ],
         ),
-        const Divider(height: 24),
-        for (final item in sale.items)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text('${item.quantity} × ${item.productName}',
-                          style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
-                    ),
-                    Text(_rs(item.total), style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600)),
-                  ],
-                ),
-                if (item.privateStockAfter != null)
-                  Text(
-                    'Stock now: private ${item.privateStockAfter} · reserved ${item.reservedQuantity ?? 0} · public ${item.publicStockAfter ?? 0}',
-                    style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textLight),
-                  ),
-              ],
-            ),
+        const SizedBox(height: 16),
+        if (receipt != null) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
+            decoration: BoxDecoration(color: const Color(0xFFE9EBEE), borderRadius: BorderRadius.circular(12)),
+            child: ReceiptSlip(receipt: receipt),
           ),
-        const Divider(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: Text('Paid (walk-in)', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          ReceiptActions(receipt: receipt),
+        ] else
+          // Older servers didn't send a receipt — show the plain summary
+          for (final item in sale.items)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text('${item.quantity} × ${item.productName}',
+                        style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
+                  ),
+                  Text(_rs(item.total), style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600)),
+                ],
+              ),
             ),
-            Text(_rs(sale.totalAmount),
-                style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.success)),
-          ],
-        ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         OutlinedButton.icon(
           onPressed: () => context.read<PosBloc>().add(PosReceiptDismissed()),
           icon: const Icon(Icons.add_shopping_cart),
@@ -1032,6 +1028,26 @@ class _TodaySalesSheet extends StatelessWidget {
                                 Text(
                                   s.items.map((it) => '${it.quantity}× ${it.productName}').join(', '),
                                   style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
+                                ),
+                                Row(
+                                  children: [
+                                    if (s.cashierName != null)
+                                      Expanded(
+                                        child: Text('By ${s.cashierName}',
+                                            overflow: TextOverflow.ellipsis,
+                                            style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textLight)),
+                                      )
+                                    else
+                                      const Spacer(),
+                                    TextButton.icon(
+                                      onPressed: () => Navigator.of(context).push(
+                                        MaterialPageRoute(builder: (_) => ReceiptScreen(saleId: s.id, receipt: s.receipt)),
+                                      ),
+                                      style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                                      icon: const Icon(Icons.receipt_outlined, size: 16),
+                                      label: const Text('Receipt'),
+                                    ),
+                                  ],
                                 ),
                               ],
                             );

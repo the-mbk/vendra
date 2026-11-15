@@ -214,9 +214,14 @@ export default function DashboardPage() {
         <KPICard
           title="Riders Online"
           value={stats?.ridersOnline || 0}
-          subtitle={`Out of ${stats?.riders || 0} registered`}
+          subtitle={
+            stats?.pendingRiders
+              ? `Out of ${stats?.riders || 0} · ${stats.pendingRiders} awaiting document review`
+              : `Out of ${stats?.riders || 0} registered`
+          }
           icon="two_wheeler"
           color="cyan"
+          trend={stats?.pendingRiders > 0 ? "Documents to review" : undefined}
           href="/dashboard/riders"
         />
         <KPICard

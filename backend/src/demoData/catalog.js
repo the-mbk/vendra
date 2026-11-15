@@ -14,6 +14,7 @@ const IMAGES_DIR = path.join(CACHE_DIR, 'images');
 const LIST_FILE = path.join(CACHE_DIR, 'products.json');
 
 const PKR_PER_USD = 280;
+const MAX_EXTRA_PHOTOS = 3; // gallery photos besides the cover
 
 /** DummyJSON category → Vendra category id (see migration 004) */
 const CATEGORY_IDS = {
@@ -49,7 +50,7 @@ async function download(url, file) {
 }
 
 /**
- * @returns {Promise<Array<{ key, title, description, brand, group, categoryId, priceRs, imageFile|null }>>}
+ * @returns {Promise<Array<{ key, title, description, brand, group, categoryId, priceRs, imageFile|null, extraImageFiles }>>}
  */
 async function loadCatalog({ log = console.log } = {}) {
   fs.mkdirSync(IMAGES_DIR, { recursive: true });
@@ -75,6 +76,8 @@ async function loadCatalog({ log = console.log } = {}) {
       priceRs: toRupees(p.price),
       imageUrl: p.images?.[0] || p.thumbnail,
       imageFile: null,
+      extraImageUrls: (p.images || []).slice(1, 1 + MAX_EXTRA_PHOTOS),
+      extraImageFiles: [],
     }));
 
   // Photos: the first full image of each product, a few downloads at a time
@@ -87,9 +90,19 @@ async function loadCatalog({ log = console.log } = {}) {
   }
   if (failed) log(`  ${failed} photo(s) couldn't be downloaded; those products have no photo.`);
 
+  // Gallery photos (the product's other DummyJSON images), same way
+  const extraFile = (item, n) => path.join(IMAGES_DIR, `${item.key}-${n + 2}.webp`);
+  const extras = items.flatMap((item) => item.extraImageUrls.map((url, n) => ({ url, file: extraFile(item, n) })))
+    .filter((x) => !fs.existsSync(x.file));
+  if (extras.length) log(`  Downloading ${extras.length} gallery photos…`);
+  for (let i = 0; i < extras.length; i += 8) {
+    await Promise.all(extras.slice(i, i + 8).map((x) => download(x.url, x.file).catch(() => {})));
+  }
+
   for (const item of items) {
     const file = path.join(IMAGES_DIR, `${item.key}.webp`);
     if (fs.existsSync(file)) item.imageFile = file;
+    item.extraImageFiles = item.extraImageUrls.map((_, n) => extraFile(item, n)).filter((f) => fs.existsSync(f));
   }
   return items;
 }

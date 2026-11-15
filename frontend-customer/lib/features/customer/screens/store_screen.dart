@@ -4,6 +4,8 @@
 // Customer lands here when clicking a product on the homepage.
 // Product stock is live (stock:update); sold-out items drop off and
 // catalog:update reloads the store's products (FR01/PR01).
+// Shows the store's rating (averageRating / ratingCount) and each
+// product's RatingBadge (SRDS §2.3).
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -16,6 +18,8 @@ import 'package:vendra_customer/vendra_core.dart';
 import '../../../config/app_routes.dart';
 import '../../../core/services/customer_location_storage.dart';
 import '../bloc/cart_bloc.dart';
+import '../widgets/rating_summary.dart';
+import '../widgets/trust_badges.dart';
 import 'cart_screen.dart';
 import 'dart:math';
 
@@ -130,6 +134,32 @@ class _StoreScreenState extends State<StoreScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => _ProductQuickSheet(product: match),
+    );
+  }
+
+  /// The store's average rating across its products' reviews
+  Widget _storeRating() {
+    final average = toDoubleOrNull(_vendorData?['averageRating']);
+    final count = toInt(_vendorData?['ratingCount']);
+    if (average == null || count == 0) {
+      return Row(
+        children: [
+          const Icon(Icons.star_outline_rounded, size: 18, color: starColor),
+          const SizedBox(width: 6),
+          Text('No ratings yet', style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
+        ],
+      );
+    }
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 8,
+      runSpacing: 2,
+      children: [
+        RatingStars(rating: average, size: 18),
+        Text(average.toStringAsFixed(1),
+            style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        Text('· ${ratingCountLabel(count)}', style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
+      ],
     );
   }
 
@@ -255,6 +285,8 @@ class _StoreScreenState extends State<StoreScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            _storeRating(),
+                            const SizedBox(height: 10),
                             if (_vendorData?['ownerName'] != null)
                               Row(
                                 children: [
@@ -373,7 +405,14 @@ class _StoreScreenState extends State<StoreScreen> {
                     SliverToBoxAdapter(
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
-                        child: Text('Products (${_products.length})', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Products (${_products.length})', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)),
+                            // Dual inventory reassurance (FR01)
+                            if (_products.isNotEmpty) const LiveStockNote(),
+                          ],
+                        ),
                       ),
                     ),
 
@@ -469,6 +508,16 @@ class _ProductQuickSheet extends StatelessWidget {
             ),
             Text(formatRupees(product.price),
                 style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.primary)),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 12,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (product.ratingCount > 0) RatingBadge(average: product.averageRating, count: product.ratingCount),
+                LiveStockIndicator(product: product, compact: true),
+              ],
+            ),
             if (product.description != null && product.description!.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(

@@ -3,7 +3,9 @@
 Base URL: `http://localhost:3000` in development. All responses are JSON shaped `{ success, message?, data? }`.
 Errors are `{ success: false, message, code?, ...details }`. Show `message` to the user; branch on `code` when present.
 
-Authenticated routes need `Authorization: Bearer <jwt>`. A missing, expired or invalid token returns 401 with `code` `NO_TOKEN`, `TOKEN_EXPIRED` or `INVALID_TOKEN` — send the user back to sign in. Money values are rupees with 2 decimals. Timestamps are ISO-8601 instants; \"today\"/\"this week\" totals are counted in Asia/Karachi time.
+Authenticated routes need `Authorization: Bearer <jwt>`. A missing, expired or invalid token returns 401 with `code` `NO_TOKEN`, `TOKEN_EXPIRED` or `INVALID_TOKEN` — send the user back to sign in.
+
+**Rate limits and headers (SSR 01).** Every response carries security headers (helmet) and `RateLimit-*` headers. Over the limit returns **429** with `code` and `retryAfterSeconds`: `RATE_LIMITED` (more than `RATE_LIMIT_MAX` requests per minute from one IP: default 300, 2000 in development), `LOGIN_RATE_LIMITED` (10 failed sign-ins for one email from one IP in 15 minutes; successful sign-ins don't count), `SIGNUP_RATE_LIMITED` (20 sign-ups per IP per hour). Money values are rupees with 2 decimals. Timestamps are ISO-8601 instants; \"today\"/\"this week\" totals are counted in Asia/Karachi time.
 
 **Pagination:** list endpoints marked *paged* take `?limit=` (default 20, max 100) and `?offset=`, and return `meta: { limit, offset, hasMore, nextOffset }` next to `data`. Fetch the next page with `offset=nextOffset` while `hasMore` is true.
 
@@ -32,9 +34,9 @@ Connect with `{ auth: { token } }` (or no token for public stock updates only). 
 
 | Method | Path | Body | Notes |
 |---|---|---|---|
-| POST | `/api/auth/signup` | `{ fullName, email, password, role: customer\|vendor\|rider, phone?, storeName?, cnic? (vendor), vehicleType? (rider) }` | Returns `{ token, user }` |
+| POST | `/api/auth/signup` | `{ fullName, email, password, role: customer\|vendor\|rider, phone?, storeName?, cnic? (vendor) }`. Riders also send `{ cnic (13 digits), vehicleType: motorcycle\|motorbike\|scooter\|bicycle\|car, licenseNumber, vehicleNumber }` (licence and registration not needed for a bicycle) | Returns `{ token, user }`. A new rider has `user.riderApprovalStatus: pending` |
 | POST | `/api/auth/login` | `{ email, password, role? }` | Send the app's role; a mismatch returns **403 `WRONG_APP`** |
-| GET | `/api/auth/me` | | User incl. `walletBalance`, `mustChangePassword`, vendor `storeName/isApproved/storeLat/storeLng`, rider `vehicleType/isOnline` |
+| GET | `/api/auth/me` | | User incl. `walletBalance`, `mustChangePassword`, vendor `storeName/isApproved/storeLat/storeLng`, rider `vehicleType/isOnline/riderApprovalStatus (pending\|approved\|rejected)/riderRejectionReason/riderDocuments {cnic, licenseNumber, vehicleNumber}`. Vendors also get `permissions: [..]` and `staff: { id, fullName, role } \| null` (null = the store owner). Accepts staff tokens |
 | POST | `/api/auth/change-password` | `{ currentPassword, newPassword (≥8) }` | 401 `WRONG_PASSWORD` if the current one is wrong. Clears `mustChangePassword` |
 
 Login also returns `user.mustChangePassword`: when true (an admin issued a temporary password) the app should make the user choose a new one before continuing. There is no self-service "forgot password" (no email/SMS service); an admin resets it from the dashboard.
@@ -45,8 +47,10 @@ Login also returns `user.mustChangePassword`: when true (an admin issued a tempo
 |---|---|---|
 | GET | `/api/public-config?role=` | Read at app start. `{ mode: development\|production, features: { manualLocation, testCards, fastTimers, demoLogin }, deliveryFee (base), deliveryFeePerKm, maxDeliveryKm (0 = no limit), disputeWindowMinutes, geofenceMeters, taskRadiusKm, defaultBuffer, vendorAcceptTimeoutMinutes, riderAssignTimeoutMinutes, payments: { gatewayUrl, publishableKey, minTopup, maxTopup, minWithdrawal }, demoAccounts: [{ role, name, email, password, note }] }`. `demoAccounts` is empty in production; `?role=` narrows it to one app. Timing values are the effective ones (capped in development) |
 | GET | `/api/categories` | `[{ id, name, icon }]` (icon is a Material icon name) |
-| GET | `/api/products?search=&vendor_id=&category_id=` | *Paged.* Approved, in-stock products from approved vendors. `search` matches the product name, description or store name. Includes `categoryId`, `categoryName`, `publicStock`, `imageUrl` (public path like `/uploads/products/x.jpg`, or null), `vendorLat/Lng` |
-| GET | `/api/vendors/:id` | Store + its products |
+| GET | `/api/products?search=&vendor_id=&category_id=` | *Paged.* Approved, in-stock products from approved vendors. `search` matches the product name, description or store name. Includes `categoryId`, `categoryName`, `publicStock`, `imageUrl` (public path like `/uploads/products/x.jpg`, or null), `vendorLat/Lng`, `averageRating` (1 decimal, null with no reviews), `ratingCount` |
+| GET | `/api/products/:id` | One product (also when sold out, `publicStock: 0`) + `images: [url…]` (cover first, then the gallery), `ratingDistribution: { 5: n, 4: n, 3: n, 2: n, 1: n }`, `latestReviews` (3) |
+| GET | `/api/products/:id/reviews` | *Paged*, newest first. Review: `{ id, orderId, productId, productName, rating, comment, customerName ("Ahmed R."), createdAt }` |
+| GET | `/api/vendors/:id` | Store + its products, plus the store's `averageRating, ratingCount` |
 | GET | `/api/stores?lat=&lng=&search=` | Every approved store with a location and something in stock, for the map and store search (`search` matches the store name or address): `[{ id, storeName, storeAddress, latitude, longitude, productCount, distanceKm, deliversToYou }]`. With `lat/lng`: nearest first, with `distanceKm` and `deliversToYou` (within `maxDeliveryKm`) |
 
 ## Customer (role `customer`)
@@ -61,6 +65,13 @@ Login also returns `user.mustChangePassword`: when true (an admin issued a tempo
 | POST | `/api/customer/orders/:id/cancel` | Pending orders only (409 otherwise) — full refund, stock released |
 | POST | `/api/customer/orders/:id/picked-up` | Self pickup: ready_for_pickup → picked |
 | POST | `/api/customer/orders/:id/confirm-received` | Self pickup: → delivered, starts the dispute window |
+| POST | `/api/customer/orders/:id/review` | `{ items: [{ productId, rating (1–5), comment? (≤500) }], riderRating? (1–5, delivery orders) }` → 201. Once per delivered order: 409 `NOT_DELIVERED`, 409 `ALREADY_REVIEWED` |
+
+Orders also carry:
+- `deliveryOtp` — the 4-digit **handover code**, shown to the customer only while the order is open (null afterwards). The rider (or, for self pickup, the store) must enter it to complete the handover. `otpLockedUntil` is set when 5 wrong codes locked the handover for 10 minutes (the customer gets an `otp_locked` notification).
+- `reservationExpiresAt` — for a `pending` order: when the reserved stock is released and the order cancelled if the store hasn't accepted it (show a countdown).
+- `canReview`, `reviewedAt`, `riderRating`, and on each item `myRating` / `myComment`.
+- `paymentMethod` (`wallet` | `card`). Money stays in escrow (`escrowStatus: held`) until delivery plus the dispute window.
 
 ## Card payments and withdrawals
 
@@ -90,43 +101,77 @@ Other codes: 400 `CARD_TOKEN_REQUIRED`, 400 `TOKEN_ALREADY_USED` / `TOKEN_EXPIRE
 
 | Method | Path | Body / notes |
 |---|---|---|
-| GET | `/api/vendor/products` | Rows incl. `private_stock, buffer, reserved_quantity, public_stock, category_id, category_name, is_approved` |
+| GET | `/api/vendor/products` | Rows incl. `private_stock, buffer, reserved_quantity, public_stock, category_id, category_name, is_approved, rating_count, average_rating, gallery: [{ id, url }]` |
 | POST | `/api/vendor/products` | `{ name, price, private_stock, description?, buffer? (defaults to policy), barcode?, category_id? }`. New products have `is_approved=false` until an admin approves (unless the auto-approve policy is on) |
 | PUT | `/api/vendor/products/:id` | Any of the create fields. 409 `BELOW_RESERVED` `{ reserved }` if private stock would go below reserved units |
 | DELETE | `/api/vendor/products/:id` | 409 while units are reserved |
 | GET | `/api/vendor/products/barcode/:code` | Scan lookup; 404 if not in this store |
 | POST | `/api/vendor/products/:id/image` | multipart, one image in field `image` (≤5 MB; JPEG/PNG/WebP/HEIC). Replaces any existing photo; returns the product row with `image_url` |
 | DELETE | `/api/vendor/products/:id/image` | Removes the photo |
-| POST | `/api/vendor/pos/sales` | Walk-in sale `{ items: [{ productId, quantity }] }`. Sellable = `private_stock − reserved_quantity` (buffer can be sold, reserved units cannot). 409 `RESERVED_STOCK` `{ productId, sellable, reserved }`. Returns `{ id, total_amount, items: [{ product_id, product_name, quantity, unit_price, private_stock_after, public_stock_after, reserved_quantity }] }` |
-| GET | `/api/vendor/pos/sales` | Today: `{ sales, today_count, today_total }` |
+| POST | `/api/vendor/products/:id/images` | multipart `image`: adds a gallery photo (up to 5 besides the cover; the first photo of a product without a cover becomes the cover). Returns the product row |
+| DELETE | `/api/vendor/products/:id/images/:imageId` | Removes a gallery photo |
+| GET | `/api/vendor/reviews` | *Paged.* Reviews of this store's products (review shape above); `meta.count`, `meta.average` |
+| POST | `/api/vendor/pos/sales` | Walk-in sale `{ items: [{ productId, quantity }] }`. Sellable = `private_stock − reserved_quantity` (buffer can be sold, reserved units cannot). 409 `RESERVED_STOCK` `{ productId, sellable, reserved }`. Returns `{ id, total_amount, items: [{ product_id, product_name, quantity, unit_price, private_stock_after, public_stock_after, reserved_quantity }], receipt }` |
+| GET | `/api/vendor/pos/sales` | Today: `{ sales: [{ id, total_amount, created_at, cashier_name, cashier_role, items }], today_count, today_total }` |
+| GET | `/api/vendor/pos/sales/:id` | The `receipt` of one sale (reprint / share) |
+| GET · PUT | `/api/vendor/receipt-settings` | `{ receiptHeader, receiptFooter, paymentAccount, paymentAccountTitle }` (PUT: owner only; `''` clears a field) |
+
+`receipt`: `{ receipt_number ("POS-000042"), store: { name, address, phone, header, footer }, sale: { id, total_amount, created_at, cashier_name, items: [{ product_name, barcode, quantity, unit_price }] }, cashier, payment_qr: { account, title, payload } | null }`. `payment_qr.payload` is the text to encode in the slip's **scan-to-pay QR** (`vendra-pay:<account>?name=…&amount=…&ref=POS-42`); it is null until the store sets a payment account.
 | GET | `/api/vendor/orders/:id` | One order (same row shape) — refresh after an `order:update` event |
-| GET | `/api/vendor/orders?scope=active\|history\|all` | `active`: every in-progress order, not paged. `history` (delivered/cancelled) and `all` (default): *paged*, default 30. Rows incl. `items, customer_name, customer_phone, rider_name, rider_phone, escrow_status, subtotal, delivery_fee, latest_dispute` |
+| GET | `/api/vendor/orders?scope=active\|history\|all` | `active`: every in-progress order, not paged. `history` (delivered/cancelled) and `all` (default): *paged*, default 30. Rows incl. `items` (each with `barcode, packed_quantity`), `customer_name, customer_phone, rider_name, rider_phone, escrow_status, subtotal, delivery_fee, latest_dispute, packed_by_name, otp_required`. The handover code itself is never sent to the store |
 | PUT | `/api/vendor/orders/:id/approve` | pending → confirmed |
 | PUT | `/api/vendor/orders/:id/reject` | pending → cancelled (refund + stock released) |
-| PUT | `/api/vendor/orders/:id/prepare` | confirmed → packed |
+| PUT | `/api/vendor/orders/:id/items/:itemId/pack` | **Packing checklist** (confirmed orders): `{ packed: true\|false }` or `{ packedQuantity }` → `{ order_id, items: [{ id, product_id, product_name, barcode, image_url, quantity, packed_quantity }], packed_units, total_units, complete }` |
+| POST | `/api/vendor/orders/:id/scan` | `{ barcode }` packs one unit of that item → same shape + `scanned: { item_id, product_name, packed_quantity, quantity }`. 422 `WRONG_ITEM` (not in this order), 409 `ALREADY_PACKED` |
+| PUT | `/api/vendor/orders/:id/prepare` | confirmed → packed, **only when every item is packed**: else 409 `PACKING_INCOMPLETE` `{ missing: [{ item_id, product_name, missing }] }` |
 | PUT | `/api/vendor/orders/:id/ready-for-pickup` | packed → ready_for_pickup. Delivery orders are broadcast to riders within the task radius |
-| PUT | `/api/vendor/orders/:id/deliver` | Self pickup only: → delivered, starts the dispute window |
+| PUT | `/api/vendor/orders/:id/deliver` | Self pickup only: `{ otp }` — the customer's handover code → delivered, starts the dispute window. 400 `OTP_REQUIRED`, 422 `WRONG_OTP` `{ attemptsLeft }`, 429 `OTP_LOCKED` |
 | PUT | `/api/vendor/location` | `{ latitude, longitude, storeAddress? }`. A store waiting for approval moves straight away (200, `data.applied: true`). An approved store files a request instead (202, `applied: false`): it stays at its current location until an admin approves. A new request replaces an earlier one. `data` carries `latitude, longitude, storeAddress, pendingLocation, locationRejectionReason` (also on `/api/auth/me`) |
 | DELETE | `/api/vendor/location/request` | Withdraw a location change waiting for review |
 | GET | `/api/vendor/inventory/ledger` | `change_type`: `stock_in, adjustment, reserve, release, sale (online delivered), pos_sale (walk-in)` |
+
+### Shop staff (cashier, packer, inventory manager)
+
+The store owner signs in as usual. On the shop's device, anyone can **switch user** with their PIN and gets a *staff token* (12 h) limited to their role. Staff tokens work on `/api/vendor/*`, `/api/auth/me` and `/api/notifications*` only; elsewhere (wallet, withdrawals, disputes, password) they get **403 `STAFF_NOT_ALLOWED`**. A vendor route the role can't use returns **403 `STAFF_FORBIDDEN`**. A removed staff member's token stops working at once (**401 `STAFF_INACTIVE`**). Switching back to the owner is a normal `POST /api/auth/login` with the owner's password.
+
+| Role | Permissions |
+|---|---|
+| owner (no staff) | everything, incl. `owner`: staff, location, receipt settings, wallet |
+| `cashier` | `products.view`, `pos` |
+| `packer` | `products.view`, `orders.view`, `orders.fulfil` (approve/reject, packing checklist, packed, ready, hand over) |
+| `inventory_manager` | `products.view`, `products.manage` (add/edit/delete, stock, photos), `ledger`, `orders.view` |
+
+| Method | Path | Body / notes |
+|---|---|---|
+| GET | `/api/vendor/staff/roster` | Owner or staff: `[{ id, fullName, role }]` for the switch-user screen |
+| POST | `/api/vendor/staff/switch` | `{ staffId, pin }` → `{ token, staff: { id, fullName, role, permissions } }`. 401 `WRONG_PIN` `{ attemptsLeft }`; 5 wrong PINs → 429 `PIN_LOCKED` for 5 minutes |
+| GET | `/api/vendor/staff` | Owner: `[{ id, fullName, role, isActive, permissions, lastLoginAt, lockedUntil, createdAt }]`, `meta.roles` |
+| POST | `/api/vendor/staff` | Owner: `{ fullName, role, pin (4–6 digits) }` (up to 20 active) |
+| PUT | `/api/vendor/staff/:id` | Owner: any of `{ fullName, role, pin, isActive }`; a new PIN lifts a lockout |
+| DELETE | `/api/vendor/staff/:id` | Owner: deactivates (history keeps the name) |
+
+Who rang up a sale (`cashier_name`) and who packed an order (`packed_by_name`) are recorded.
 
 ## Rider (role `rider`)
 
 | Method | Path | Body / notes |
 |---|---|---|
-| GET | `/api/rider/profile` | `{ isOnline, vehicleType, currentLat, currentLng, lastLocationAt, activeOrderId }` |
-| PUT | `/api/rider/status` | `{ isOnline, lat?, lng? }`. 409 `ACTIVE_DELIVERY` if going offline with an active delivery |
+| GET | `/api/rider/profile` | `{ isOnline, vehicleType, cnic, licenseNumber, vehicleNumber, approvalStatus (pending\|approved\|rejected), rejectionReason, currentLat, currentLng, lastLocationAt, activeOrderId }` |
+| PUT | `/api/rider/documents` | `{ cnic, licenseNumber, vehicleNumber, vehicleType? }`. A rejected rider goes back to `pending`; an approved rider who changes them is reviewed again (and goes offline). Admins are notified |
+| PUT | `/api/rider/status` | `{ isOnline, lat?, lng? }`. 409 `ACTIVE_DELIVERY` if going offline with an active delivery. **403 `RIDER_NOT_APPROVED` `{ approvalStatus }`** until an admin has approved the rider's documents |
 | POST | `/api/rider/location` | `{ lat, lng, source?: gps\|manual }` — send **every 10 s while online**. Returns `{ orderId }` of the active delivery (or null). `source: manual` (a position set by hand or a simulated drive) is accepted only when `features.manualLocation` is on, else **403 `MANUAL_LOCATION_DISABLED`**. `PUT /api/rider/status` takes the same `source` |
-| GET | `/api/rider/tasks` | `{ tasks, activeOrderId, reason? (offline\|busy\|no_location), radiusKm }`. Task: `{ id, storeName, storeAddress, storeLat/Lng, deliveryAddress, customerLat/Lng, itemCount, distanceToStoreKm, tripDistanceKm, estimatedPayout, readyAt }` |
+| GET | `/api/rider/tasks` | `{ tasks, activeOrderId, reason? (not_approved\|offline\|busy\|no_location), radiusKm }`. Task: `{ id, storeName, storeAddress, storeLat/Lng, deliveryAddress, customerLat/Lng, itemCount, distanceToStoreKm, tripDistanceKm, estimatedPayout, estimatedPayoutBreakdown, readyAt }` |
 | POST | `/api/rider/tasks/:id/accept` | First rider wins; 409 `TASK_TAKEN` otherwise. One active delivery at a time |
-| GET | `/api/rider/orders?scope=active\|history` | `history` is *paged*. Rider orders incl. `storePhone, customerName, customerPhone, distanceKm, waitMinutes, payout` |
+| GET | `/api/rider/orders?scope=active\|history` | `history` is *paged*. Rider orders incl. `storePhone, customerName, customerPhone, distanceKm, waitMinutes, payout, payoutBreakdown, otpRequired, customerRating` |
 | POST | `/api/rider/orders/:id/arrived` | `{ lat, lng }`. At the store (waiting time starts). 422 `OUTSIDE_PICKUP_GEOFENCE` `{ distanceMeters, geofenceMeters }` unless within `pickup_geofence_m` of the store |
 | POST | `/api/rider/orders/:id/picked` | `{ lat, lng }`. ready_for_pickup → picked, with the same store check |
 | POST | `/api/rider/orders/:id/on-the-way` | picked → on_the_way |
-| POST | `/api/rider/orders/:id/deliver` | `{ lat, lng }` — must be within the geofence (200 m) of the customer pin, else **422 `OUTSIDE_GEOFENCE` `{ distanceMeters, geofenceMeters }`**. Returns `{ distanceKm, distanceSource (gps\|straight_line), waitMinutes, payout }` |
-| GET | `/api/rider/earnings` | `{ today, todayCount, week, weekCount, allTime, allTimeCount, totalKm, walletBalance, recent }` |
+| POST | `/api/rider/orders/:id/deliver` | `{ lat, lng, otp }` — must be within the geofence (200 m) of the customer pin, else **422 `OUTSIDE_GEOFENCE` `{ distanceMeters, geofenceMeters }`**, **and** carry the customer's 4-digit handover code: 400 `OTP_REQUIRED`, 422 `WRONG_OTP` `{ attemptsLeft }` (5 tries), 429 `OTP_LOCKED` `{ lockedUntil }` (10 min). A spoofed GPS position alone can't complete a delivery. Returns `{ distanceKm, distanceSource (gps\|straight_line), waitMinutes, payout, payoutBreakdown }` |
+| GET | `/api/rider/earnings` | `{ today, todayCount, week, weekCount, allTime, allTimeCount, totalKm, averageRating, ratingCount, walletBalance, recent }` |
 
 Payout = `rider_base_fee + rider_per_km × GPS km + rider_per_wait_min × max(0, wait − rider_free_wait_min)`.
+
+`payoutBreakdown` (the payout slip, stored at delivery so later policy changes don't rewrite it): `{ baseFee, perKm, distanceKm, distancePay, perWaitMin, freeWaitMin, waitMinutes, paidWaitMinutes, waitPay, total, distanceSource }`. `total` is the exact amount paid; the lines are rounded for display. Orders delivered before slips existed have `null`.
 
 Delivery fee (charged to the customer) = `delivery_fee + delivery_fee_per_km × straight-line km from the store to the customer pin`, rounded to the nearest Rs 10. Self pickup is free. Stores farther than `max_delivery_km` (default 15) from the pin don't deliver: checkout and quote return **400 `OUT_OF_DELIVERY_RANGE`**; self pickup still works. One order is always from one store, so the apps keep a separate cart per store.
 
@@ -134,7 +179,7 @@ Delivery fee (charged to the customer) = `delivery_fee + delivery_fee_per_km × 
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/notifications?limit=50` | `{ notifications, unreadCount }` |
+| GET | `/api/notifications?limit=50&offset=&unread=true` | *Paged* (default 50, max 200): `{ notifications, unreadCount }` + `meta`. `unread=true` lists unread only. Accepts staff tokens |
 | PUT | `/api/notifications/read-all` | |
 | PUT | `/api/notifications/:id/read` | |
 | GET | `/api/wallet?limit=50` | Max 200. `{ balance, transactions: [{ id, orderId, type, amount, balanceAfter, description, reference, createdAt }] }`. `type`: `deposit` (card payment, `reference` = `pi_…`), `opening_balance` (money from before the gateway), `escrow_hold`, `escrow_refund`, `escrow_release`, `rider_payout`, `withdrawal` (`reference` = `po_…` once sent), `withdrawal_reversal` |
@@ -146,7 +191,7 @@ Delivery fee (charged to the customer) = `delivery_fee + delivery_fee_per_km × 
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/admin/stats` | + `ridersOnline, pendingProducts, openDisputes, platformRevenue, orders.inProgress` |
+| GET | `/api/admin/stats` | + `ridersOnline, pendingRiders, pendingProducts, openDisputes, platformRevenue, orders.inProgress` |
 | GET | `/api/admin/vendors` · PUT `/:id/approve` · PUT `/:id/disapprove` | Rows include `latitude, longitude, pendingLocation: { latitude, longitude, address, requestedAt, movedKm } \| null` |
 | PUT | `/api/admin/vendors/:id/location/approve` · `/location/reject` `{ reason }` | Review a store's location change: approve moves the store; reject (reason required) leaves it where it is. Either way the vendor is notified. 409 when nothing is waiting |
 | GET | `/api/admin/products?status=pending\|approved\|all` · PUT `/:id/approve` · PUT `/:id/hide` | Catalog approval |
@@ -154,7 +199,8 @@ Delivery fee (charged to the customer) = `delivery_fee + delivery_fee_per_km × 
 | PUT | `/api/admin/policies` | `{ values: { key: number } }`. `%` ≤ 100, `0/1` flags, `units` whole numbers |
 | GET | `/api/admin/disputes?status=open\|resolved` | Same shape as `GET /api/disputes/:id` |
 | PUT | `/api/admin/disputes/:id/resolve` | `{ resolution: refund\|release, note? }` |
-| GET | `/api/admin/riders` | `{ fullName, email, phone, vehicleType, isOnline, deliveries, earnings, walletBalance, activeOrderId }` |
+| GET | `/api/admin/riders?status=pending\|approved\|rejected` | Waiting riders first: `{ id (user id), fullName, email, phone, vehicleType, cnic, licenseNumber, vehicleNumber, approvalStatus, rejectionReason, reviewedAt, isOnline, deliveries, earnings, averageRating, walletBalance, activeOrderId }` |
+| PUT | `/api/admin/riders/:id/approve` · `/reject` `{ reason }` | Rider document review (`:id` = the rider's user id). Reject needs a reason, takes the rider offline, and is refused mid-delivery. The rider is notified |
 | GET | `/api/admin/finance` | `{ escrowPool, held {orders, amount}, disputed {orders, amount}, commission, deliveryMargin, platformRevenue, riderPayouts, recent }` |
 | GET | `/api/admin/finance/reconciliation` | Does the money at the gateway match the books? `{ gateway: { reachable, available, inTransit }, books: { wallets, escrow, platformRevenue, pendingWithdrawals, uncreditedPayments }, openingBalances: { total, funded, unfunded }, expectedGatewayBalance, difference, balanced }` |
 | GET | `/api/admin/payments?status=&search=` · `/api/admin/withdrawals?status=&search=` | *Paged*, default 50. `search` matches the user's name or email, the gateway id, the card's last 4 digits and (payments) the order number, e.g. `#VDR-03630`. The payment/withdrawal shapes above plus `user: { id, name, email, role }` |
@@ -164,10 +210,10 @@ Delivery fee (charged to the customer) = `delivery_fee + delivery_fee_per_km × 
 ## Order and escrow lifecycle
 
 ```
-pending ─approve→ confirmed ─prepare→ packed ─ready→ ready_for_pickup
-   │                                                   │
-   └─reject/cancel→ cancelled (refund)                  ├─ delivery:  rider accept → picked → on_the_way → delivered (geofenced)
-                                                       └─ self pickup: picked (optional) → delivered
+pending ─approve→ confirmed ─(packing checklist)─prepare→ packed ─ready→ ready_for_pickup
+   │                                                                         │
+   └─reject/cancel→ cancelled (refund)        ├─ delivery:  rider accept → picked → on_the_way → delivered (geofence + handover code)
+                                              └─ self pickup: picked (optional) → delivered (store enters the code, or the customer confirms)
 
 escrow: held ──(delivered + dispute window, no dispute)──→ released (vendor gets subtotal − commission)
           └─ dispute opened → disputed ─admin→ refunded (customer) | released

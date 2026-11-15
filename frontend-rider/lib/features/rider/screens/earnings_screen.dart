@@ -1,6 +1,8 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Rider App - Earnings, delivery history and wallet (FR04)
 // The wallet holds delivery payouts; "Withdraw" sends them to a card.
+// Summary shows the rider's average customer rating; tapping a delivery
+// in History opens its itemised payout slip.
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -13,6 +15,7 @@ import 'package:vendra_rider/vendra_core.dart';
 
 import '../bloc/earnings_bloc.dart';
 import '../models/rider_models.dart';
+import '../widgets/delivery_slip_sheet.dart';
 import '../widgets/withdraw_action.dart';
 
 final _dateFmt = DateFormat('d MMM yyyy, h:mm a');
@@ -59,7 +62,8 @@ class EarningsScreen extends StatelessWidget {
 
             return TabBarView(
               children: [
-                RefreshIndicator(onRefresh: refresh, child: _Summary(earnings: state.earnings, balance: state.wallet.balance)),
+                RefreshIndicator(
+                    onRefresh: refresh, child: _Summary(earnings: state.earnings, balance: state.wallet.balance)),
                 RefreshIndicator(onRefresh: refresh, child: _History(state: state)),
                 RefreshIndicator(onRefresh: refresh, child: _Wallet(state: state)),
               ],
@@ -116,6 +120,7 @@ class _Summary extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
+        _RatingTile(average: e.averageRating, count: e.ratingCount),
         _PeriodTile(label: 'Today', amount: e.today, count: e.todayCount, icon: Icons.today),
         _PeriodTile(label: 'This week', amount: e.week, count: e.weekCount, icon: Icons.date_range),
         _PeriodTile(label: 'All time', amount: e.allTime, count: e.allTimeCount, icon: Icons.all_inclusive),
@@ -126,7 +131,8 @@ class _Summary extends StatelessWidget {
               backgroundColor: AppColors.secondary.withValues(alpha: 0.1),
               child: const Icon(Icons.route, color: AppColors.secondary, size: 20),
             ),
-            title: Text('Total distance', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            title: Text('Total distance',
+                style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
             trailing: Text(km(e.totalKm),
                 style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.secondary)),
           ),
@@ -137,6 +143,45 @@ class _Summary extends StatelessWidget {
           style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
         ),
       ],
+    );
+  }
+}
+
+/// Average of the stars customers gave this rider
+class _RatingTile extends StatelessWidget {
+  final double? average;
+  final int count;
+  const _RatingTile({required this.average, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final rated = average != null && count > 0;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: starColor.withValues(alpha: 0.15),
+          child: const Icon(Icons.star_rounded, color: starColor, size: 22),
+        ),
+        title: Text('Customer rating',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+        subtitle: Text(
+          rated ? 'From $count rating${count == 1 ? '' : 's'}' : 'No ratings yet',
+          style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
+        ),
+        trailing: rated
+            ? Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(average!.toStringAsFixed(1),
+                      style:
+                          GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                  RatingStars(rating: average!, size: 14),
+                ],
+              )
+            : null,
+      ),
     );
   }
 }
@@ -197,43 +242,66 @@ class _History extends StatelessWidget {
         final when = o.deliveredAt ?? o.assignedAt;
         return Card(
           margin: const EdgeInsets.only(bottom: 10),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text('#${o.id} · ${o.storeName ?? 'Store'}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                    ),
-                    _StatusChip(text: o.statusText, color: delivered ? AppColors.success : AppColors.error),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text('To ${o.deliveryAddress ?? 'customer'}',
-                    style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
-                if (when != null)
-                  Text(_dateFmt.format(when), style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textLight)),
-                if (delivered) ...[
-                  const Divider(height: 20),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => showDeliverySlip(context, o),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Row(
                     children: [
-                      _Metric(icon: Icons.route, text: km(o.distanceKm)),
-                      const SizedBox(width: 14),
-                      _Metric(
-                          icon: Icons.schedule,
-                          text: '${(o.waitMinutes ?? 0).toStringAsFixed(0)} min wait'),
-                      const Spacer(),
-                      Text(rs(o.payout),
-                          style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.success)),
+                      Expanded(
+                        child: Text('#${o.id} · ${o.storeName ?? 'Store'}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.poppins(
+                                fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                      ),
+                      _StatusChip(text: o.statusText, color: delivered ? AppColors.success : AppColors.error),
                     ],
                   ),
+                  const SizedBox(height: 4),
+                  Text('To ${o.deliveryAddress ?? 'customer'}',
+                      style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                  Row(
+                    children: [
+                      if (when != null)
+                        Expanded(
+                          child: Text(_dateFmt.format(when),
+                              style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textLight)),
+                        )
+                      else
+                        const Spacer(),
+                      if (o.customerRating != null) RatingStars(rating: o.customerRating!.toDouble(), size: 14),
+                    ],
+                  ),
+                  if (delivered) ...[
+                    const Divider(height: 20),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Wrap(
+                            spacing: 14,
+                            runSpacing: 4,
+                            children: [
+                              _Metric(icon: Icons.route, text: km(o.distanceKm)),
+                              _Metric(
+                                  icon: Icons.schedule, text: '${(o.waitMinutes ?? 0).toStringAsFixed(0)} min wait'),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(rs(o.payout),
+                            style: GoogleFonts.poppins(
+                                fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.success)),
+                        const Icon(Icons.chevron_right, size: 18, color: AppColors.textLight),
+                      ],
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         );
@@ -256,8 +324,7 @@ class _HistoryFooter extends StatelessWidget {
         child: Column(
           children: [
             Text(error,
-                textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                textAlign: TextAlign.center, style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
             TextButton.icon(
               onPressed: () => context.read<EarningsBloc>().add(const EarningsHistoryMoreRequested()),
               icon: const Icon(Icons.refresh, size: 18),
@@ -317,17 +384,18 @@ class _Wallet extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        Text('Withdrawals', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        Text('Withdrawals',
+            style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
         const SizedBox(height: 8),
         WithdrawalHistoryList(
           refreshKey: state.withdrawalsVersion,
           emptyText: 'No withdrawals yet. Use Withdraw to send your earnings to a card.',
         ),
         const SizedBox(height: 16),
-        Text('Transactions', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        Text('Transactions',
+            style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
         const SizedBox(height: 8),
-        if (wallet.transactions.isEmpty)
-          const _Message(icon: Icons.receipt_long, text: 'No wallet transactions yet.'),
+        if (wallet.transactions.isEmpty) const _Message(icon: Icons.receipt_long, text: 'No wallet transactions yet.'),
         for (final t in wallet.transactions) _TransactionTile(t: t),
       ],
     );
@@ -364,7 +432,8 @@ class _TransactionTile extends StatelessWidget {
                   Text(t.title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14, color: AppColors.textPrimary)),
+                      style:
+                          GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14, color: AppColors.textPrimary)),
                   if (lines.isNotEmpty)
                     Text(lines.join('\n'),
                         style: GoogleFonts.poppins(fontSize: 11, height: 1.4, color: AppColors.textSecondary)),
@@ -403,6 +472,7 @@ class _Metric extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, size: 15, color: AppColors.textSecondary),
         const SizedBox(width: 4),

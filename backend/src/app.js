@@ -12,6 +12,7 @@ const { corsOrigin } = require('./utils/cors');
 const { initRealtime } = require('./realtime');
 const { PRODUCTS_PUBLIC_PATH, sendStoredFile, verifyEvidenceLink } = require('./services/storage.service');
 const { asyncHandler } = require('./utils/http');
+const { securityHeaders, createLimiters, trustProxySetting } = require('./utils/security');
 
 const authRoutes = require('./routes/auth.routes');
 const vendorRoutes = require('./routes/vendor.routes');
@@ -24,6 +25,11 @@ const { gatewayWebhook } = require('./controllers/payment.controller');
 
 function createServer({ logRequests = true } = {}) {
   const app = express();
+  app.set('trust proxy', trustProxySetting());
+  const limit = createLimiters();
+
+  // Security headers (helmet) on every response
+  app.use(securityHeaders);
 
   // CORS — localhost in dev (Flutter web uses random ports) + ALLOWED_ORIGINS
   app.use(cors({
@@ -34,7 +40,12 @@ function createServer({ logRequests = true } = {}) {
   }));
   // Gateway webhooks are verified against the exact bytes sent, so they skip the JSON parser
   app.post('/api/payments/webhook', express.raw({ type: 'application/json', limit: '256kb' }), gatewayWebhook);
-  app.use(express.json());
+  app.use(express.json({ limit: '100kb' }));
+
+  // Rate limits (SSR 01): per IP on the whole API, stricter on sign-in and sign-up
+  app.use('/api', limit.api);
+  app.post('/api/auth/login', limit.login);
+  app.post('/api/auth/signup', limit.signup);
 
   if (logRequests) {
     app.use((req, res, next) => {

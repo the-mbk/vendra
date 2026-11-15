@@ -25,12 +25,42 @@ function payoutPaisa(policies, distanceKm, waitMin) {
   return toPaisa(rupees);
 }
 
+const round2 = (n) => Math.round(n * 100) / 100;
+
+/**
+ * The payout slip the rider sees: each line with the rate it used. Stored on the
+ * order at delivery, so a later policy change doesn't rewrite old slips.
+ * Lines are rounded for display; total is the exact amount paid.
+ */
+function payoutBreakdown(policies, distanceKm, waitMin) {
+  const paidWait = Math.max(0, waitMin - policies.rider_free_wait_min);
+  return {
+    baseFee: round2(policies.rider_base_fee),
+    perKm: policies.rider_per_km,
+    distanceKm: Math.round(distanceKm * 1000) / 1000,
+    distancePay: round2(policies.rider_per_km * distanceKm),
+    perWaitMin: policies.rider_per_wait_min,
+    freeWaitMin: policies.rider_free_wait_min,
+    waitMinutes: round2(waitMin),
+    paidWaitMinutes: round2(paidWait),
+    waitPay: round2(policies.rider_per_wait_min * paidWait),
+    total: payoutPaisa(policies, distanceKm, waitMin) / 100,
+  };
+}
+
+function estimateKm(storeLat, storeLng, customerLat, customerLng) {
+  if ([storeLat, storeLng, customerLat, customerLng].some((v) => v == null)) return 0;
+  return haversineKm(storeLat, storeLng, customerLat, customerLng);
+}
+
 /** Estimate shown on a task card before the trip: straight-line distance, no waiting */
 function estimatePayoutPaisa(policies, storeLat, storeLng, customerLat, customerLng) {
-  if ([storeLat, storeLng, customerLat, customerLng].some((v) => v == null)) {
-    return toPaisa(policies.rider_base_fee);
-  }
-  return payoutPaisa(policies, haversineKm(storeLat, storeLng, customerLat, customerLng), 0);
+  return payoutPaisa(policies, estimateKm(storeLat, storeLng, customerLat, customerLng), 0);
+}
+
+/** The same estimate as slip lines */
+function estimatePayoutBreakdown(policies, storeLat, storeLng, customerLat, customerLng) {
+  return payoutBreakdown(policies, estimateKm(storeLat, storeLng, customerLat, customerLng), 0);
 }
 
 /**
@@ -64,8 +94,9 @@ async function computeTrip(client, order, policies, finalPoint) {
     distanceKm: Math.round(distanceKm * 1000) / 1000,
     waitMinutes: Math.round(waitMin * 100) / 100,
     payoutPaisa: payoutPaisa(policies, distanceKm, waitMin),
+    breakdown: { ...payoutBreakdown(policies, distanceKm, waitMin), distanceSource: source },
     distanceSource: source,
   };
 }
 
-module.exports = { computeTrip, estimatePayoutPaisa, payoutPaisa, waitingMinutes };
+module.exports = { computeTrip, estimatePayoutPaisa, estimatePayoutBreakdown, payoutPaisa, payoutBreakdown, waitingMinutes };

@@ -17,6 +17,7 @@ export 'core/models/wallet_model.dart';
 export 'core/models/page_meta.dart';
 export 'core/models/payment_model.dart';
 export 'core/models/app_config_model.dart';
+export 'core/models/review_model.dart';
 
 export 'core/utils/card_utils.dart';
 
@@ -45,3 +46,4 @@ export 'core/widgets/withdrawal_history.dart';
 export 'core/widgets/demo_login_panel.dart';
 export 'core/widgets/dev_banner.dart';
 export 'core/widgets/vendra_brand_header.dart';
+export 'core/widgets/rating_stars.dart';

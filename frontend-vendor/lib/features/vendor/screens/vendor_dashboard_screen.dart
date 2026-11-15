@@ -1,8 +1,15 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra App - Vendor Dashboard Screen
 // Adapted from Stitch vendor_dashboard_web design for mobile
-// Uses BottomNavigationBar with 5 tabs: Home · POS · Orders · Ledger · Profile
+// Uses BottomNavigationBar with up to 5 tabs: Home · POS · Orders · Ledger · Profile
 // Stock numbers on this screen are live (see VendorProductBloc).
+//
+// Shop staff (SRDS §1.3): tabs, drawer entries, stats and actions follow
+// the signed-in person's permissions (see staff/permissions.dart) — a
+// cashier gets POS + a read-only product list, a packer the orders, an
+// inventory manager products / stock / ledger. A bar above the bottom
+// navigation shows who is signed in with "Switch user". Switching user
+// re-opens this screen, so everything reloads for the new person.
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -29,6 +36,11 @@ import 'wallet_screen.dart';
 import '../widgets/wallet_widgets.dart';
 
 import 'vendor_location_screen.dart';
+import 'vendor_reviews_screen.dart';
+import 'receipt_settings_screen.dart';
+import '../../staff/permissions.dart';
+import '../../staff/screens/staff_screen.dart';
+import '../../staff/widgets/switch_user.dart';
 
 final NumberFormat _money = NumberFormat('#,##0');
 
@@ -48,33 +60,38 @@ class VendorDashboardScreen extends StatefulWidget {
 }
 
 class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
-  // Tab indexes
-  static const int _homeTab = 0;
-  static const int _posTab = 1;
-  static const int _ordersTab = 2;
-  static const int _ledgerTab = 3;
-  static const int _profileTab = 4;
-
-  int _currentIndex = _homeTab;
+  VendorTab _current = VendorTab.home;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   StreamSubscription<OrderUpdateEvent>? _escrowSub;
   StreamSubscription<NotificationModel>? _walletNotifSub;
 
+  /// The signed-in vendor / staff member (null only while signing out)
+  UserModel? get _user {
+    final state = context.read<AuthBloc>().state;
+    return state is auth_state.Authenticated ? state.user : null;
+  }
+
+  bool _can(String permission) => _user?.can(permission) ?? false;
+
   @override
   void initState() {
     super.initState();
+    // Every role can see the product list; the rest only if this session may
     context.read<VendorProductBloc>().add(const FetchVendorProducts());
-    context.read<VendorOrderBloc>().add(const FetchVendorOrders());
-    context.read<StoreLocationBloc>().add(const StoreLocationRequested());
+    final orders = context.read<VendorOrderBloc>();
+    orders.add(_can(Perm.ordersView) ? const FetchVendorOrders() : const ClearVendorOrders());
+    if (_can(Perm.owner)) context.read<StoreLocationBloc>().add(const StoreLocationRequested());
     // Escrow released to the store → refresh the wallet chip
     _escrowSub = RealtimeService().orderUpdates.listen((e) {
-      if (e.escrowStatus == 'released' && mounted) context.read<AuthBloc>().add(RefreshUserRequested());
+      if (e.escrowStatus == 'released' && mounted && _can(Perm.owner)) {
+        context.read<AuthBloc>().add(RefreshUserRequested());
+      }
     });
     // A bounced withdrawal puts the money back → refresh the balance
     _walletNotifSub = RealtimeService().notifications.listen((n) {
       if (isWalletNotification(n.type) && mounted) context.read<AuthBloc>().add(RefreshUserRequested());
       // An admin approved / rejected a store location change → refresh the location card
-      if ((n.type == 'location_approved' || n.type == 'location_rejected') && mounted) {
+      if ((n.type == 'location_approved' || n.type == 'location_rejected') && mounted && _can(Perm.owner)) {
         context.read<StoreLocationBloc>().add(const StoreLocationRequested());
         context.read<AuthBloc>().add(RefreshUserRequested());
       }
@@ -88,7 +105,14 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
     super.dispose();
   }
 
-  void _goToTab(int index) => setState(() => _currentIndex = index);
+  /// Opens [tab] if this session has it (e.g. a notification asking for Orders)
+  void _goToTab(VendorTab tab) {
+    final user = _user;
+    if (user == null || !visibleTabs(user).contains(tab)) return;
+    setState(() => _current = tab);
+  }
+
+  void _open(Widget screen) => Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
 
   void _openWallet() => Navigator.push(context, MaterialPageRoute(builder: (_) => const WalletScreen()));
 
@@ -114,8 +138,8 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
     context.read<AuthBloc>().add(RefreshUserRequested());
   }
 
-  Widget _drawerItem(IconData icon, String title, VoidCallback onTap, {int? tab}) {
-    final selected = tab != null && tab == _currentIndex;
+  Widget _drawerItem(IconData icon, String title, VoidCallback onTap, {VendorTab? tab}) {
+    final selected = tab != null && tab == _current;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
       child: ListTile(
@@ -136,8 +160,36 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
     );
   }
 
+  Widget _tabScreen(VendorTab tab) => switch (tab) {
+        VendorTab.home => _buildHomeTab(),
+        VendorTab.pos => const PosScreen(),
+        VendorTab.orders => const VendorOrdersScreen(),
+        VendorTab.ledger => const StockLedgerScreen(),
+        VendorTab.profile => const VendorProfileScreen(),
+      };
+
+  BottomNavigationBarItem _navItem(VendorTab tab) => switch (tab) {
+        VendorTab.home => const BottomNavigationBarItem(
+            icon: Icon(Icons.dashboard_outlined), activeIcon: Icon(Icons.dashboard), label: 'Home'),
+        VendorTab.pos => const BottomNavigationBarItem(
+            icon: Icon(Icons.point_of_sale_outlined), activeIcon: Icon(Icons.point_of_sale), label: 'POS'),
+        VendorTab.orders => BottomNavigationBarItem(
+            icon: _ordersIcon(Icons.receipt_long_outlined), activeIcon: _ordersIcon(Icons.receipt_long), label: 'Orders'),
+        VendorTab.ledger => const BottomNavigationBarItem(
+            icon: Icon(Icons.inventory_2_outlined), activeIcon: Icon(Icons.inventory_2), label: 'Ledger'),
+        VendorTab.profile => const BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline), activeIcon: Icon(Icons.person), label: 'Profile'),
+      };
+
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthBloc>().state;
+    final user = auth is auth_state.Authenticated ? auth.user : null;
+    final tabs = user == null ? const [VendorTab.home, VendorTab.profile] : visibleTabs(user);
+    final current = tabs.contains(_current) ? _current : VendorTab.home;
+    final index = tabs.indexOf(current);
+    bool can(String p) => user?.can(p) ?? false;
+
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: AppColors.background,
@@ -152,80 +204,80 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(colors: [Color(0xFF0D2137), Color(0xFF1565C0)]),
                 ),
-                child: BlocBuilder<AuthBloc, auth_state.AuthState>(
-                  builder: (context, state) {
-                    final user = state is auth_state.Authenticated ? state.user : null;
-                    return Row(
-                      children: [
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(Icons.storefront, color: Colors.white, size: 26),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(user?.storeName ?? 'Vendor Panel',
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
-                              Text(user?.fullName ?? 'Manage store & orders',
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    );
-                  },
+                child: Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.storefront, color: Colors.white, size: 26),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(user?.storeName ?? 'Vendor Panel',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
+                          Text(user == null ? 'Manage store & orders' : signedInLabel(user),
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              _drawerItem(Icons.dashboard_outlined, 'Home', () => _goToTab(_homeTab), tab: _homeTab),
-              _drawerItem(Icons.point_of_sale, 'Walk-in POS', () => _goToTab(_posTab), tab: _posTab),
-              _drawerItem(Icons.receipt_long_outlined, 'Orders', () => _goToTab(_ordersTab), tab: _ordersTab),
-              _drawerItem(Icons.inventory_2_outlined, 'Stock ledger', () => _goToTab(_ledgerTab), tab: _ledgerTab),
-              _drawerItem(Icons.person_outline, 'Profile', () => _goToTab(_profileTab), tab: _profileTab),
+              _drawerItem(Icons.dashboard_outlined, 'Home', () => _goToTab(VendorTab.home), tab: VendorTab.home),
+              if (tabs.contains(VendorTab.pos))
+                _drawerItem(Icons.point_of_sale, 'Walk-in POS', () => _goToTab(VendorTab.pos), tab: VendorTab.pos),
+              if (tabs.contains(VendorTab.orders))
+                _drawerItem(Icons.receipt_long_outlined, 'Orders', () => _goToTab(VendorTab.orders), tab: VendorTab.orders),
+              if (tabs.contains(VendorTab.ledger))
+                _drawerItem(Icons.inventory_2_outlined, 'Stock ledger', () => _goToTab(VendorTab.ledger), tab: VendorTab.ledger),
+              _drawerItem(Icons.person_outline, 'Profile', () => _goToTab(VendorTab.profile), tab: VendorTab.profile),
               const Divider(indent: 16, endIndent: 16, height: 24),
-              _drawerItem(Icons.account_balance_wallet_outlined, 'Wallet', _openWallet),
-              _drawerItem(Icons.gavel_outlined, 'Disputes', _openDisputes),
-              _drawerItem(Icons.map_outlined, 'Store location', _openLocation),
-              _drawerItem(Icons.add_circle_outline, 'Add product', () => Navigator.pushNamed(context, AppRoutes.addProduct)),
+              if (can(Perm.owner)) ...[
+                _drawerItem(Icons.account_balance_wallet_outlined, 'Wallet', _openWallet),
+                _drawerItem(Icons.gavel_outlined, 'Disputes', _openDisputes),
+                _drawerItem(Icons.map_outlined, 'Store location', _openLocation),
+              ],
+              if (can(Perm.productsManage))
+                _drawerItem(Icons.add_circle_outline, 'Add product', () => Navigator.pushNamed(context, AppRoutes.addProduct)),
+              _drawerItem(Icons.star_outline_rounded, 'Customer reviews', () => _open(const VendorReviewsScreen())),
+              if (can(Perm.owner)) ...[
+                _drawerItem(Icons.groups_outlined, 'Shop staff', () => _open(const StaffScreen())),
+                _drawerItem(Icons.receipt_outlined, 'Receipt settings', () => _open(const ReceiptSettingsScreen())),
+              ],
+              const Divider(indent: 16, endIndent: 16, height: 24),
+              _drawerItem(Icons.switch_account_outlined, 'Switch user', () => showSwitchUser(context)),
+              if (user?.staff != null)
+                _drawerItem(Icons.storefront_outlined, 'Back to owner', () => backToOwner(context)),
             ],
           ),
         ),
       ),
       body: IndexedStack(
-        index: _currentIndex,
+        index: index,
+        children: [for (final tab in tabs) _tabScreen(tab)],
+      ),
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          _buildHomeTab(),
-          const PosScreen(),
-          const VendorOrdersScreen(),
-          const StockLedgerScreen(),
-          const VendorProfileScreen(),
-        ],
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: _goToTab,
-        items: [
-          const BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined), activeIcon: Icon(Icons.dashboard), label: 'Home'),
-          const BottomNavigationBarItem(icon: Icon(Icons.point_of_sale_outlined), activeIcon: Icon(Icons.point_of_sale), label: 'POS'),
-          BottomNavigationBarItem(
-            icon: _ordersIcon(Icons.receipt_long_outlined),
-            activeIcon: _ordersIcon(Icons.receipt_long),
-            label: 'Orders',
+          if (user?.staff != null) _StaffSessionBar(user: user!),
+          BottomNavigationBar(
+            currentIndex: index,
+            onTap: (i) => _goToTab(tabs[i]),
+            items: [for (final tab in tabs) _navItem(tab)],
           ),
-          const BottomNavigationBarItem(icon: Icon(Icons.inventory_2_outlined), activeIcon: Icon(Icons.inventory_2), label: 'Ledger'),
-          const BottomNavigationBarItem(icon: Icon(Icons.person_outline), activeIcon: Icon(Icons.person), label: 'Profile'),
         ],
       ),
-      floatingActionButton: _currentIndex == _homeTab
+      floatingActionButton: current == VendorTab.home && can(Perm.productsManage)
           ? FloatingActionButton.extended(
               onPressed: () => Navigator.pushNamed(context, AppRoutes.addProduct),
               icon: const Icon(Icons.add),
@@ -345,13 +397,18 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
           title: BlocBuilder<AuthBloc, auth_state.AuthState>(
             builder: (context, state) {
               String storeName = 'My Store';
+              String greeting = _greeting();
               if (state is auth_state.Authenticated) {
                 storeName = state.user.storeName ?? 'My Store';
+                final staff = state.user.staff;
+                if (staff != null) greeting = '$greeting, ${staff.fullName.split(' ').first}';
               }
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(_greeting(),
+                  Text(greeting,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary, fontWeight: FontWeight.w400)),
                   Text(storeName,
                       maxLines: 1,
@@ -364,7 +421,7 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
           actions: [
             BlocBuilder<AuthBloc, auth_state.AuthState>(
               builder: (context, state) {
-                if (state is auth_state.Authenticated) {
+                if (state is auth_state.Authenticated && state.user.can(Perm.owner)) {
                   return IconButton(
                     tooltip: 'Wallet · Rs. ${_money.format(state.user.walletBalance)}',
                     onPressed: _openWallet,
@@ -379,8 +436,9 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
               color: AppColors.textPrimary,
               onOpenOrder: (ctx, orderId) {
                 Navigator.of(ctx).pop();
+                if (!_can(Perm.ordersView)) return; // e.g. a cashier
                 context.read<VendorOrderBloc>().add(RefreshVendorOrder(orderId));
-                _goToTab(_ordersTab);
+                _goToTab(VendorTab.orders);
               },
             ),
             const SizedBox(width: 8),
@@ -402,35 +460,43 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                 final reservedUnits = products.fold<int>(0, (sum, p) => sum + p.reservedQuantity);
                 final awaitingApproval = products.where((p) => !p.isApproved).length;
 
+                final stats = <Widget>[
+                  if (_can(Perm.ordersView)) ...[
+                    _statCard('Active Orders', '$activeCount', Icons.shopping_bag_outlined, AppColors.secondary,
+                        onTap: () => _goToTab(VendorTab.orders)),
+                    _statCard('Pending', '$pendingCount', Icons.hourglass_top, Colors.orange,
+                        onTap: () => _goToTab(VendorTab.orders)),
+                  ],
+                  if (_can(Perm.pos))
+                    _statCard(
+                      'Walk-in Today',
+                      'Rs. ${_money.format(pos.todayTotal)}',
+                      Icons.point_of_sale,
+                      AppColors.primary,
+                      subtitle: '${pos.todayCount} sale${pos.todayCount == 1 ? '' : 's'} · open POS',
+                      onTap: () => _goToTab(VendorTab.pos),
+                    ),
+                  _statCard('Reserved Units', '$reservedUnits', Icons.lock_outline, AppColors.reservedAmber,
+                      subtitle: 'Locked by online orders'),
+                ];
+
                 return Column(
                   children: [
-                    Row(
-                      children: [
-                        _statCard('Active Orders', '$activeCount', Icons.shopping_bag_outlined, AppColors.secondary,
-                            onTap: () => _goToTab(_ordersTab)),
-                        const SizedBox(width: 12),
-                        _statCard('Pending', '$pendingCount', Icons.hourglass_top, Colors.orange,
-                            onTap: () => _goToTab(_ordersTab)),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        _statCard(
-                          'Walk-in Today',
-                          'Rs. ${_money.format(pos.todayTotal)}',
-                          Icons.point_of_sale,
-                          AppColors.primary,
-                          subtitle: '${pos.todayCount} sale${pos.todayCount == 1 ? '' : 's'} · open POS',
-                          onTap: () => _goToTab(_posTab),
-                        ),
-                        const SizedBox(width: 12),
-                        _statCard('Reserved Units', '$reservedUnits', Icons.lock_outline, AppColors.reservedAmber,
-                            subtitle: 'Locked by online orders'),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _walletCard(),
+                    // Two stat cards per row (a lone last card gets an empty partner)
+                    for (var i = 0; i < stats.length; i += 2) ...[
+                      if (i > 0) const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          stats[i],
+                          const SizedBox(width: 12),
+                          if (i + 1 < stats.length) stats[i + 1] else const Expanded(child: SizedBox.shrink()),
+                        ],
+                      ),
+                    ],
+                    if (_can(Perm.owner)) ...[
+                      const SizedBox(height: 12),
+                      _walletCard(),
+                    ],
                     if (awaitingApproval > 0) ...[
                       const SizedBox(height: 12),
                       Container(
@@ -457,9 +523,11 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 12),
-                    // Set Store Location button (shows a change waiting for admin approval)
-                    _locationCard(),
+                    if (_can(Perm.owner)) ...[
+                      const SizedBox(height: 12),
+                      // Set Store Location button (shows a change waiting for admin approval)
+                      _locationCard(),
+                    ],
                   ],
                 );
               },
@@ -547,7 +615,10 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                           child: ProductCard(
                             product: product,
                             showVendorStock: true,
-                            onTap: () => Navigator.pushNamed(context, AppRoutes.editProduct, arguments: product),
+                            // Cashier / packer: a read-only look; editing needs products.manage
+                            onTap: () => _can(Perm.productsManage)
+                                ? Navigator.pushNamed(context, AppRoutes.editProduct, arguments: product)
+                                : _showProductDetails(product),
                           ),
                         ),
                         if (!product.isApproved)
@@ -631,6 +702,89 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
     );
   }
 
+  /// Read-only product sheet for roles that can't edit products
+  void _showProductDetails(ProductModel p) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 72,
+                    height: 72,
+                    child: ProductImage(product: p, iconSize: 28, borderRadius: BorderRadius.circular(10)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(p.name, style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)),
+                        Text(formatRupees(p.price),
+                            style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.primary)),
+                        RatingBadge(average: p.averageRating, count: p.ratingCount),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _detailChip('Private', '${p.privateStock}', AppColors.secondary),
+                  _detailChip('Reserved', '${p.reservedQuantity}', AppColors.reservedAmber),
+                  _detailChip('Sellable', '${p.sellableInStore}', AppColors.stockGreen),
+                  _detailChip('Online', '${p.publicStock}', Colors.blueGrey),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (p.categoryName != null) _detailLine(Icons.category_outlined, p.categoryName!),
+              if (p.barcode != null && p.barcode!.isNotEmpty) _detailLine(Icons.qr_code_2, p.barcode!),
+              if (p.description != null && p.description!.trim().isNotEmpty) _detailLine(Icons.notes, p.description!),
+              const SizedBox(height: 8),
+              Text("Your role can view products but not change them.",
+                  style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _detailChip(String label, String value, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+        child: Column(
+          children: [
+            Text(value, style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: color)),
+            Text(label, style: GoogleFonts.poppins(fontSize: 11, color: color)),
+          ],
+        ),
+      );
+
+  Widget _detailLine(IconData icon, String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 16, color: AppColors.textSecondary),
+            const SizedBox(width: 8),
+            Expanded(child: Text(text, style: GoogleFonts.poppins(fontSize: 13))),
+          ],
+        ),
+      );
+
   Widget _statCard(String title, String value, IconData icon, Color color, {VoidCallback? onTap, String? subtitle}) {
     return Expanded(
       child: GestureDetector(
@@ -700,6 +854,49 @@ class _AwaitingApprovalBadge extends StatelessWidget {
           Text('Awaiting approval',
               style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w700, color: const Color(0xFF5C4800))),
         ],
+      ),
+    );
+  }
+}
+
+/// "Ali Raza · Cashier" above the bottom navigation while a staff member is signed in
+class _StaffSessionBar extends StatelessWidget {
+  final UserModel user;
+  const _StaffSessionBar({required this.user});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.secondary,
+      child: InkWell(
+        onTap: () => showSwitchUser(context),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+          child: Row(
+            children: [
+              const Icon(Icons.badge_outlined, size: 16, color: Colors.white),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  signedInLabel(user),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => showSwitchUser(context),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                icon: const Icon(Icons.switch_account_outlined, size: 16),
+                label: Text('Switch user', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

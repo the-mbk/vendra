@@ -16,7 +16,7 @@ const navSections = [
     items: [
       { label: "Vendors", icon: "storefront", href: "/dashboard/vendors", badge: "pendingVendors" },
       { label: "Products", icon: "inventory_2", href: "/dashboard/products", badge: "pendingProducts" },
-      { label: "Riders", icon: "two_wheeler", href: "/dashboard/riders" },
+      { label: "Riders", icon: "two_wheeler", href: "/dashboard/riders", badge: "pendingRiders" },
       { label: "Users", icon: "group", href: "/dashboard/users" },
     ],
   },
@@ -71,6 +71,8 @@ export default function DashboardLayout({ children }) {
         setCounts({
           openDisputes: Number(res.data?.openDisputes) || 0,
           pendingProducts: Number(res.data?.pendingProducts) || 0,
+          // Riders whose CNIC / licence / vehicle are waiting to be checked
+          pendingRiders: Number(res.data?.pendingRiders) || 0,
           // Vendors needing a decision: new sign-ups + store location change requests
           pendingVendors:
             (Number(res.data?.vendors?.pending) || 0) + (Number(res.data?.vendors?.location_requests) || 0),

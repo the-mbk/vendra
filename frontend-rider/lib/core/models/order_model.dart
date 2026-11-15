@@ -35,6 +35,20 @@ class OrderModel {
   final DateTime? pickedAt;
   final DateTime? deliveredAt;
   final List<OrderItemModel> items;
+  /// Customer only: the 4-digit handover code to give the rider / store (null once handed over)
+  final String? deliveryOtp;
+  /// Set while 5 wrong codes have locked the handover
+  final DateTime? otpLockedUntil;
+  /// Vendor / rider: the customer's code is still needed to hand this order over
+  final bool otpRequired;
+  /// Pending orders: when the reserved stock is released if the store hasn't accepted
+  final DateTime? reservationExpiresAt;
+  final String? paymentMethod; // wallet | card
+  final bool canReview;
+  final DateTime? reviewedAt;
+  final int? riderRating;
+  /// Vendor: the staff member who packed it
+  final String? packedByName;
 
   OrderModel({
     required this.id,
@@ -66,6 +80,15 @@ class OrderModel {
     this.pickedAt,
     this.deliveredAt,
     this.items = const [],
+    this.deliveryOtp,
+    this.otpLockedUntil,
+    this.otpRequired = false,
+    this.reservationExpiresAt,
+    this.paymentMethod,
+    this.canReview = false,
+    this.reviewedAt,
+    this.riderRating,
+    this.packedByName,
   });
 
   factory OrderModel.fromJson(Map<String, dynamic> json) {
@@ -111,10 +134,24 @@ class OrderModel {
               ?.map((item) => OrderItemModel.fromJson(Map<String, dynamic>.from(item)))
               .toList() ??
           [],
+      deliveryOtp: pick(json, 'deliveryOtp')?.toString(),
+      otpLockedUntil: toDate(pick(json, 'otpLockedUntil')),
+      otpRequired: pick(json, 'otpRequired', 'otp_required') == true,
+      reservationExpiresAt: toDate(pick(json, 'reservationExpiresAt')),
+      paymentMethod: pick(json, 'paymentMethod', 'payment_method'),
+      canReview: json['canReview'] == true,
+      reviewedAt: toDate(pick(json, 'reviewedAt', 'reviewed_at')),
+      riderRating: toIntOrNull(pick(json, 'riderRating', 'rider_rating')),
+      packedByName: json['packed_by_name'],
     );
   }
 
   bool get isDelivery => deliveryType == 'delivery';
+
+  /// Packing checklist: units ticked / scanned so far, and whether every line is done
+  int get packedUnits => items.fold(0, (s, i) => s + i.packedQuantity);
+  int get totalUnits => items.fold(0, (s, i) => s + i.quantity);
+  bool get isFullyPacked => items.isNotEmpty && items.every((i) => i.isPacked);
   bool get hasOpenDispute => latestDispute?.status == 'open';
 
   /// Disputes are allowed while payment is still held (not cancelled, not settled)
@@ -201,6 +238,10 @@ class OrderItemModel {
   final int quantity;
   final double unitPrice;
   final String? imageUrl; // product photo path, if the product has one
+  final String? barcode; // vendor rows: scanned to pack
+  final int packedQuantity; // vendor rows: packing checklist progress
+  final int? myRating; // customer: the stars they gave this product
+  final String? myComment;
 
   OrderItemModel({
     this.id,
@@ -209,6 +250,10 @@ class OrderItemModel {
     required this.quantity,
     required this.unitPrice,
     this.imageUrl,
+    this.barcode,
+    this.packedQuantity = 0,
+    this.myRating,
+    this.myComment,
   });
 
   factory OrderItemModel.fromJson(Map<String, dynamic> json) {
@@ -219,8 +264,13 @@ class OrderItemModel {
       quantity: toInt(json['quantity']),
       unitPrice: toDouble(pick(json, 'unitPrice', 'unit_price')),
       imageUrl: pick(json, 'imageUrl', 'image_url'),
+      barcode: json['barcode'],
+      packedQuantity: toInt(pick(json, 'packedQuantity', 'packed_quantity')),
+      myRating: toIntOrNull(json['myRating']),
+      myComment: json['myComment'],
     );
   }
 
   double get total => unitPrice * quantity;
+  bool get isPacked => packedQuantity >= quantity;
 }

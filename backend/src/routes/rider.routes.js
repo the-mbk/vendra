@@ -7,6 +7,7 @@ const router = express.Router();
 const { authenticate, requireRole } = require('../middleware/auth');
 const {
   getProfile,
+  updateDocuments,
   setStatus,
   postLocation,
   getTasks,
@@ -23,6 +24,7 @@ router.use(authenticate, requireRole('rider'));
 
 // Availability + GPS
 router.get('/profile', getProfile);
+router.put('/documents', updateDocuments);
 router.put('/status', setStatus);
 router.post('/location', postLocation);
 

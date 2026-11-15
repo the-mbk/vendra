@@ -8,6 +8,9 @@
 // A photo picked on the add/edit screen is uploaded right after the
 // product is saved; if only the upload fails the product stays saved and
 // the success state carries a `photoError` for the screen to show.
+// Gallery photos (up to 5 besides the cover, FR06) upload / delete straight
+// away on an existing product (POST / DELETE …/images); on a new product
+// they are queued and uploaded right after it is created.
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -43,6 +46,8 @@ class AddVendorProduct extends VendorProductEvent {
   final int? categoryId;
   /// Uploaded after the product is created
   final ProductPhoto? photo;
+  /// Extra gallery photos, uploaded after the cover
+  final List<ProductPhoto> galleryPhotos;
   const AddVendorProduct({
     required this.name,
     this.description,
@@ -52,6 +57,7 @@ class AddVendorProduct extends VendorProductEvent {
     this.barcode,
     this.categoryId,
     this.photo,
+    this.galleryPhotos = const [],
   });
 }
 
@@ -80,6 +86,20 @@ class UpdateVendorProduct extends VendorProductEvent {
     this.photo,
     this.removePhoto = false,
   });
+}
+
+/// Adds one gallery photo to a saved product (POST /api/vendor/products/:id/images)
+class AddGalleryPhoto extends VendorProductEvent {
+  final int productId;
+  final ProductPhoto photo;
+  const AddGalleryPhoto({required this.productId, required this.photo});
+}
+
+/// Removes one gallery photo (DELETE /api/vendor/products/:id/images/:imageId)
+class DeleteGalleryPhoto extends VendorProductEvent {
+  final int productId;
+  final int imageId;
+  const DeleteGalleryPhoto({required this.productId, required this.imageId});
 }
 
 class DeleteVendorProduct extends VendorProductEvent {
@@ -111,7 +131,8 @@ class VendorProductLoaded extends VendorProductState {
   @override
   List<Object?> get props => products
       .map((p) => '${p.id}:${p.privateStock}:${p.reservedQuantity}:${p.buffer}:${p.publicStock}:'
-          '${p.isApproved}:${p.name}:${p.price}:${p.categoryId}:${p.barcode}:${p.imageUrl}')
+          '${p.isApproved}:${p.name}:${p.price}:${p.categoryId}:${p.barcode}:${p.imageUrl}:'
+          '${p.gallery.map((g) => g.id).join('/')}:${p.averageRating}:${p.ratingCount}')
       .toList();
 }
 
@@ -122,6 +143,14 @@ class VendorProductActionSuccess extends VendorProductState {
   const VendorProductActionSuccess({required this.message, this.photoError});
   @override
   List<Object?> get props => [message, photoError, identityHashCode(this)];
+}
+
+/// A gallery upload / delete failed (the product itself is unchanged)
+class VendorProductGalleryError extends VendorProductState {
+  final String message;
+  const VendorProductGalleryError({required this.message});
+  @override
+  List<Object?> get props => [message, identityHashCode(this)];
 }
 
 class VendorProductError extends VendorProductState {
@@ -144,6 +173,10 @@ class VendorProductBloc extends Bloc<VendorProductEvent, VendorProductState> {
   List<ProductModel> _products = const [];
   bool _hasLoaded = false;
 
+  /// Products with a gallery upload / delete in flight
+  final Set<int> _galleryBusy = {};
+  bool isGalleryBusy(int productId) => _galleryBusy.contains(productId);
+
   /// Last known product list (kept while action/error states are showing)
   List<ProductModel> get products => _products;
   bool get hasLoaded => _hasLoaded;
@@ -160,6 +193,8 @@ class VendorProductBloc extends Bloc<VendorProductEvent, VendorProductState> {
     on<AddVendorProduct>(_onAdd);
     on<UpdateVendorProduct>(_onUpdate);
     on<DeleteVendorProduct>(_onDelete);
+    on<AddGalleryPhoto>(_onAddGalleryPhoto);
+    on<DeleteGalleryPhoto>(_onDeleteGalleryPhoto);
     on<_VendorStockChanged>(_onStockChanged);
 
     _stockSub = RealtimeService().vendorStock.listen((u) => add(_VendorStockChanged(u)));
@@ -252,7 +287,16 @@ class VendorProductBloc extends Bloc<VendorProductEvent, VendorProductState> {
       });
       if (response.data['success'] == true) {
         final productId = toInt((response.data['data'] as Map)['id']);
-        final photoError = event.photo == null ? null : await _uploadPhoto(productId, event.photo!);
+        final errors = <String>[];
+        if (event.photo != null) {
+          final error = await _uploadPhoto(productId, event.photo!);
+          if (error != null) errors.add(error);
+        }
+        for (final photo in event.galleryPhotos) {
+          final error = await _uploadGalleryPhoto(productId, photo);
+          if (error != null) errors.add(error);
+        }
+        final photoError = errors.isEmpty ? null : errors.toSet().join(' ');
         // Server says whether the product still needs admin approval
         emit(VendorProductActionSuccess(
           message: response.data['message'] ?? 'Product added successfully!',
@@ -314,6 +358,44 @@ class VendorProductBloc extends Bloc<VendorProductEvent, VendorProductState> {
       // e.g. 400 "Each photo must be 5 MB or smaller." / wrong file type
       return ApiService.getErrorMessage(e);
     }
+  }
+
+  /// POST /api/vendor/products/:id/images — returns an error message, or null on success
+  Future<String?> _uploadGalleryPhoto(int productId, ProductPhoto photo) async {
+    try {
+      final response = await _api.postMultipart(ApiConfig.vendorProductGallery(productId), photo.toFormData());
+      if (response.data['success'] == true) {
+        _patchProduct(Map<String, dynamic>.from(response.data['data'] as Map));
+        return null;
+      }
+      return response.data['message'] ?? 'Upload failed';
+    } catch (e) {
+      // e.g. 409 "A product can have up to 5 extra photos besides the cover."
+      return ApiService.getErrorMessage(e);
+    }
+  }
+
+  Future<void> _onAddGalleryPhoto(AddGalleryPhoto event, Emitter<VendorProductState> emit) async {
+    if (!_galleryBusy.add(event.productId)) return;
+    _emitLoaded(emit);
+    final error = await _uploadGalleryPhoto(event.productId, event.photo);
+    _galleryBusy.remove(event.productId);
+    if (error != null) emit(VendorProductGalleryError(message: error));
+    _emitLoaded(emit);
+  }
+
+  Future<void> _onDeleteGalleryPhoto(DeleteGalleryPhoto event, Emitter<VendorProductState> emit) async {
+    if (!_galleryBusy.add(event.productId)) return;
+    _emitLoaded(emit);
+    try {
+      final response = await _api.delete(ApiConfig.vendorProductGalleryImage(event.productId, event.imageId));
+      if (response.data['data'] is Map) _patchProduct(Map<String, dynamic>.from(response.data['data'] as Map));
+    } catch (e) {
+      emit(VendorProductGalleryError(message: ApiService.getErrorMessage(e)));
+    } finally {
+      _galleryBusy.remove(event.productId);
+    }
+    _emitLoaded(emit);
   }
 
   /// DELETE /api/vendor/products/:id/image — returns an error message, or null on success

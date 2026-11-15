@@ -1,10 +1,12 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra App - Auth BLoC
-// Manages authentication state: login, signup, auto-login, logout
+// Manages authentication state: login, signup, auto-login, logout, and
+// the shop device's "switch user" (a staff PIN token or the owner again)
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:vendra_vendor/vendra_core.dart';
+import '../../staff/services/owner_email_store.dart';
 import 'auth_event.dart';
 import 'auth_state.dart';
 
@@ -18,12 +20,35 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<LogoutRequested>(_onLogout);
     on<AuthWalletBalanceUpdated>(_onWalletBalanceUpdated);
     on<RefreshUserRequested>(_onRefreshUser);
+    on<SessionSwitched>(_onSessionSwitched);
   }
 
   /// Opens the realtime socket + notification inbox for a signed-in vendor (FR09)
   void _startLiveServices(UserModel user) {
     if (!user.isVendor) return;
+    // Remembered so "Back to owner" only needs the password after a staff switch
+    if (user.isStoreOwner) OwnerEmailStore.remember(user.email);
     NotificationCenter().start();
+  }
+
+  /// Swaps the stored token, then re-reads /me with it (permissions, staff).
+  /// On failure the previous token goes back so the device stays signed in.
+  Future<void> _onSessionSwitched(SessionSwitched event, Emitter<AuthState> emit) async {
+    final previous = await StorageService.getToken();
+    try {
+      await StorageService.saveToken(event.token);
+      final response = await _api.get(ApiConfig.me);
+      if (response.data['success'] != true) throw Exception(response.data['message'] ?? 'Could not switch user');
+      final user = UserModel.fromJson(response.data['data']);
+      await StorageService.saveUserRole(user.role);
+      // Reconnects the socket with the new token and reloads the inbox
+      _startLiveServices(user);
+      emit(Authenticated(user: user, token: event.token));
+      event.done?.complete(null);
+    } catch (e) {
+      if (previous != null) await StorageService.saveToken(previous);
+      event.done?.complete(ApiService.getErrorMessage(e));
+    }
   }
 
   /// Re-reads /api/auth/me (e.g. wallet balance after an escrow release).

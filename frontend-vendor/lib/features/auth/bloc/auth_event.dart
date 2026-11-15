@@ -2,6 +2,8 @@
 // Vendra App - Auth Events
 // ══════════════════════════════════════════════════════════════
 
+import 'dart:async';
+
 import 'package:equatable/equatable.dart';
 
 abstract class AuthEvent extends Equatable {
@@ -54,6 +56,18 @@ class AuthWalletBalanceUpdated extends AuthEvent {
 
 /// Re-fetch the signed-in user (wallet balance etc.) without risking a sign-out
 class RefreshUserRequested extends AuthEvent {}
+
+/// Shop device: a staff member signed in with their PIN, or the owner came
+/// back with their password. Stores [token] as the session and reloads
+/// /api/auth/me. [done] completes with null on success, or an error message
+/// (the previous session is kept then).
+class SessionSwitched extends AuthEvent {
+  final String token;
+  final Completer<String?>? done;
+  const SessionSwitched({required this.token, this.done});
+  @override
+  List<Object?> get props => [token];
+}
 
 /// Logout and clear token
 class LogoutRequested extends AuthEvent {}

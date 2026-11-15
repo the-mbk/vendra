@@ -4,7 +4,9 @@
 // GET /api/categories), camera barcode scan, and an optional buffer
 // (empty = platform default from GET /api/public-config), and a photo
 // (gallery everywhere, camera where supported) that is uploaded right
-// after the product is saved — or removed on save.
+// after the product is saved — or removed on save. Up to 5 more photos
+// form the product's gallery (FR06): on a saved product each one uploads
+// or deletes straight away; on a new product they upload after it's added.
 // New products wait for admin approval before customers can see them.
 // ══════════════════════════════════════════════════════════════
 
@@ -44,6 +46,10 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
   final _picker = ImagePicker();
   ProductPhoto? _photo; // picked, uploaded on save
   bool _removePhoto = false; // delete the saved photo on save
+  final List<ProductPhoto> _galleryQueue = []; // new product: extra photos uploaded after it's added
+
+  /// Gallery photos besides the cover (server limit)
+  static const int maxGalleryPhotos = 5;
 
   bool get isEditing => widget.product != null;
 
@@ -92,24 +98,68 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
 
   bool get _cameraAvailable => !kIsWeb && _picker.supportsImageSource(ImageSource.camera);
 
-  Future<void> _pickPhoto(ImageSource source) async {
+  /// Opens the picker; null if cancelled, too big or unreadable (the reason is shown)
+  Future<ProductPhoto?> _pickImage(ImageSource source) async {
     try {
       // Gallery on mobile, a file chooser on web / desktop
       final file = await _picker.pickImage(source: source, maxWidth: 1600, maxHeight: 1600, imageQuality: 85);
-      if (file == null) return;
+      if (file == null) return null;
       final bytes = await file.readAsBytes();
-      if (!mounted) return;
+      if (!mounted) return null;
       if (bytes.length > ProductPhoto.maxBytes) {
         _snack('That photo is over 5 MB — please choose a smaller one.', error: true);
-        return;
+        return null;
       }
       final name = file.name.isNotEmpty ? file.name : 'product_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      setState(() {
-        _photo = ProductPhoto(name: name, bytes: bytes, mimeType: ProductPhoto.mimeFor(name, file.mimeType));
-        _removePhoto = false;
-      });
+      return ProductPhoto(name: name, bytes: bytes, mimeType: ProductPhoto.mimeFor(name, file.mimeType));
     } catch (e) {
       if (mounted) _snack('Could not open photos: $e', error: true);
+      return null;
+    }
+  }
+
+  Future<void> _pickPhoto(ImageSource source) async {
+    final photo = await _pickImage(source);
+    if (photo == null || !mounted) return;
+    setState(() {
+      _photo = photo;
+      _removePhoto = false;
+    });
+  }
+
+  /// Gallery "+" tile: choose or take a photo, then upload it (saved product) or queue it (new product)
+  Future<void> _addGalleryPhoto(ProductModel? live) async {
+    var source = ImageSource.gallery;
+    if (_cameraAvailable) {
+      final picked = await showModalBottomSheet<ImageSource>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Choose from gallery'),
+                onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_camera_outlined),
+                title: const Text('Take a photo'),
+                onTap: () => Navigator.pop(ctx, ImageSource.camera),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (picked == null) return;
+      source = picked;
+    }
+    final photo = await _pickImage(source);
+    if (photo == null || !mounted) return;
+    if (live != null) {
+      context.read<VendorProductBloc>().add(AddGalleryPhoto(productId: live.id, photo: photo));
+    } else {
+      setState(() => _galleryQueue.add(photo));
     }
   }
 
@@ -168,6 +218,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
             barcode: barcode,
             categoryId: _categoryId,
             photo: _photo,
+            galleryPhotos: List.of(_galleryQueue),
           ));
     }
   }
@@ -218,6 +269,11 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
             ));
           }
           Navigator.pop(context);
+        } else if (state is VendorProductGalleryError) {
+          // Gallery changes apply straight away; only report a failure
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(state.message), backgroundColor: AppColors.error, behavior: SnackBarBehavior.floating),
+          );
         } else if (state is VendorProductError) {
           if (state.code == 'BELOW_RESERVED') setState(() => _stockError = state.message);
           ScaffoldMessenger.of(context).showSnackBar(
@@ -262,6 +318,8 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                       ],
 
                       _photoSection(live),
+                      const SizedBox(height: 12),
+                      _gallerySection(live, bloc),
                       const SizedBox(height: 16),
 
                       VendraTextField(
@@ -531,6 +589,121 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// Extra photos after the cover: thumbnails with delete, plus an add tile
+  Widget _gallerySection(ProductModel? live, VendorProductBloc bloc) {
+    final saved = live?.gallery ?? const <GalleryPhoto>[];
+    final count = live != null ? saved.length : _galleryQueue.length;
+    final busy = live != null && bloc.isGalleryBusy(live.id);
+    final canAdd = count < maxGalleryPhotos && !busy;
+
+    final tiles = <Widget>[
+      if (live != null)
+        for (final g in saved)
+          _galleryTile(
+            image: Image.network(
+              ApiConfig.fileUrl(g.url),
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _photoPlaceholder(Icons.broken_image_outlined, ''),
+            ),
+            onRemove: busy || g.id == null
+                ? null
+                : () => bloc.add(DeleteGalleryPhoto(productId: live.id, imageId: g.id!)),
+          )
+      else
+        for (var i = 0; i < _galleryQueue.length; i++)
+          _galleryTile(
+            image: Image.memory(
+              _galleryQueue[i].bytes,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _photoPlaceholder(Icons.image_outlined, _galleryQueue[i].name),
+            ),
+            onRemove: () => setState(() => _galleryQueue.removeAt(i)),
+          ),
+      if (busy)
+        const SizedBox(
+          width: 76,
+          height: 76,
+          child: Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))),
+        )
+      else if (canAdd)
+        InkWell(
+          onTap: () => _addGalleryPhoto(live),
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            width: 76,
+            height: 76,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.secondary.withValues(alpha: 0.4)),
+              color: AppColors.secondary.withValues(alpha: 0.04),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.add_photo_alternate_outlined, color: AppColors.secondary),
+                Text('Add', style: GoogleFonts.poppins(fontSize: 11, color: AppColors.secondary)),
+              ],
+            ),
+          ),
+        ),
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text('More photos', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600)),
+              ),
+              Text('$count/$maxGalleryPhotos', style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+            ],
+          ),
+          Text(
+            live != null
+                ? 'Customers swipe through these after the cover. Changes apply straight away.'
+                : 'Customers swipe through these after the cover. Uploaded when you add the product.',
+            style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, children: tiles),
+        ],
+      ),
+    );
+  }
+
+  Widget _galleryTile({required Widget image, VoidCallback? onRemove}) {
+    return SizedBox(
+      width: 76,
+      height: 76,
+      child: Stack(
+        children: [
+          Positioned.fill(child: ClipRRect(borderRadius: BorderRadius.circular(10), child: image)),
+          if (onRemove != null)
+            Positioned(
+              top: 2,
+              right: 2,
+              child: Material(
+                color: Colors.black54,
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: onRemove,
+                  child: const Padding(
+                    padding: EdgeInsets.all(3),
+                    child: Icon(Icons.close, size: 14, color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

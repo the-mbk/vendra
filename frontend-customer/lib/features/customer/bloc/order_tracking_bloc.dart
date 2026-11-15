@@ -89,7 +89,8 @@ class OrderTrackingState extends Equatable {
         order == null
             ? null
             : '${order!.status}:${order!.escrowStatus}:${order!.rider?.id}:${order!.latestDispute?.status}:'
-                '${order!.latestDispute?.resolution}:${order!.escrowReleaseDueAt}',
+                '${order!.latestDispute?.resolution}:${order!.escrowReleaseDueAt}:${order!.deliveryOtp}:'
+                '${order!.otpLockedUntil}:${order!.reservationExpiresAt}:${order!.canReview}:${order!.reviewedAt}',
         riderPosition,
         riderSeenAt,
         path.length,

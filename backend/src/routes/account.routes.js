@@ -5,15 +5,16 @@
 
 const express = require('express');
 const router = express.Router();
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authenticateAllowStaff } = require('../middleware/auth');
 const { evidenceUpload, MAX_EVIDENCE_FILES } = require('../services/storage.service');
 const { getNotifications, markNotificationRead, markAllNotificationsRead, getWallet } = require('../controllers/account.controller');
 const { createDispute, getMyDisputes, getDispute } = require('../controllers/dispute.controller');
 
 // Notifications
-router.get('/notifications', authenticate, getNotifications);
-router.put('/notifications/read-all', authenticate, markAllNotificationsRead);
-router.put('/notifications/:id/read', authenticate, markNotificationRead);
+// Store staff on the shop's device see the store's notifications too
+router.get('/notifications', authenticateAllowStaff, getNotifications);
+router.put('/notifications/read-all', authenticateAllowStaff, markAllNotificationsRead);
+router.put('/notifications/:id/read', authenticateAllowStaff, markNotificationRead);
 
 // Wallet
 router.get('/wallet', authenticate, getWallet);

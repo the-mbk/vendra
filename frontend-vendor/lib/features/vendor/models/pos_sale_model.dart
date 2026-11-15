@@ -1,10 +1,13 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Vendor App - Walk-in POS models (FR01 / FR02)
-// POST /api/vendor/pos/sales  → { id, total_amount, created_at, items: [...] }
+// POST /api/vendor/pos/sales  → { id, total_amount, created_at, items: [...], receipt }
 // GET  /api/vendor/pos/sales  → { sales, today_count, today_total }
+//                               (each sale has cashier_name / cashier_role)
 // ══════════════════════════════════════════════════════════════
 
 import 'package:vendra_vendor/vendra_core.dart';
+
+import 'pos_receipt.dart';
 
 /// One product line in the sale being rung up
 class PosLine {
@@ -58,8 +61,19 @@ class PosSale {
   final double totalAmount;
   final DateTime? createdAt;
   final List<PosSaleItem> items;
+  /// Who rang it up (staff name, or the owner's)
+  final String? cashierName;
+  /// The printable slip — sent with a new sale; reprints load it by id
+  final PosReceipt? receipt;
 
-  PosSale({required this.id, required this.totalAmount, this.createdAt, this.items = const []});
+  PosSale({
+    required this.id,
+    required this.totalAmount,
+    this.createdAt,
+    this.items = const [],
+    this.cashierName,
+    this.receipt,
+  });
 
   factory PosSale.fromJson(Map<String, dynamic> json) => PosSale(
         id: toInt(json['id']),
@@ -68,6 +82,8 @@ class PosSale {
         items: (json['items'] as List<dynamic>? ?? const [])
             .map((i) => PosSaleItem.fromJson(Map<String, dynamic>.from(i)))
             .toList(),
+        cashierName: json['cashier_name'],
+        receipt: json['receipt'] is Map ? PosReceipt.fromJson(Map<String, dynamic>.from(json['receipt'])) : null,
       );
 
   int get unitCount => items.fold(0, (sum, i) => sum + i.quantity);

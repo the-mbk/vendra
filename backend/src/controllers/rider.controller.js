@@ -6,9 +6,11 @@
 const pool = require('../db');
 const { consumeOrderLocks } = require('../services/inventory.service');
 const { payRider, scheduleEscrowRelease } = require('../services/orderSettlement.service');
-const { announceOrder } = require('../services/notification.service');
+const { announceOrder, notifyAdmins } = require('../services/notification.service');
 const { getPolicies } = require('../services/policy.service');
-const { computeTrip, estimatePayoutPaisa } = require('../services/riderPayout.service');
+const { computeTrip, estimatePayoutPaisa, estimatePayoutBreakdown } = require('../services/riderPayout.service');
+const { verifyHandoverOtp, withHandoverOtp } = require('../services/handoverOtp.service');
+const { readRiderDocuments } = require('../services/riderDocuments');
 const { emitToRiders, emitToTrackers } = require('../realtime');
 const { httpError, asyncHandler, withTransaction, intParam, paging, pageOf } = require('../utils/http');
 const { FEATURES } = require('../config/mode');
@@ -36,6 +38,16 @@ async function riderRow(db, userId) {
   const r = await db.query('SELECT * FROM riders WHERE user_id = $1', [userId]);
   if (r.rows.length === 0) throw httpError(404, 'Rider profile not found.');
   return r.rows[0];
+}
+
+/** New riders deliver only after an admin has checked their CNIC, licence and vehicle */
+function assertApproved(rider) {
+  if (rider.approval_status === 'approved') return;
+  throw httpError(403,
+    rider.approval_status === 'rejected'
+      ? `Your documents were not approved${rider.rejection_reason ? `: ${rider.rejection_reason}` : ''}. Update them in Profile and resubmit.`
+      : 'Your documents are being reviewed. You can go online once an admin approves your account.',
+    { code: 'RIDER_NOT_APPROVED', approvalStatus: rider.approval_status });
 }
 
 async function activeOrderId(db, riderUserId) {
@@ -78,6 +90,25 @@ function formatRiderOrder(o) {
     distanceKm: num(o.distance_km),
     waitMinutes: num(o.wait_minutes),
     payout: Number(o.rider_payout),
+    payoutBreakdown: o.payout_breakdown || null,
+    // The customer's handover code is needed to finish; the rider never sees it
+    otpRequired: Boolean(o.delivery_otp) && !o.otp_verified_at,
+    customerRating: o.rider_rating ?? null,
+  };
+}
+
+function riderProfileView(r) {
+  return {
+    isOnline: r.is_online,
+    vehicleType: r.vehicle_type,
+    cnic: r.cnic,
+    licenseNumber: r.license_number,
+    vehicleNumber: r.vehicle_number,
+    approvalStatus: r.approval_status,
+    rejectionReason: r.approval_status === 'rejected' ? r.rejection_reason : null,
+    currentLat: num(r.current_lat),
+    currentLng: num(r.current_lng),
+    lastLocationAt: r.last_location_at,
   };
 }
 
@@ -86,14 +117,46 @@ const getProfile = asyncHandler(async (req, res) => {
   const r = await riderRow(pool, req.user.userId);
   res.json({
     success: true,
-    data: {
-      isOnline: r.is_online,
-      vehicleType: r.vehicle_type,
-      currentLat: num(r.current_lat),
-      currentLng: num(r.current_lng),
-      lastLocationAt: r.last_location_at,
-      activeOrderId: await activeOrderId(pool, req.user.userId),
-    },
+    data: { ...riderProfileView(r), activeOrderId: await activeOrderId(pool, req.user.userId) },
+  });
+});
+
+/**
+ * PUT /api/rider/documents  Body: { cnic, licenseNumber, vehicleNumber, vehicleType? }
+ * Fills in or corrects the documents; a rejected rider goes back in the review queue.
+ * An approved rider who changes them is reviewed again too (they go offline).
+ */
+const updateDocuments = asyncHandler(async (req, res) => {
+  const rider = await withTransaction(async (client, afterCommit) => {
+    const current = (await client.query('SELECT * FROM riders WHERE user_id = $1 FOR UPDATE', [req.user.userId])).rows[0];
+    if (!current) throw httpError(404, 'Rider profile not found.');
+    const docs = readRiderDocuments({ ...req.body, vehicleType: req.body.vehicleType || current.vehicle_type });
+    if (await activeOrderId(client, req.user.userId)) throw httpError(409, 'Finish your active delivery before changing your documents.');
+    const changed = current.cnic !== docs.cnic || current.license_number !== docs.licenseNumber
+      || current.vehicle_number !== docs.vehicleNumber || (docs.vehicleType && docs.vehicleType !== current.vehicle_type);
+    const resubmit = current.approval_status === 'rejected' || (changed && current.approval_status === 'approved');
+    const r = await client.query(
+      `UPDATE riders SET cnic = $1, license_number = $2, vehicle_number = $3, vehicle_type = COALESCE($4, vehicle_type),
+              approval_status = CASE WHEN $5::boolean THEN 'pending' ELSE approval_status END,
+              is_online = CASE WHEN $5::boolean THEN false ELSE is_online END,
+              rejection_reason = CASE WHEN $5::boolean THEN NULL ELSE rejection_reason END
+       WHERE user_id = $6 RETURNING *`,
+      [docs.cnic, docs.licenseNumber, docs.vehicleNumber, docs.vehicleType, resubmit, req.user.userId]
+    );
+    if (resubmit) {
+      const name = (await client.query('SELECT full_name FROM users WHERE id = $1', [req.user.userId])).rows[0].full_name;
+      await notifyAdmins(client, afterCommit, {
+        type: 'rider_pending',
+        title: `${name} sent rider documents`,
+        body: 'Check the CNIC, licence and vehicle in Riders.',
+      });
+    }
+    return r.rows[0];
+  });
+  res.json({
+    success: true,
+    message: rider.approval_status === 'pending' ? 'Documents sent. An admin will review them shortly.' : 'Documents saved.',
+    data: riderProfileView(rider),
   });
 });
 
@@ -102,6 +165,7 @@ const setStatus = asyncHandler(async (req, res) => {
   const isOnline = req.body.isOnline === true;
   const point = req.body.lat != null ? readPoint(req.body) : null;
 
+  if (isOnline) assertApproved(await riderRow(pool, req.user.userId));
   if (!isOnline && await activeOrderId(pool, req.user.userId)) {
     throw httpError(409, 'Finish your active delivery before going offline.', { code: 'ACTIVE_DELIVERY' });
   }
@@ -167,6 +231,7 @@ const getTasks = asyncHandler(async (req, res) => {
     success: true,
     data: { tasks: [], activeOrderId: activeId, reason, radiusKm: policies.task_radius_km },
   });
+  if (rider.approval_status !== 'approved') return empty('not_approved');
   if (!rider.is_online) return empty('offline');
   if (activeId) return empty('busy');
   if (rider.current_lat == null) return empty('no_location');
@@ -191,6 +256,7 @@ const getTasks = asyncHandler(async (req, res) => {
         distanceToStoreKm: toStoreKm == null ? null : Math.round(toStoreKm * 100) / 100,
         tripDistanceKm: tripKm == null ? null : Math.round(tripKm * 100) / 100,
         estimatedPayout: paisaToNumber(estimatePayoutPaisa(policies, num(o.store_lat), num(o.store_lng), num(o.customer_lat), num(o.customer_lng))),
+        estimatedPayoutBreakdown: estimatePayoutBreakdown(policies, num(o.store_lat), num(o.store_lng), num(o.customer_lat), num(o.customer_lng)),
       };
     })
     .filter((t) => t.distanceToStoreKm == null || t.distanceToStoreKm <= policies.task_radius_km)
@@ -207,6 +273,7 @@ const acceptTask = asyncHandler(async (req, res) => {
   const order = await withTransaction(async (client, afterCommit) => {
     const rider = (await client.query('SELECT * FROM riders WHERE user_id = $1 FOR UPDATE', [riderUserId])).rows[0];
     if (!rider) throw httpError(404, 'Rider profile not found.');
+    assertApproved(rider);
     if (!rider.is_online) throw httpError(409, 'Go online to accept deliveries.');
     if (await activeOrderId(client, riderUserId)) throw httpError(409, 'Finish your current delivery first.');
 
@@ -304,16 +371,18 @@ const markOnTheWay = asyncHandler(async (req, res) => {
 });
 
 /**
- * POST /api/rider/orders/:id/deliver  Body: { lat, lng }
- * Geofence (SSR 02): the rider must be within `geofence_m` of the customer's pin.
- * Then stock is deducted, the rider is paid from escrow, and the dispute window starts.
+ * POST /api/rider/orders/:id/deliver  Body: { lat, lng, otp }
+ * Geofence (SSR 02): the rider must be within `geofence_m` of the customer's pin,
+ * and enter the customer's 4-digit handover code (a spoofed GPS fix alone can't
+ * complete a delivery). Then stock is deducted, the rider is paid from escrow,
+ * and the dispute window starts.
  */
 const deliverOrder = asyncHandler(async (req, res) => {
   const orderId = intParam(req.params.id);
   const point = readPoint(req.body);
   const riderUserId = req.user.userId;
 
-  const result = await withTransaction(async (client, afterCommit) => {
+  const result = await withHandoverOtp(async (client, afterCommit) => {
     const order = await lockOwnOrder(client, orderId, riderUserId, ['picked', 'on_the_way']);
     const policies = await getPolicies(client);
 
@@ -324,6 +393,7 @@ const deliverOrder = asyncHandler(async (req, res) => {
         `You are ${Math.round(distanceM)} m from the customer's location. Move within ${policies.geofence_m} m to confirm delivery.`,
         { code: 'OUTSIDE_GEOFENCE', distanceMeters: Math.round(distanceM), geofenceMeters: policies.geofence_m });
     }
+    await verifyHandoverOtp(client, order, req.body.otp);
 
     await client.query(
       `INSERT INTO rider_locations (rider_user_id, order_id, latitude, longitude) VALUES ($1, $2, $3, $4)`,
@@ -333,9 +403,9 @@ const deliverOrder = asyncHandler(async (req, res) => {
 
     await client.query(
       `UPDATE orders SET status = 'delivered', delivered_at = NOW(), updated_at = NOW(),
-              delivery_lat = $1, delivery_lng = $2, distance_km = $3, wait_minutes = $4
-       WHERE id = $5`,
-      [point.lat, point.lng, trip.distanceKm, trip.waitMinutes, orderId]
+              delivery_lat = $1, delivery_lng = $2, distance_km = $3, wait_minutes = $4, payout_breakdown = $5
+       WHERE id = $6`,
+      [point.lat, point.lng, trip.distanceKm, trip.waitMinutes, JSON.stringify(trip.breakdown), orderId]
     );
     await consumeOrderLocks(client, afterCommit, orderId, 'Delivered by rider');
     await payRider(client, order, trip.payoutPaisa);
@@ -354,6 +424,7 @@ const deliverOrder = asyncHandler(async (req, res) => {
       distanceSource: trip.distanceSource,
       waitMinutes: trip.waitMinutes,
       payout: paisaToNumber(trip.payoutPaisa),
+      payoutBreakdown: trip.breakdown,
       distanceFromCustomerMeters: Math.round(distanceM),
     };
   });
@@ -392,7 +463,9 @@ const getEarnings = asyncHandler(async (req, res) => {
        COUNT(*) FILTER (WHERE delivered_at >= date_trunc('week', NOW())) AS week_count,
        COALESCE(SUM(rider_payout), 0) AS all_time,
        COUNT(*) AS all_time_count,
-       COALESCE(SUM(distance_km), 0) AS total_km
+       COALESCE(SUM(distance_km), 0) AS total_km,
+       ROUND(AVG(rider_rating), 1)::float8 AS average_rating,
+       COUNT(rider_rating) AS rating_count
      FROM orders WHERE rider_user_id = $1 AND status = 'delivered'`,
     [userId]
   );
@@ -412,6 +485,8 @@ const getEarnings = asyncHandler(async (req, res) => {
       allTime: Number(t.all_time),
       allTimeCount: Number(t.all_time_count),
       totalKm: Number(t.total_km),
+      averageRating: t.average_rating,
+      ratingCount: Number(t.rating_count),
       walletBalance: paisaToNumber(toPaisa(wallet.rows[0].wallet_balance)),
       recent: recent.rows.map(formatRiderOrder),
     },
@@ -420,6 +495,7 @@ const getEarnings = asyncHandler(async (req, res) => {
 
 module.exports = {
   getProfile,
+  updateDocuments,
   setStatus,
   postLocation,
   getTasks,

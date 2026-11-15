@@ -5,6 +5,8 @@
 // picked / on the way), rider contact, escrow state and dispute status.
 // Updates in place when the server pushes order:update (OrderBloc
 // listens). Pages load with infinite scroll as the list nears its end.
+// Active cards show the stock reservation countdown (FR02) and the
+// handover code; delivered ones offer "Rate your order" (SRDS §2.3).
 // Tracking opens one order at a time; only that order's rider pings
 // reach the app (see OrderTrackingBloc).
 // ══════════════════════════════════════════════════════════════
@@ -16,7 +18,10 @@ import 'package:intl/intl.dart';
 import 'package:vendra_customer/vendra_core.dart';
 import '../../../config/app_routes.dart';
 import '../bloc/order_bloc.dart';
+import '../widgets/handover_code_card.dart';
+import '../widgets/order_review.dart';
 import '../widgets/order_status_widgets.dart';
+import '../widgets/reservation_countdown.dart';
 import 'report_issue_screen.dart';
 
 class CustomerOrdersPanel extends StatefulWidget {
@@ -60,6 +65,8 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
 
   void _openTracking(OrderModel order) =>
       Navigator.pushNamed(context, AppRoutes.orderTracking, arguments: order);
+
+  void _refreshOrder(OrderModel order) => context.read<OrderBloc>().add(RefreshCustomerOrder(order.id));
 
   void _openReport(OrderModel order) =>
       Navigator.push(context, MaterialPageRoute(builder: (_) => ReportIssueScreen(order: order)));
@@ -360,6 +367,22 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
                 ),
                 const SizedBox(height: 4),
                 EscrowStatusLine(order: order),
+                if (reservationDeadline(order) != null) ...[
+                  const SizedBox(height: 6),
+                  ReservationCountdown(
+                    order: order,
+                    compact: true,
+                    onExpired: () => context.read<OrderBloc>().add(RefreshCustomerOrder(order.id)),
+                  ),
+                ],
+                if (showsHandoverCode(order)) ...[
+                  const SizedBox(height: 8),
+                  HandoverCodeCard(order: order, compact: true),
+                ],
+                if (order.status == 'delivered' && order.canReview) ...[
+                  const SizedBox(height: 8),
+                  OrderReviewSection(order: order, compact: true, onReviewed: () => _refreshOrder(order)),
+                ],
                 if (isActiveOrder(order)) ...[
                   const SizedBox(height: 8),
                   SizedBox(
@@ -406,6 +429,10 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
                   ],
                 ),
               ),
+            if (order.reviewedAt != null) ...[
+              const SizedBox(height: 10),
+              OrderReviewSection(order: order, compact: true, onReviewed: () => _refreshOrder(order)),
+            ],
             const SizedBox(height: 10),
             OrderDisputeSection(
               order: order,

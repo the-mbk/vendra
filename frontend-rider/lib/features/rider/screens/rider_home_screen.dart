@@ -1,6 +1,8 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Rider App - Home (Stitch "vendra_rider_home_mobile")
 // Online/offline toggle, today's earnings, incoming delivery requests.
+// Until an admin approves the rider's documents the toggle is locked and
+// the requests area shows the review status (refreshed on resume).
 // Bottom tabs: Home · Earnings · Profile
 // ══════════════════════════════════════════════════════════════
 
@@ -17,10 +19,12 @@ import '../../auth/bloc/auth_state.dart';
 import '../bloc/earnings_bloc.dart';
 import '../bloc/rider_home_bloc.dart';
 import '../models/rider_models.dart';
+import '../widgets/approval_status_card.dart';
 import '../widgets/location_settings_sheet.dart';
 import '../widgets/task_card.dart';
 import 'earnings_screen.dart';
 import 'profile_tab.dart';
+import 'rider_documents_screen.dart';
 
 class RiderHomeScreen extends StatefulWidget {
   const RiderHomeScreen({super.key});
@@ -29,11 +33,31 @@ class RiderHomeScreen extends StatefulWidget {
   State<RiderHomeScreen> createState() => _RiderHomeScreenState();
 }
 
-class _RiderHomeScreenState extends State<RiderHomeScreen> {
+class _RiderHomeScreenState extends State<RiderHomeScreen> with WidgetsBindingObserver {
   int _tab = 0;
   bool _deliveryOpen = false;
   int _handledMessageId = 0;
   int _handledDeliveryNonce = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Back in the app while waiting for approval: the admin may have decided meanwhile
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState lifecycle) {
+    if (lifecycle != AppLifecycleState.resumed || !mounted) return;
+    final home = context.read<RiderHomeBloc>();
+    if (!home.state.loading && !home.state.isApproved) home.add(const RiderHomeRefreshed());
+  }
 
   Future<void> _openDelivery(int orderId) async {
     if (_deliveryOpen) return;
@@ -226,6 +250,16 @@ class _HomeTab extends StatelessWidget {
         ),
       ];
     }
+    if (!state.isApproved || state.reason == 'not_approved') {
+      return [
+        ApprovalStatusCard(
+          status: state.isRejected ? 'rejected' : 'pending',
+          rejectionReason: state.rejectionReason,
+          onUpdateDocuments: () => openRiderDocuments(context),
+          onCheckStatus: () => bloc.add(const RiderHomeRefreshed()),
+        ),
+      ];
+    }
     if (!state.isOnline || state.reason == 'offline') {
       return [
         _InfoCard(
@@ -348,8 +382,27 @@ class _Header extends StatelessWidget {
               _OnlineToggle(
                 online: state.isOnline,
                 busy: state.togglingStatus,
+                locked: !state.loading && !state.isApproved,
                 onChanged: (v) => context.read<RiderHomeBloc>().add(RiderOnlineToggled(v)),
               ),
+              if (!state.loading && !state.isApproved)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, right: 8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.lock_outline, size: 14, color: Colors.white70),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          state.isRejected
+                              ? 'Going online is locked: update your documents'
+                              : 'Going online unlocks once your documents are approved',
+                          style: GoogleFonts.poppins(fontSize: 12, color: Colors.white70),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
             ],
           ),
         ),
@@ -361,8 +414,11 @@ class _Header extends StatelessWidget {
 class _OnlineToggle extends StatelessWidget {
   final bool online;
   final bool busy;
+
+  /// Not approved yet: the control is greyed out and does nothing
+  final bool locked;
   final ValueChanged<bool> onChanged;
-  const _OnlineToggle({required this.online, required this.busy, required this.onChanged});
+  const _OnlineToggle({required this.online, required this.busy, required this.onChanged, this.locked = false});
 
   @override
   Widget build(BuildContext context) {
@@ -371,7 +427,7 @@ class _OnlineToggle extends StatelessWidget {
       final color = value ? AppColors.success : AppColors.textSecondary;
       return Expanded(
         child: GestureDetector(
-          onTap: busy || selected ? null : () => onChanged(value),
+          onTap: busy || selected || locked ? null : () => onChanged(value),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
             padding: const EdgeInsets.symmetric(vertical: 10),
@@ -402,11 +458,17 @@ class _OnlineToggle extends StatelessWidget {
       );
     }
 
-    return Container(
-      padding: const EdgeInsets.all(4),
-      margin: const EdgeInsets.only(right: 8),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(28)),
-      child: Row(children: [segment(true, 'Online'), segment(false, 'Offline')]),
+    return Semantics(
+      enabled: !locked,
+      child: Opacity(
+        opacity: locked ? 0.5 : 1,
+        child: Container(
+          padding: const EdgeInsets.all(4),
+          margin: const EdgeInsets.only(right: 8),
+          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(28)),
+          child: Row(children: [segment(true, 'Online'), segment(false, 'Offline')]),
+        ),
+      ),
     );
   }
 }

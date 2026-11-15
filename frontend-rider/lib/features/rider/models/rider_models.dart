@@ -8,6 +8,10 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:vendra_rider/vendra_core.dart';
 
+import 'payout_breakdown.dart';
+
+export 'payout_breakdown.dart';
+
 /// A delivery task or a rider's order — the API uses the same shape for both.
 class RiderOrder {
   final int id;
@@ -32,10 +36,20 @@ class RiderOrder {
   final double? distanceKm;
   final double? waitMinutes;
   final double payout;
+
+  /// The payout slip (FR04); null for orders delivered before slips existed
+  final PayoutBreakdown? payoutBreakdown;
+
+  /// Delivering needs the customer's 4-digit handover code
+  final bool otpRequired;
+
+  /// 1–5 stars the customer gave the rider, once rated
+  final int? customerRating;
   // Task-only fields
   final double? distanceToStoreKm;
   final double? tripDistanceKm;
   final double? estimatedPayout;
+  final PayoutBreakdown? estimatedPayoutBreakdown;
 
   const RiderOrder({
     required this.id,
@@ -60,9 +74,13 @@ class RiderOrder {
     this.distanceKm,
     this.waitMinutes,
     this.payout = 0,
+    this.payoutBreakdown,
+    this.otpRequired = false,
+    this.customerRating,
     this.distanceToStoreKm,
     this.tripDistanceKm,
     this.estimatedPayout,
+    this.estimatedPayoutBreakdown,
   });
 
   factory RiderOrder.fromJson(Map<String, dynamic> json) => RiderOrder(
@@ -88,9 +106,13 @@ class RiderOrder {
         distanceKm: toDoubleOrNull(json['distanceKm']),
         waitMinutes: toDoubleOrNull(json['waitMinutes']),
         payout: toDouble(json['payout']),
+        payoutBreakdown: PayoutBreakdown.tryParse(json['payoutBreakdown']),
+        otpRequired: json['otpRequired'] == true,
+        customerRating: toIntOrNull(json['customerRating']),
         distanceToStoreKm: toDoubleOrNull(json['distanceToStoreKm']),
         tripDistanceKm: toDoubleOrNull(json['tripDistanceKm']),
         estimatedPayout: toDoubleOrNull(json['estimatedPayout']),
+        estimatedPayoutBreakdown: PayoutBreakdown.tryParse(json['estimatedPayoutBreakdown']),
       );
 
   LatLng? get storePoint => storeLat != null && storeLng != null ? LatLng(storeLat!, storeLng!) : null;
@@ -140,7 +162,7 @@ enum DeliveryStep { headingToStore, atStore, pickedUp, onTheWay, delivered, clos
 class RiderTasksResult {
   final List<RiderOrder> tasks;
   final int? activeOrderId;
-  final String? reason; // offline | busy | no_location
+  final String? reason; // not_approved | offline | busy | no_location
   final double? radiusKm;
 
   const RiderTasksResult({required this.tasks, this.activeOrderId, this.reason, this.radiusKm});
@@ -155,7 +177,7 @@ class RiderTasksResult {
       );
 }
 
-/// GET /api/rider/profile
+/// GET /api/rider/profile (also the PUT /api/rider/documents response)
 class RiderProfile {
   final bool isOnline;
   final String? vehicleType;
@@ -164,6 +186,11 @@ class RiderProfile {
   final DateTime? lastLocationAt;
   final int? activeOrderId;
 
+  /// pending | approved | rejected — an admin checks the documents first
+  final String approvalStatus;
+  final String? rejectionReason;
+  final RiderDocuments documents;
+
   const RiderProfile({
     required this.isOnline,
     this.vehicleType,
@@ -171,6 +198,9 @@ class RiderProfile {
     this.currentLng,
     this.lastLocationAt,
     this.activeOrderId,
+    this.approvalStatus = 'approved',
+    this.rejectionReason,
+    this.documents = const RiderDocuments(),
   });
 
   factory RiderProfile.fromJson(Map<String, dynamic> json) => RiderProfile(
@@ -180,6 +210,10 @@ class RiderProfile {
         currentLng: toDoubleOrNull(json['currentLng']),
         lastLocationAt: toDate(json['lastLocationAt']),
         activeOrderId: toIntOrNull(json['activeOrderId']),
+        // Older backends send no status: they had no approval step
+        approvalStatus: json['approvalStatus'] ?? 'approved',
+        rejectionReason: json['rejectionReason'],
+        documents: RiderDocuments.fromJson(json),
       );
 }
 
@@ -192,6 +226,10 @@ class RiderEarnings {
   final double allTime;
   final int allTimeCount;
   final double totalKm;
+
+  /// Average customer rating of the rider (1 decimal), null before the first rating
+  final double? averageRating;
+  final int ratingCount;
   final double walletBalance;
   final List<RiderOrder> recent;
 
@@ -203,6 +241,8 @@ class RiderEarnings {
     this.allTime = 0,
     this.allTimeCount = 0,
     this.totalKm = 0,
+    this.averageRating,
+    this.ratingCount = 0,
     this.walletBalance = 0,
     this.recent = const [],
   });
@@ -215,6 +255,8 @@ class RiderEarnings {
         allTime: toDouble(json['allTime']),
         allTimeCount: toInt(json['allTimeCount']),
         totalKm: toDouble(json['totalKm']),
+        averageRating: toDoubleOrNull(json['averageRating']),
+        ratingCount: toInt(json['ratingCount']),
         walletBalance: toDouble(json['walletBalance']),
         recent: (json['recent'] as List<dynamic>? ?? const [])
             .map((o) => RiderOrder.fromJson(Map<String, dynamic>.from(o)))
@@ -229,6 +271,7 @@ class DeliveryResult {
   final String distanceSource; // gps | straight_line
   final double waitMinutes;
   final double payout;
+  final PayoutBreakdown? breakdown;
 
   const DeliveryResult({
     required this.orderId,
@@ -236,6 +279,7 @@ class DeliveryResult {
     required this.distanceSource,
     required this.waitMinutes,
     required this.payout,
+    this.breakdown,
   });
 
   factory DeliveryResult.fromJson(Map<String, dynamic> json) => DeliveryResult(
@@ -244,6 +288,7 @@ class DeliveryResult {
         distanceSource: json['distanceSource'] ?? 'gps',
         waitMinutes: toDouble(json['waitMinutes']),
         payout: toDouble(json['payout']),
+        breakdown: PayoutBreakdown.tryParse(json['payoutBreakdown']),
       );
 
   bool get isGps => distanceSource == 'gps';
@@ -259,8 +304,12 @@ String km(double? v) => v == null ? '—' : '${v.toStringAsFixed(v < 10 ? 2 : 1)
 
 String vehicleLabel(String? type) {
   switch (type) {
+    case 'motorcycle':
+      return 'Motorcycle';
     case 'motorbike':
       return 'Motorbike';
+    case 'scooter':
+      return 'Scooter';
     case 'bicycle':
       return 'Bicycle';
     case 'car':

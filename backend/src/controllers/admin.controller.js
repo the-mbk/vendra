@@ -23,7 +23,8 @@ const getDashboardStats = asyncHandler(async (req, res) => {
                        COUNT(*) AS total FROM vendors`),
     pool.query(`SELECT COUNT(*) FILTER (WHERE u.role = 'customer') AS customers,
                        COUNT(*) FILTER (WHERE u.role = 'rider') AS riders,
-                       COUNT(*) FILTER (WHERE r.is_online) AS riders_online
+                       COUNT(*) FILTER (WHERE r.is_online) AS riders_online,
+                       COUNT(*) FILTER (WHERE r.approval_status = 'pending') AS riders_pending
                 FROM users u LEFT JOIN riders r ON r.user_id = u.id`),
     pool.query(`SELECT COUNT(*) AS total,
                        COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE) AS today,
@@ -44,6 +45,7 @@ const getDashboardStats = asyncHandler(async (req, res) => {
       customers: Number(users.rows[0].customers),
       riders: Number(users.rows[0].riders),
       ridersOnline: Number(users.rows[0].riders_online),
+      pendingRiders: Number(users.rows[0].riders_pending),
       orders: {
         total: Number(orders.rows[0].total),
         today: Number(orders.rows[0].today),
@@ -287,19 +289,24 @@ const updatePolicies = asyncHandler(async (req, res) => {
 // Riders + finance
 // ──────────────────────────────────────
 
-/** GET /api/admin/riders */
+/** GET /api/admin/riders?status=pending|approved|rejected — waiting riders first */
 const getRiders = asyncHandler(async (req, res) => {
+  const status = ['pending', 'approved', 'rejected'].includes(req.query.status) ? req.query.status : null;
   const r = await pool.query(
     `SELECT u.id, u.full_name, u.email, u.phone, u.wallet_balance, u.created_at,
             r.vehicle_type, r.is_online, r.last_location_at,
+            r.cnic, r.license_number, r.vehicle_number, r.approval_status, r.rejection_reason, r.reviewed_at,
             COUNT(o.id) FILTER (WHERE o.status = 'delivered') AS deliveries,
             COALESCE(SUM(o.rider_payout) FILTER (WHERE o.status = 'delivered'), 0) AS earnings,
+            ROUND(AVG(o.rider_rating), 1)::float8 AS average_rating,
             MAX(o.id) FILTER (WHERE o.status IN ('ready_for_pickup', 'picked', 'on_the_way')) AS active_order_id
      FROM users u
      JOIN riders r ON r.user_id = u.id
      LEFT JOIN orders o ON o.rider_user_id = u.id
+     WHERE ($1::text IS NULL OR r.approval_status = $1)
      GROUP BY u.id, r.id
-     ORDER BY r.is_online DESC, u.created_at DESC`
+     ORDER BY (r.approval_status = 'pending') DESC, r.is_online DESC, u.created_at DESC`,
+    [status]
   );
   res.json({
     success: true,
@@ -311,6 +318,13 @@ const getRiders = asyncHandler(async (req, res) => {
       vehicleType: x.vehicle_type,
       isOnline: x.is_online,
       lastLocationAt: x.last_location_at,
+      cnic: x.cnic,
+      licenseNumber: x.license_number,
+      vehicleNumber: x.vehicle_number,
+      approvalStatus: x.approval_status,
+      rejectionReason: x.rejection_reason,
+      reviewedAt: x.reviewed_at,
+      averageRating: x.average_rating,
       deliveries: Number(x.deliveries),
       earnings: Number(x.earnings),
       walletBalance: Number(x.wallet_balance),
@@ -319,6 +333,48 @@ const getRiders = asyncHandler(async (req, res) => {
     })),
   });
 });
+
+/**
+ * PUT /api/admin/riders/:id/approve — the rider can go online
+ * PUT /api/admin/riders/:id/reject  Body: { reason } — the rider fixes their documents and resubmits
+ * (:id is the rider's user id, as listed by GET /api/admin/riders)
+ */
+function reviewRider(approve) {
+  return asyncHandler(async (req, res) => {
+    const userId = intParam(req.params.id);
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 300) : '';
+    if (!approve && !reason) throw httpError(400, 'Tell the rider what to fix (reason).');
+
+    const rider = await withTransaction(async (client, afterCommit) => {
+      const current = (await client.query('SELECT * FROM riders WHERE user_id = $1 FOR UPDATE', [userId])).rows[0];
+      if (!current) throw httpError(404, 'Rider not found.');
+      if (approve && !current.cnic) throw httpError(409, 'This rider has not sent their CNIC yet.');
+      if (!approve) {
+        const active = await client.query(
+          `SELECT 1 FROM orders WHERE rider_user_id = $1 AND status IN ('ready_for_pickup', 'picked', 'on_the_way')`, [userId]);
+        if (active.rows.length) throw httpError(409, 'This rider is on a delivery. Reject them after it is finished.');
+      }
+      const r = await client.query(
+        `UPDATE riders SET approval_status = $1::varchar, rejection_reason = $2, reviewed_at = NOW(),
+                is_online = CASE WHEN $1::varchar = 'approved' THEN is_online ELSE false END
+         WHERE user_id = $3 RETURNING *`,
+        [approve ? 'approved' : 'rejected', approve ? null : reason, userId]
+      );
+      await notify(client, afterCommit, userId, approve
+        ? { type: 'rider_approved', title: 'You are approved to deliver', body: 'Go online to start receiving delivery tasks.' }
+        : { type: 'rider_rejected', title: 'Your rider documents need changes', body: reason });
+      return r.rows[0];
+    });
+    res.json({
+      success: true,
+      message: approve ? 'Rider approved.' : 'Rider rejected. They have been told what to fix.',
+      data: { id: userId, approvalStatus: rider.approval_status, rejectionReason: rider.rejection_reason },
+    });
+  });
+}
+
+const approveRider = reviewRider(true);
+const rejectRider = reviewRider(false);
 
 /** GET /api/admin/finance — escrow pool, platform revenue, recent entries */
 const getFinance = asyncHandler(async (req, res) => {
@@ -456,6 +512,8 @@ module.exports = {
   getPolicies,
   updatePolicies,
   getRiders,
+  approveRider,
+  rejectRider,
   getFinance,
   getAllOrders,
   getAllUsers,

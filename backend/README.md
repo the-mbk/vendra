@@ -2,6 +2,8 @@
 
 Node.js + Express + PostgreSQL API for Vendra, a multi-vendor marketplace with dual inventory (private vs public stock), atomic order reservation, escrow funded by card payments, rider delivery with GPS payouts, disputes and a policy engine. Realtime updates go over Socket.IO on the same port.
 
+Also: customer reviews and ratings, a 4-digit delivery handover code (so a spoofed GPS position can't complete a delivery), rider document approval, shop staff with PIN switching (cashier / packer / inventory manager), a packing checklist with barcode scanning, product photo galleries, printable POS receipts with a scan-to-pay QR, itemised rider payout slips, security headers and rate limits.
+
 - Card payments go through **Vendra Pay** ([gateway/](gateway/README.md)), a local payment gateway sandbox with test cards, payouts and signed webhooks.
 
 - API reference: [docs/API.md](docs/API.md)
@@ -67,10 +69,15 @@ When all the repos sit side by side in one folder, `run-local.ps1` in that folde
 `npm run seed` fills an empty database with a marketplace in **Islamabad and Rawalpindi** (development mode only):
 
 - **1,000 users:** 120 stores (about 9 waiting for approval), 150 riders, 729 customers and the admin. Run `npm run seed -- --users=3000` for a bigger city.
-- **About 2,000 products:** groceries, electronics, fashion, beauty, home and sports stores, with real product photos and some products waiting for approval.
-- **90 days of orders:** delivered, cancelled, and recent ones still in escrow. Wallets, rider earnings and platform revenue add up exactly.
+- **About 2,000 products:** groceries, electronics, fashion, beauty, home and sports stores, with real product photos (a cover plus up to 3 gallery photos) and some products waiting for approval.
+- **90 days of orders:** delivered, cancelled, and recent ones still in escrow. Wallets, rider earnings and platform revenue add up exactly. Deliveries carry their payout slip, and about 40% of delivered orders have customer reviews and a rider rating.
+- **Rider applicants:** a few new riders waiting for document review (one sent back), so the admin's review queue isn't empty.
+- **Shop staff** at Capital Electronics Hub (usman@vendor.pk), for the vendor app's *Switch user*: Ali Raza (cashier, PIN `1111`), Sana Iqbal (packer, PIN `2222`), Kashif Mehmood (inventory manager, PIN `3333`). The store also has receipt header/footer and a payment account for the scan-to-pay QR.
 
-Product names, descriptions and photos come from [DummyJSON](https://dummyjson.com), a free fake-data API. The first run downloads them into `.cache/`; later runs work offline. The photos go into the file storage bucket. The data comes from a fixed seed, so it's the same every time. To start over, run `.un-local.ps1 -Reset`, which wipes the database, files and gateway together so the books stay balanced.
+Product names, descriptions and photos come from [DummyJSON](https://dummyjson.com), a free fake-data API. The first run downloads them into `.cache/`; later runs work offline. The photos go into the file storage bucket. The data comes from a fixed seed, so it's the same every time. To start over, run `.
+un-local.ps1 -Reset`, which wipes the database, files and gateway together so the books stay balanced.
+
+Data loaded before migration 010 has no reviews, staff or rider documents; reset to get them. `npm run images:backfill` adds missing cover photos and gallery photos to an existing database without a reset.
 
 Every account's password is `password123`. Generated accounts use `@demo.vendra.pk` addresses. The demo accounts are listed on each app's login screen in development:
 
@@ -99,6 +106,10 @@ The backend tests use their own small fixture (`tests/fixture.sql`), not this da
 | `UPLOAD_DIR` | no | Folder used when no bucket is configured (default `./uploads`) |
 | `APP_MODE` | no | `development` (default) or `production` — see above |
 | `GATEWAY_URL`, `GATEWAY_PUBLIC_URL`, `GATEWAY_PUBLISHABLE_KEY`, `GATEWAY_SECRET_KEY`, `GATEWAY_WEBHOOK_SECRET` | no | The payment gateway (defaults match Vendra Pay in docker-compose). `GATEWAY_PUBLIC_URL` is where the apps reach it, if different |
+| `RATE_LIMIT_MAX` | no | API requests per minute from one IP (default 300; 2000 in development, where all the apps share 127.0.0.1) |
+| `LOGIN_RATE_LIMIT_MAX` | no | Failed sign-ins per email per IP in 15 minutes before 429 (default 10) |
+| `SIGNUP_RATE_LIMIT_MAX` | no | Sign-ups per IP per hour (default 20) |
+| `TRUST_PROXY` | no | Behind a reverse proxy / load balancer, the number of proxy hops (e.g. `1`), so rate limits see the client's IP |
 
 ## Tests
 
@@ -112,6 +123,17 @@ The tests keep photos in a temp folder. Set the `S3_*` variables as well to run 
 
 After each money-moving step the tests check that wallets + escrow pool + platform revenue still equal total deposits, and that the escrow pool equals the money held on open orders.
 
+`tests/trust-and-operations.test.js` covers reviews, the handover code (wrong codes, lockout), rider approval, staff permissions and PIN lockout, the packing checklist, receipts, galleries, payout slips, security headers and the login rate limit.
+
+### PR 04 benchmark (100 inventory requests per second)
+
+```bash
+TEST_DATABASE_URL=postgresql://postgres:dev@localhost:5432/vendra_bench npm run bench:concurrency -- --rate=100 --duration=15
+TEST_DATABASE_URL=… npm run bench:concurrency -- --rate=100 --duration=15 --products=10
+```
+
+It fires online checkouts at a fixed rate (whether or not earlier ones have answered) while the store sells the same products at the walk-in counter, runs stock out part-way, then checks every number: shelf stock, reserved units vs successful orders vs inventory locks, public stock, the ledger, no overselling, the walk-in buffer untouched, and the money invariants. `--products=1` (default) is the worst case, all requests on one product's row lock; `--products=10` spreads the load. It prints the results and writes `bench/results/concurrency-<time>.json` and an `.html` report with a per-second chart. Like the tests, it drops and recreates the database in `TEST_DATABASE_URL`.
+
 ## How it's organised
 
 ```
@@ -120,7 +142,8 @@ src/
   server.js         Starts listening; releases due escrow every 30 s
   realtime.js       Socket.IO rooms and emit helpers
   migrate.js        Migration runner          seed.js   Seed runner
-  controllers/      auth, customer, vendor, rider, dispute, account, admin
+  controllers/      auth, customer, vendor, staff, rider, dispute, account, admin, payment
+  middleware/auth   JWT, roles, and shop-staff permissions
   services/
     inventory       The only code that changes stock (locks rows in id order)
     orderSettlement Escrow: rider payout, release with commission, refund
@@ -133,9 +156,14 @@ src/
     gateway.client  Talks to the payment gateway (tokens only, never card numbers)
     checkout        Prices the cart and places orders (the only code that creates orders)
     orderTimeouts   Cancels and refunds orders the store or riders never picked up
+    handoverOtp     Delivery handover codes: check, count wrong tries, lock
+    review          Customer reviews and the products' running rating totals
+    riderDocuments  CNIC / licence / vehicle validation
   config/mode.js    APP_MODE and the development features
-  utils/            money (integer paisa), geo (haversine), http (errors, transactions), cors
-migrations/         001_init … 006_payments_and_withdrawals
+  utils/            money (integer paisa), geo (haversine), http (errors, transactions), cors, security (helmet + rate limits)
+  backfillImages.js Missing cover / gallery photos from the demo catalogue (npm run images:backfill)
+migrations/         001_init … 010_reviews_otp_staff_riders_gallery
+bench/              PR 04 concurrency benchmark
 gateway/            Vendra Pay, the payment gateway sandbox (its own Dockerfile and README)
 ```
 

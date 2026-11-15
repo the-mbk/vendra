@@ -5,21 +5,28 @@
 
 const pool = require('../db');
 const { formatNotification } = require('../services/notification.service');
-const { asyncHandler, httpError, intParam } = require('../utils/http');
+const { asyncHandler, httpError, intParam, paging, pageOf } = require('../utils/http');
 
-/** GET /api/notifications?limit=50 */
+/**
+ * GET /api/notifications?limit=50&offset=0&unread=true — the inbox, newest first.
+ * meta.hasMore / nextOffset page back through older alerts.
+ */
 const getNotifications = asyncHandler(async (req, res) => {
-  const limit = Math.min(Number(req.query.limit) || 50, 200);
+  const page = paging(req.query, { defaultLimit: 50, maxLimit: 200 });
+  const unreadOnly = req.query.unread === 'true';
   const [list, unread] = await Promise.all([
     pool.query(
-      'SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2',
-      [req.user.userId, limit]
+      `SELECT * FROM notifications WHERE user_id = $1 ${unreadOnly ? 'AND is_read = false' : ''}
+       ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`,
+      [req.user.userId, page.limit + 1, page.offset]
     ),
     pool.query('SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND is_read = false', [req.user.userId]),
   ]);
+  const { items, meta } = pageOf(list.rows, page);
   res.json({
     success: true,
-    data: { notifications: list.rows.map(formatNotification), unreadCount: Number(unread.rows[0].count) },
+    data: { notifications: items.map(formatNotification), unreadCount: Number(unread.rows[0].count) },
+    meta,
   });
 });
 

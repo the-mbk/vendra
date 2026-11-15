@@ -2,6 +2,9 @@
 // Vendra Rider App - Home BLoC
 // Online/offline status, today's earnings, and incoming delivery
 // tasks (live via task:new / task:taken, plus pull-to-refresh).
+// Also the admin approval gate: a pending or rejected rider can't go
+// online; a rejected one resubmits documents (PUT /api/rider/documents).
+// The status refreshes on a rider_approved / rider_rejected notification.
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -63,6 +66,22 @@ class RiderTaskDeclined extends RiderHomeEvent {
   List<Object?> get props => [orderId];
 }
 
+/// Send new or corrected documents for the admin review
+class RiderDocumentsSubmitted extends RiderHomeEvent {
+  final String cnic;
+  final String vehicleType;
+  final String? licenseNumber;
+  final String? vehicleNumber;
+  const RiderDocumentsSubmitted({
+    required this.cnic,
+    required this.vehicleType,
+    this.licenseNumber,
+    this.vehicleNumber,
+  });
+  @override
+  List<Object?> get props => [cnic, vehicleType, licenseNumber, vehicleNumber];
+}
+
 // ── State ────────────────────────────────────────────────────
 
 class HomeMessage {
@@ -80,11 +99,23 @@ class RiderHomeState extends Equatable {
   final String? vehicleType;
   final List<RiderOrder> allTasks;
   final Set<int> declined;
-  final String? reason; // offline | busy | no_location
+  final String? reason; // not_approved | offline | busy | no_location
   final int? activeOrderId;
   final double? radiusKm;
   final RiderEarnings? earnings;
   final int? acceptingId;
+
+  /// pending | approved | rejected (documents checked by an admin)
+  final String approvalStatus;
+  final String? rejectionReason;
+  final RiderDocuments documents;
+  final bool savingDocuments;
+
+  /// The last document submission's error (shown on the form)
+  final String? documentsError;
+
+  /// Bumped when documents were saved (the form closes)
+  final int documentsSavedNonce;
 
   /// One-shot UI effects, keyed by an increasing id
   final HomeMessage? message;
@@ -104,12 +135,23 @@ class RiderHomeState extends Equatable {
     this.radiusKm,
     this.earnings,
     this.acceptingId,
+    this.approvalStatus = 'approved',
+    this.rejectionReason,
+    this.documents = const RiderDocuments(),
+    this.savingDocuments = false,
+    this.documentsError,
+    this.documentsSavedNonce = 0,
     this.message,
     this.openDeliveryNonce = 0,
     this.openDeliveryId,
   });
 
   List<RiderOrder> get tasks => allTasks.where((t) => !declined.contains(t.id)).toList();
+
+  /// Only an approved rider may go online and take deliveries
+  bool get isApproved => approvalStatus == 'approved';
+  bool get isPendingApproval => approvalStatus == 'pending';
+  bool get isRejected => approvalStatus == 'rejected';
 
   RiderHomeState copyWith({
     bool? loading,
@@ -128,6 +170,14 @@ class RiderHomeState extends Equatable {
     RiderEarnings? earnings,
     int? acceptingId,
     bool clearAccepting = false,
+    String? approvalStatus,
+    String? rejectionReason,
+    bool clearRejectionReason = false,
+    RiderDocuments? documents,
+    bool? savingDocuments,
+    String? documentsError,
+    bool clearDocumentsError = false,
+    int? documentsSavedNonce,
     HomeMessage? message,
     int? openDeliveryId,
     int? openDeliveryNonce,
@@ -145,6 +195,12 @@ class RiderHomeState extends Equatable {
       radiusKm: radiusKm ?? this.radiusKm,
       earnings: earnings ?? this.earnings,
       acceptingId: clearAccepting ? null : (acceptingId ?? this.acceptingId),
+      approvalStatus: approvalStatus ?? this.approvalStatus,
+      rejectionReason: clearRejectionReason ? null : (rejectionReason ?? this.rejectionReason),
+      documents: documents ?? this.documents,
+      savingDocuments: savingDocuments ?? this.savingDocuments,
+      documentsError: clearDocumentsError ? null : (documentsError ?? this.documentsError),
+      documentsSavedNonce: documentsSavedNonce ?? this.documentsSavedNonce,
       message: message ?? this.message,
       openDeliveryId: openDeliveryId ?? this.openDeliveryId,
       openDeliveryNonce: openDeliveryNonce ?? this.openDeliveryNonce,
@@ -166,7 +222,16 @@ class RiderHomeState extends Equatable {
         earnings?.today,
         earnings?.todayCount,
         earnings?.week,
+        earnings?.averageRating,
         acceptingId,
+        approvalStatus,
+        rejectionReason,
+        documents.cnic,
+        documents.licenseNumber,
+        documents.vehicleNumber,
+        savingDocuments,
+        documentsError,
+        documentsSavedNonce,
         message?.id,
         openDeliveryNonce,
       ];
@@ -189,11 +254,26 @@ class RiderHomeBloc extends Bloc<RiderHomeEvent, RiderHomeState> {
     on<RiderOnlineToggled>(_onToggled);
     on<RiderTaskAccepted>(_onAccepted);
     on<RiderTaskDeclined>(_onDeclined);
+    on<RiderDocumentsSubmitted>(_onDocumentsSubmitted);
 
     final rt = RealtimeService();
     _subs.add(rt.newTasks.listen((_) => add(RiderTasksRefreshed())));
     _subs.add(rt.takenTasks.listen((id) => add(RiderTaskTaken(id))));
+    // An admin approved or rejected the documents: reload the profile
+    _subs.add(rt.notifications
+        .where((n) => n.type == 'rider_approved' || n.type == 'rider_rejected')
+        .listen((_) => add(const RiderHomeRefreshed())));
   }
+
+  /// Approval status, documents and vehicle from a profile response
+  RiderHomeState _withProfile(RiderProfile profile) => state.copyWith(
+        isOnline: profile.isOnline,
+        vehicleType: profile.vehicleType,
+        approvalStatus: profile.approvalStatus,
+        rejectionReason: profile.rejectionReason,
+        clearRejectionReason: profile.rejectionReason == null,
+        documents: profile.documents,
+      );
 
   HomeMessage _msg(String text, {bool isError = false}) => HomeMessage(++_messageId, text, isError: isError);
 
@@ -206,11 +286,7 @@ class RiderHomeBloc extends Bloc<RiderHomeEvent, RiderHomeState> {
       _location.rememberServerPosition(profile.currentLat, profile.currentLng);
       if (profile.isOnline) _location.start();
       _setPolling(profile.isOnline);
-      emit(state.copyWith(
-        isOnline: profile.isOnline,
-        vehicleType: profile.vehicleType,
-        activeOrderId: profile.activeOrderId,
-      ));
+      emit(_withProfile(profile).copyWith(activeOrderId: profile.activeOrderId));
       await _loadTasks(emit);
       await _loadEarnings(emit);
       emit(state.copyWith(loading: false, clearLoadError: true));
@@ -227,7 +303,12 @@ class RiderHomeBloc extends Bloc<RiderHomeEvent, RiderHomeState> {
     try {
       final res = await _api.get(ApiConfig.riderProfile);
       final profile = RiderProfile.fromJson(Map<String, dynamic>.from(res.data['data']));
-      emit(state.copyWith(isOnline: profile.isOnline, clearLoadError: true, loading: false));
+      emit(_withProfile(profile).copyWith(clearLoadError: true, loading: false));
+      if (!profile.isOnline && _location.isTracking) {
+        // Taken offline elsewhere (e.g. documents rejected)
+        _location.stop();
+        _setPolling(false);
+      }
       await _loadTasks(emit);
       await _loadEarnings(emit);
     } catch (e) {
@@ -253,10 +334,23 @@ class RiderHomeBloc extends Bloc<RiderHomeEvent, RiderHomeState> {
   Future<void> _loadTasks(Emitter<RiderHomeState> emit) async {
     final res = await _api.get(ApiConfig.riderTasks);
     final result = RiderTasksResult.fromJson(Map<String, dynamic>.from(res.data['data']));
-    if (result.reason == 'offline' && _location.isTracking) {
+    final notApproved = result.reason == 'not_approved';
+    if ((result.reason == 'offline' || notApproved) && _location.isTracking) {
       // The server has us offline (e.g. changed elsewhere) — stop sending location
       _location.stop();
       _setPolling(false);
+    }
+    if (notApproved && state.isApproved) {
+      // Approval was withdrawn since the profile loaded: learn pending vs rejected (and why)
+      try {
+        final res = await _api.get(ApiConfig.riderProfile);
+        emit(_withProfile(RiderProfile.fromJson(Map<String, dynamic>.from(res.data['data']))));
+      } catch (_) {
+        emit(state.copyWith(approvalStatus: 'pending'));
+      }
+    } else if (!notApproved && !state.isApproved) {
+      // Tasks report not_approved before anything else, so any other answer means approved
+      emit(state.copyWith(approvalStatus: 'approved', clearRejectionReason: true));
     }
     emit(state.copyWith(
       allTasks: result.tasks,
@@ -265,8 +359,8 @@ class RiderHomeBloc extends Bloc<RiderHomeEvent, RiderHomeState> {
       activeOrderId: result.activeOrderId,
       clearActiveOrder: result.activeOrderId == null,
       radiusKm: result.radiusKm,
-      // reason 'offline' means the server has us offline
-      isOnline: result.reason == 'offline' ? false : null,
+      // reason 'offline' / 'not_approved' means the server has us offline
+      isOnline: result.reason == 'offline' || notApproved ? false : null,
     ));
   }
 
@@ -279,6 +373,17 @@ class RiderHomeBloc extends Bloc<RiderHomeEvent, RiderHomeState> {
 
   Future<void> _onToggled(RiderOnlineToggled event, Emitter<RiderHomeState> emit) async {
     if (state.togglingStatus || event.online == state.isOnline) return;
+    if (event.online && !state.isApproved) {
+      emit(state.copyWith(
+        message: _msg(
+          state.isRejected
+              ? 'Your documents were not approved. Update them and wait for the review.'
+              : 'Your documents are being reviewed. You can go online once an admin approves you.',
+          isError: true,
+        ),
+      ));
+      return;
+    }
     emit(state.copyWith(togglingStatus: true));
     try {
       if (event.online) {
@@ -310,8 +415,50 @@ class RiderHomeBloc extends Bloc<RiderHomeEvent, RiderHomeState> {
       }
       await _loadTasks(emit);
     } catch (e) {
+      if (ApiService.getErrorCode(e) == 'RIDER_NOT_APPROVED') {
+        // 403 { approvalStatus }: the server's message says why (pending, or rejected + reason)
+        final status = ApiService.getErrorData(e)?['approvalStatus'] as String?;
+        emit(state.copyWith(
+          togglingStatus: false,
+          isOnline: false,
+          approvalStatus: status ?? (state.isApproved ? 'pending' : null),
+          message: _msg(ApiService.getErrorMessage(e), isError: true),
+        ));
+        add(const RiderHomeRefreshed()); // the rejection reason and documents
+        return;
+      }
       // 409: "Finish your active delivery before going offline."
       emit(state.copyWith(togglingStatus: false, message: _msg(ApiService.getErrorMessage(e), isError: true)));
+    }
+  }
+
+  Future<void> _onDocumentsSubmitted(RiderDocumentsSubmitted event, Emitter<RiderHomeState> emit) async {
+    if (state.savingDocuments) return;
+    emit(state.copyWith(savingDocuments: true, clearDocumentsError: true));
+    try {
+      final res = await _api.put(ApiConfig.riderDocuments, data: {
+        'cnic': event.cnic,
+        'vehicleType': event.vehicleType,
+        if (event.licenseNumber != null) 'licenseNumber': event.licenseNumber,
+        if (event.vehicleNumber != null) 'vehicleNumber': event.vehicleNumber,
+      });
+      final profile = RiderProfile.fromJson(Map<String, dynamic>.from(res.data['data']));
+      if (!profile.isOnline && _location.isTracking) {
+        // Sent back for review: the server took us offline
+        _location.stop();
+        _setPolling(false);
+      }
+      emit(_withProfile(profile).copyWith(
+        savingDocuments: false,
+        documentsSavedNonce: state.documentsSavedNonce + 1,
+        message: _msg(res.data['message'] ?? 'Documents saved'),
+      ));
+      try {
+        await _loadTasks(emit);
+      } catch (_) {}
+    } catch (e) {
+      // 400: what's wrong with a document · 409: active delivery
+      emit(state.copyWith(savingDocuments: false, documentsError: ApiService.getErrorMessage(e)));
     }
   }
 

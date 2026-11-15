@@ -18,6 +18,10 @@ process.env.DATABASE_URL = TEST_DATABASE_URL;
 process.env.UPLOAD_DIR = require('path').join(require('os').tmpdir(), 'vendra-test-uploads');
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
 process.env.NODE_ENV = 'test';
+// Thousands of requests from 127.0.0.1 in a few seconds: keep the per-IP limits out of the way
+// (the login limit counts failures per email, so it stays at its real value and is tested)
+process.env.RATE_LIMIT_MAX = process.env.RATE_LIMIT_MAX || '100000';
+process.env.SIGNUP_RATE_LIMIT_MAX = process.env.SIGNUP_RATE_LIMIT_MAX || '1000';
 
 async function resetDatabase() {
   const url = new URL(TEST_DATABASE_URL);

@@ -2,8 +2,10 @@
 // Vendra Rider App - Active Delivery BLoC
 // Walks the delivery: arrived at store → picked up (both checked against
 // the store location, pickup geofence) → on the way →
-// confirm delivery (geofenced, SSR02). The deliver response carries
-// the GPS-based payout breakdown (FR04); escrow release starts (FR03).
+// confirm delivery (geofenced, SSR02, plus the customer's 4-digit
+// handover code so a spoofed GPS position alone can't finish it).
+// The deliver response carries the itemised payout slip (FR04);
+// escrow release starts (FR03).
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -12,6 +14,7 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:vendra_rider/vendra_core.dart';
 
+import '../models/handover_code.dart';
 import '../models/rider_models.dart';
 import '../services/rider_location_service.dart';
 
@@ -31,8 +34,20 @@ class DeliveryLoadRequested extends DeliveryEvent {
   List<Object?> get props => [orderId];
 }
 
-/// The single primary button: performs the next step
+/// The single primary button: performs the next step. On the way, when the
+/// order needs a handover code, this only asks for it (awaitingCode).
 class DeliveryAdvanceRequested extends DeliveryEvent {}
+
+/// The customer's code was entered: confirm the delivery with it
+class DeliveryCodeSubmitted extends DeliveryEvent {
+  final String code;
+  const DeliveryCodeSubmitted(this.code);
+  @override
+  List<Object?> get props => [code];
+}
+
+/// The code dialog was closed without confirming
+class DeliveryCodeCancelled extends DeliveryEvent {}
 
 // ── State ────────────────────────────────────────────────────
 
@@ -52,6 +67,12 @@ class DeliveryState extends Equatable {
   final DeliveryMessage? message;
   final DeliveryResult? result;
 
+  /// The handover code dialog is open (the screen shows / closes it)
+  final bool awaitingCode;
+
+  /// Why the last code was refused (wrong, attempts left, locked until…)
+  final HandoverCodeFeedback? codeFeedback;
+
   const DeliveryState({
     this.loading = true,
     this.loadError,
@@ -60,6 +81,8 @@ class DeliveryState extends Equatable {
     this.geofenceMeters = 200,
     this.message,
     this.result,
+    this.awaitingCode = false,
+    this.codeFeedback,
   });
 
   DeliveryState copyWith({
@@ -72,6 +95,9 @@ class DeliveryState extends Equatable {
     double? geofenceMeters,
     DeliveryMessage? message,
     DeliveryResult? result,
+    bool? awaitingCode,
+    HandoverCodeFeedback? codeFeedback,
+    bool clearCodeFeedback = false,
   }) {
     return DeliveryState(
       loading: loading ?? this.loading,
@@ -81,6 +107,8 @@ class DeliveryState extends Equatable {
       geofenceMeters: geofenceMeters ?? this.geofenceMeters,
       message: message ?? this.message,
       result: result ?? this.result,
+      awaitingCode: awaitingCode ?? this.awaitingCode,
+      codeFeedback: clearCodeFeedback ? null : (codeFeedback ?? this.codeFeedback),
     );
   }
 
@@ -91,10 +119,13 @@ class DeliveryState extends Equatable {
         order?.id,
         order?.status,
         order?.arrivedAt,
+        order?.otpRequired,
         busy,
         geofenceMeters,
         message?.id,
         result?.orderId,
+        awaitingCode,
+        codeFeedback?.id,
       ];
 }
 
@@ -110,6 +141,8 @@ class DeliveryBloc extends Bloc<DeliveryEvent, DeliveryState> {
   DeliveryBloc() : super(DeliveryState(geofenceMeters: AppConfig.current.geofenceMeters.toDouble())) {
     on<DeliveryLoadRequested>(_onLoad);
     on<DeliveryAdvanceRequested>(_onAdvance);
+    on<DeliveryCodeSubmitted>(_onCodeSubmitted);
+    on<DeliveryCodeCancelled>(_onCodeCancelled);
 
     // Status changed elsewhere (e.g. order cancelled by admin) → reload
     _orderSub = RealtimeService().orderUpdates.listen((u) {
@@ -132,7 +165,14 @@ class DeliveryBloc extends Bloc<DeliveryEvent, DeliveryState> {
       }
       final order = await _fetchActive();
       _orderId = order?.id ?? _orderId;
-      emit(state.copyWith(loading: false, clearLoadError: true, order: order, clearOrder: order == null));
+      emit(state.copyWith(
+        loading: false,
+        clearLoadError: true,
+        order: order,
+        clearOrder: order == null,
+        // Cancelled (or otherwise moved on) while the code dialog was open: close it
+        awaitingCode: state.awaitingCode && order?.step == DeliveryStep.onTheWay,
+      ));
     } catch (e) {
       emit(state.copyWith(loading: false, loadError: ApiService.getErrorMessage(e)));
     }
@@ -168,7 +208,17 @@ class DeliveryBloc extends Bloc<DeliveryEvent, DeliveryState> {
           await _reload(emit, 'On the way — the customer can track you live');
           break;
         case DeliveryStep.onTheWay:
-          await _deliver(order, emit);
+          if (order.otpRequired) {
+            // Ask for the customer's code first; a lockout stays visible until it ends
+            final feedback = state.codeFeedback;
+            emit(state.copyWith(
+              busy: false,
+              awaitingCode: true,
+              clearCodeFeedback: feedback == null || !feedback.isLocked(),
+            ));
+          } else {
+            await _deliver(order, emit); // an order from before handover codes
+          }
           break;
         case DeliveryStep.delivered:
         case DeliveryStep.closed:
@@ -176,13 +226,35 @@ class DeliveryBloc extends Bloc<DeliveryEvent, DeliveryState> {
           break;
       }
     } catch (e) {
-      emit(state.copyWith(busy: false, message: _msg(ApiService.getErrorMessage(e), isError: true)));
-      // The server may have moved on (e.g. order cancelled) — resync
-      try {
-        final fresh = await _fetchActive();
-        emit(state.copyWith(order: fresh, clearOrder: fresh == null));
-      } catch (_) {}
+      await _failed(e, emit);
     }
+  }
+
+  Future<void> _onCodeSubmitted(DeliveryCodeSubmitted event, Emitter<DeliveryState> emit) async {
+    final order = state.order;
+    if (order == null || state.busy || !state.awaitingCode) return;
+    emit(state.copyWith(busy: true));
+    try {
+      await _deliver(order, emit, otp: event.code);
+    } catch (e) {
+      await _failed(e, emit);
+    }
+  }
+
+  void _onCodeCancelled(DeliveryCodeCancelled event, Emitter<DeliveryState> emit) {
+    if (state.busy) return;
+    final feedback = state.codeFeedback;
+    emit(state.copyWith(awaitingCode: false, clearCodeFeedback: feedback == null || !feedback.isLocked()));
+  }
+
+  /// Unexpected error: show it, close the code dialog, and resync
+  Future<void> _failed(Object e, Emitter<DeliveryState> emit) async {
+    emit(state.copyWith(busy: false, awaitingCode: false, message: _msg(ApiService.getErrorMessage(e), isError: true)));
+    // The server may have moved on (e.g. order cancelled) — resync
+    try {
+      final fresh = await _fetchActive();
+      emit(state.copyWith(order: fresh, clearOrder: fresh == null));
+    } catch (_) {}
   }
 
   Future<void> _reload(Emitter<DeliveryState> emit, String message) async {
@@ -222,23 +294,39 @@ class DeliveryBloc extends Bloc<DeliveryEvent, DeliveryState> {
     }
   }
 
-  Future<void> _deliver(RiderOrder order, Emitter<DeliveryState> emit) async {
+  /// Geofence first (server order), then the handover code. Code problems keep
+  /// the dialog open with the reason; anything else closes it.
+  Future<void> _deliver(RiderOrder order, Emitter<DeliveryState> emit, {String? otp}) async {
     final LocationFix fix;
     try {
       fix = await _location.currentFix(fresh: true);
     } on LocationUnavailable catch (e) {
-      emit(state.copyWith(busy: false, message: _msg(e.message, isError: true)));
+      emit(state.copyWith(busy: false, awaitingCode: false, message: _msg(e.message, isError: true)));
       return;
     }
     try {
-      final res = await _api.post(ApiConfig.riderDeliver(order.id), data: fix.toJson());
+      final res = await _api.post(ApiConfig.riderDeliver(order.id), data: {
+        ...fix.toJson(),
+        if (otp != null) 'otp': otp,
+      });
       final result = DeliveryResult.fromJson(Map<String, dynamic>.from(res.data['data']));
       _location.stopDrive();
-      emit(state.copyWith(busy: false, result: result));
+      emit(state.copyWith(busy: false, awaitingCode: false, clearCodeFeedback: true, result: result));
     } catch (e) {
       // Manual position refused: the service switched to GPS and told the rider — tap again
       if (_location.handleManualRejected(e)) {
-        emit(state.copyWith(busy: false));
+        emit(state.copyWith(busy: false, awaitingCode: false));
+        return;
+      }
+      final feedback = HandoverCodeFeedback.fromError(
+        ++_messageId,
+        code: ApiService.getErrorCode(e),
+        data: ApiService.getErrorData(e),
+        message: ApiService.getErrorMessage(e),
+      );
+      if (feedback != null) {
+        // OTP_REQUIRED (the order list was stale) / WRONG_OTP / OTP_LOCKED
+        emit(state.copyWith(busy: false, awaitingCode: true, codeFeedback: feedback));
         return;
       }
       if (ApiService.getErrorCode(e) == 'OUTSIDE_GEOFENCE') {
@@ -247,6 +335,7 @@ class DeliveryBloc extends Bloc<DeliveryEvent, DeliveryState> {
         final limit = toInt(data['geofenceMeters'], state.geofenceMeters.round());
         emit(state.copyWith(
           busy: false,
+          awaitingCode: false,
           message: _msg('You are $away m away — move within $limit m of the customer to confirm delivery.',
               isError: true),
         ));

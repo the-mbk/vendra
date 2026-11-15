@@ -25,6 +25,7 @@ import '../../auth/bloc/auth_state.dart';
 
 import 'store_screen.dart';
 import 'customer_orders_panel.dart';
+import '../widgets/trust_badges.dart';
 import '../widgets/wallet_actions.dart';
 import '../../../core/services/customer_location_storage.dart';
 
@@ -673,12 +674,22 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Product name
-                    Text(
-                      product.name,
-                      style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    // Product name + rating
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            product.name,
+                            style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (product.ratingCount > 0) ...[
+                          const SizedBox(width: 6),
+                          RatingBadge(average: product.averageRating, count: product.ratingCount, fontSize: 11),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 4),
                     // Store name
@@ -720,12 +731,14 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                             style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.primary),
                           ),
                         ),
+                        // Live stock, synced with the store shelf (FR01)
+                        const LiveDot(size: 6),
                         Text(
-                          '${product.publicStock} left',
+                          stockLabel(product),
                           style: GoogleFonts.poppins(
                             fontSize: 11,
                             fontWeight: FontWeight.w500,
-                            color: product.isLowStock ? AppColors.stockRed : AppColors.textSecondary,
+                            color: product.publicStock <= 10 ? AppColors.stockRed : AppColors.textSecondary,
                           ),
                         ),
                       ],

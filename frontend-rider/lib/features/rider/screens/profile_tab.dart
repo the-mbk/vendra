@@ -1,6 +1,7 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Rider App - Profile tab
-// Account details, wallet (withdraw), location settings, change password, logout.
+// Account details, rider documents + approval status (edit → review
+// again), wallet (withdraw), location settings, change password, logout.
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -13,10 +14,13 @@ import '../../auth/bloc/auth_event.dart';
 import '../../auth/bloc/auth_state.dart';
 import '../bloc/earnings_bloc.dart';
 import '../bloc/rider_home_bloc.dart';
+import '../models/rider_documents_rules.dart';
 import '../models/rider_models.dart';
 import '../services/rider_location_service.dart';
 import '../widgets/location_settings_sheet.dart';
+import '../widgets/rider_documents_fields.dart';
 import '../widgets/withdraw_action.dart';
+import 'rider_documents_screen.dart';
 
 class ProfileTab extends StatelessWidget {
   const ProfileTab({super.key});
@@ -48,7 +52,7 @@ class ProfileTab extends StatelessWidget {
                     radius: 34,
                     backgroundColor: AppColors.secondary,
                     child: Icon(
-                      _vehicleIcon(home.vehicleType ?? user?.vehicleType),
+                      RiderDocumentsFields.vehicleIcon(home.vehicleType ?? user?.vehicleType),
                       color: Colors.white,
                       size: 32,
                     ),
@@ -58,13 +62,15 @@ class ProfileTab extends StatelessWidget {
                       textAlign: TextAlign.center,
                       style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                   const SizedBox(height: 6),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 8,
+                    runSpacing: 6,
                     children: [
                       _pill(vehicleLabel(home.vehicleType ?? user?.vehicleType), AppColors.secondary),
-                      const SizedBox(width: 8),
                       _pill(home.isOnline ? 'Online' : 'Offline',
                           home.isOnline ? AppColors.success : AppColors.textSecondary),
+                      if (!home.loading) _pill(_approvalLabel(home.approvalStatus), _approvalColor(home.approvalStatus)),
                     ],
                   ),
                 ],
@@ -93,6 +99,8 @@ class ProfileTab extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(height: 8),
+          _DocumentsCard(home: home),
           const SizedBox(height: 8),
           Card(
             child: ListenableBuilder(
@@ -154,16 +162,17 @@ class ProfileTab extends StatelessWidget {
     );
   }
 
-  static IconData _vehicleIcon(String? type) {
-    switch (type) {
-      case 'bicycle':
-        return Icons.pedal_bike;
-      case 'car':
-        return Icons.directions_car;
-      default:
-        return Icons.two_wheeler;
-    }
-  }
+  static String _approvalLabel(String status) => switch (status) {
+        'approved' => 'Approved',
+        'rejected' => 'Not approved',
+        _ => 'Under review',
+      };
+
+  static Color _approvalColor(String status) => switch (status) {
+        'approved' => AppColors.success,
+        'rejected' => AppColors.error,
+        _ => AppColors.reservedAmber,
+      };
 
   Widget _tile(IconData icon, String label, String value, {Color? iconColor}) {
     return ListTile(
@@ -178,6 +187,81 @@ class ProfileTab extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
       child: Text(text, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
+    );
+  }
+}
+
+/// CNIC, licence and registration with the review status and an Edit action
+class _DocumentsCard extends StatelessWidget {
+  final RiderHomeState home;
+  const _DocumentsCard({required this.home});
+
+  @override
+  Widget build(BuildContext context) {
+    final docs = home.documents;
+    final motorised = vehicleNeedsLicence(home.vehicleType);
+    final status = home.approvalStatus;
+    final color = ProfileTab._approvalColor(status);
+    return Card(
+      child: Column(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.badge_outlined, color: AppColors.secondary),
+            title: Text('Rider documents', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+            subtitle: Text(
+              switch (status) {
+                'approved' => 'Approved by an admin',
+                'rejected' => 'Not approved — update and resubmit',
+                _ => 'Waiting for an admin to review',
+              },
+              style: GoogleFonts.poppins(fontSize: 12, color: color),
+            ),
+            trailing: TextButton.icon(
+              onPressed: home.loading || home.savingDocuments ? null : () => openRiderDocuments(context),
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              label: Text(status == 'rejected' ? 'Update' : 'Edit'),
+            ),
+          ),
+          if (status == 'rejected' && (home.rejectionReason ?? '').trim().isNotEmpty)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.error.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text('Reason: ${home.rejectionReason!.trim()}',
+                  style: GoogleFonts.poppins(fontSize: 12, color: AppColors.error)),
+            ),
+          const Divider(height: 1),
+          _row('CNIC', docs.cnic != null ? formatCnic(docs.cnic!) : '—'),
+          if (motorised) ...[
+            _row('Driving licence', docs.licenseNumber ?? '—'),
+            _row('Vehicle registration', docs.vehicleNumber ?? '—'),
+          ] else
+            _row('Licence / registration', 'Not needed (bicycle)'),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: Text(label, style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary))),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(value,
+                textAlign: TextAlign.right,
+                style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+          ),
+        ],
+      ),
     );
   }
 }

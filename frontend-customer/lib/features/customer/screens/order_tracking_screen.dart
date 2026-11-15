@@ -6,8 +6,11 @@
 //   top switch which one is tracked
 // - Status timeline incl. ready_for_pickup (finding / assigned rider),
 //   picked and on_the_way
+// - Stock reservation countdown while the store confirms (FR02)
+// - Delivery handover code (anti GPS-spoofing), with the lock warning
 // - Rider details, escrow state, dispute status / "Report an issue"
 // - Self-pickup confirmations
+// - "Rate your order" / the stars given, once delivered (SRDS §2.3)
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -21,7 +24,10 @@ import 'package:vendra_customer/vendra_core.dart';
 import '../../../config/app_routes.dart';
 import '../bloc/order_bloc.dart';
 import '../bloc/order_tracking_bloc.dart';
+import '../widgets/handover_code_card.dart';
+import '../widgets/order_review.dart';
 import '../widgets/order_status_widgets.dart';
+import '../widgets/reservation_countdown.dart';
 import 'report_issue_screen.dart';
 
 class OrderTrackingScreen extends StatelessWidget {
@@ -207,6 +213,18 @@ class _OrderTrackingView extends StatelessWidget {
                   _ActiveOrderSwitcher(currentId: order.id),
                   _header(order),
                   const SizedBox(height: 16),
+                  if (reservationDeadline(order) != null) ...[
+                    ReservationCountdown(
+                      order: order,
+                      // Released (and refunded) or accepted meanwhile: reload to show it
+                      onExpired: () => context.read<OrderTrackingBloc>().add(const LoadOrderTracking(silent: true)),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  if (showsHandoverCode(order)) ...[
+                    HandoverCodeCard(order: order),
+                    const SizedBox(height: 16),
+                  ],
                   if (_hasMap(order)) ...[
                     _TrackingMap(
                       store: _latLng(order.vendorLat, order.vendorLng),
@@ -226,6 +244,16 @@ class _OrderTrackingView extends StatelessWidget {
                   const SizedBox(height: 16),
                   _timeline(order),
                   const SizedBox(height: 16),
+                  if (order.status == 'delivered' && (order.canReview || order.reviewedAt != null)) ...[
+                    OrderReviewSection(
+                      order: order,
+                      onReviewed: () {
+                        context.read<OrderTrackingBloc>().add(const LoadOrderTracking(silent: true));
+                        context.read<OrderBloc>().add(RefreshCustomerOrder(order.id));
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   _customerActions(context, order),
                   OrderDisputeSection(
                     order: order,

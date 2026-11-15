@@ -1,6 +1,7 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra App - Product Model
-// Supports dual inventory fields + vendor location + category/approval
+// Supports dual inventory fields + vendor location + category/approval,
+// ratings and the photo gallery
 // ══════════════════════════════════════════════════════════════
 
 import 'json_utils.dart';
@@ -26,6 +27,11 @@ class ProductModel {
   final bool isActive;
   final bool isApproved;
   final String? createdAt;
+  /// 1-decimal average of customer reviews; null until the first review
+  final double? averageRating;
+  final int ratingCount;
+  /// Extra photos after the cover ([imageUrl]). Vendor rows carry ids (to delete them)
+  final List<GalleryPhoto> gallery;
 
   ProductModel({
     required this.id,
@@ -48,6 +54,9 @@ class ProductModel {
     this.isActive = true,
     this.isApproved = true,
     this.createdAt,
+    this.averageRating,
+    this.ratingCount = 0,
+    this.gallery = const [],
   });
 
   factory ProductModel.fromJson(Map<String, dynamic> json) {
@@ -72,6 +81,9 @@ class ProductModel {
       isActive: pick(json, 'isActive', 'is_active') ?? true,
       isApproved: pick(json, 'isApproved', 'is_approved') ?? true,
       createdAt: pick(json, 'createdAt', 'created_at'),
+      averageRating: toDoubleOrNull(pick(json, 'averageRating', 'average_rating')),
+      ratingCount: toInt(pick(json, 'ratingCount', 'rating_count')),
+      gallery: GalleryPhoto.listFrom(json),
     );
   }
 
@@ -108,8 +120,17 @@ class ProductModel {
       isActive: isActive,
       isApproved: isApproved,
       createdAt: createdAt,
+      averageRating: averageRating,
+      ratingCount: ratingCount,
+      gallery: gallery,
     );
   }
+
+  /// Every photo, cover first (what the product page swipes through)
+  List<String> get allImages => [
+        if (imageUrl != null && imageUrl!.isNotEmpty) imageUrl!,
+        ...gallery.map((g) => g.url).where((u) => u != imageUrl),
+      ];
 
   /// Units a walk-in cashier may sell: the buffer is theirs, reserved units are not
   int get sellableInStore => (privateStock - reservedQuantity).clamp(0, privateStock);
@@ -122,4 +143,30 @@ class ProductModel {
 
   /// Whether product is out of stock (public)
   bool get isOutOfStock => publicStock <= 0;
+}
+
+/// A gallery photo: vendor rows have `{ id, url }`; the public product page sends
+/// `images: [url…]` (cover first), in which case the cover is skipped here.
+class GalleryPhoto {
+  final int? id;
+  final String url;
+
+  const GalleryPhoto({this.id, required this.url});
+
+  static List<GalleryPhoto> listFrom(Map<String, dynamic> json) {
+    final gallery = json['gallery'];
+    if (gallery is List) {
+      return gallery
+          .whereType<Map>()
+          .map((g) => GalleryPhoto(id: toIntOrNull(g['id']), url: g['url']?.toString() ?? ''))
+          .where((g) => g.url.isNotEmpty)
+          .toList();
+    }
+    final images = json['images'];
+    if (images is List) {
+      final cover = pick(json, 'imageUrl', 'image_url');
+      return images.map((u) => u.toString()).where((u) => u != cover).map((u) => GalleryPhoto(url: u)).toList();
+    }
+    return const [];
+  }
 }
