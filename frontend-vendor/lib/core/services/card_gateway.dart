@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════
-// Vendra App - Card gateway client (Vendra Pay)
+// Vendra App - Card gateway client (Vendra Pay; Stripe is in stripe_payments.dart)
 // The app talks to the gateway directly with the publishable key, so card
 // numbers never reach the Vendra API — only single-use tokens do:
 //   POST /v1/tokens                       tokenize a card → tok_…
@@ -28,6 +28,9 @@ class CardGatewayException implements Exception {
   const CardGatewayException(this.message, {this.code, this.statusCode});
 
   bool get isIncorrectOtp => code == 'incorrect_otp';
+
+  /// Stripe: the user closed the card check (3-D Secure) without finishing it
+  bool get isCancelled => code == 'canceled';
 
   @override
   String toString() => message;

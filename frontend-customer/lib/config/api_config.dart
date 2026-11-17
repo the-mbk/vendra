@@ -85,7 +85,10 @@ class ApiConfig {
   static const String products = '/api/products'; // paged: ?limit=&offset=
   static String product(int id) => '/api/products/$id'; // with images, rating breakdown, latest reviews
   static String productReviews(int id) => '/api/products/$id/reviews'; // paged
-  static String vendorDetails(int id) => '/api/vendors/$id';
+  static String vendorDetails(int id) => '/api/vendors/$id'; // + logoUrl, coverUrl, ratingDistribution, latestReviews
+  static String storeReviews(int vendorId) => '/api/vendors/$vendorId/reviews'; // paged, every product's reviews
+  /// The customer's latest delivered, not-yet-reviewed order with this product → { orderId: int|null }
+  static String productReviewOrder(int productId) => '/api/customer/products/$productId/review-order';
   static const String stores = '/api/stores'; // every open store for the map: ?lat=&lng= sorts nearest first
   static const String checkout = '/api/customer/checkout';
   static const String checkoutQuote = '/api/customer/checkout/quote'; // the cart's total with the distance-based delivery fee
@@ -110,7 +113,14 @@ class ApiConfig {
   // ──────────────────────────────────────
   // Withdrawals (money out, every role)
   // ──────────────────────────────────────
-  static const String withdrawals = '/api/withdrawals'; // POST { amount, token } · GET paged
+  static const String withdrawals = '/api/withdrawals'; // POST { amount, token? } · GET paged
+
+  // Payout accounts (payments.payoutsTo == 'payoneer' | 'stripe_account'): withdrawals
+  // go to the user's linked Payoneer account or Stripe Express account, set up
+  // once on the provider's page
+  static const String payoutAccount = '/api/payouts/account'; // { provider, required, account, currency, pkrPerUnit }
+  static const String payoutOnboarding = '/api/payouts/account/onboarding'; // POST → { url }
+  static const String payoutDashboard = '/api/payouts/account/dashboard'; // POST → { url }
 
   // ──────────────────────────────────────
   // Rider Endpoints

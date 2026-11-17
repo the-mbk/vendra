@@ -13,6 +13,8 @@ const {
   getProducts,
   getProduct,
   getProductReviews,
+  getStoreReviews,
+  getReviewableOrder,
   getVendorDetails,
   reviewOrder,
   checkout,
@@ -31,6 +33,7 @@ router.get('/products', getProducts);
 router.get('/products/:id', getProduct);
 router.get('/products/:id/reviews', getProductReviews);
 router.get('/vendors/:id', getVendorDetails);
+router.get('/vendors/:id/reviews', getStoreReviews);
 router.get('/stores', getStores);
 
 // Protected customer routes
@@ -43,5 +46,6 @@ router.post('/customer/orders/:id/cancel', authenticate, requireCustomer, cancel
 router.post('/customer/orders/:id/picked-up', authenticate, requireCustomer, customerMarkPickedUp);
 router.post('/customer/orders/:id/confirm-received', authenticate, requireCustomer, customerConfirmOrderDelivered);
 router.post('/customer/orders/:id/review', authenticate, requireCustomer, reviewOrder);
+router.get('/customer/products/:id/review-order', authenticate, requireCustomer, getReviewableOrder);
 
 module.exports = router;

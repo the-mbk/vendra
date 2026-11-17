@@ -110,7 +110,14 @@ class ApiConfig {
   // ──────────────────────────────────────
   // Withdrawals (money out, every role)
   // ──────────────────────────────────────
-  static const String withdrawals = '/api/withdrawals'; // POST { amount, token } · GET paged
+  static const String withdrawals = '/api/withdrawals'; // POST { amount, token? } · GET paged
+
+  // Payout accounts (payments.payoutsTo == 'payoneer' | 'stripe_account'): withdrawals
+  // go to the user's linked Payoneer account or Stripe Express account, set up
+  // once on the provider's page
+  static const String payoutAccount = '/api/payouts/account'; // { provider, required, account, currency, pkrPerUnit }
+  static const String payoutOnboarding = '/api/payouts/account/onboarding'; // POST → { url }
+  static const String payoutDashboard = '/api/payouts/account/dashboard'; // POST → { url }
 
   // ──────────────────────────────────────
   // Rider Endpoints

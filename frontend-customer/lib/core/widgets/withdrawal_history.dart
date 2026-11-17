@@ -1,9 +1,11 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra App - Withdrawal history (GET /api/withdrawals, paged)
 // A non-scrolling list to embed in a wallet/earnings screen, with status
-// chips (In transit / Paid / Returned). Reloads itself when a withdrawal
-// notification arrives, polls gently while a payout is still in transit,
-// and when [refreshKey] changes (e.g. right after a new withdrawal).
+// chips (In transit / Paid / Returned) and, for withdrawals to a payout
+// account (Payoneer / Stripe), what the account received ("received as $17.86").
+// Reloads itself when a withdrawal notification arrives, polls gently while
+// a payout is still in transit, and when [refreshKey] changes (e.g. right
+// after a new withdrawal).
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -212,15 +214,22 @@ class _WithdrawalHistoryListState extends State<WithdrawalHistoryList> {
   }
 
   Widget _tile(WithdrawalModel w) {
+    final converted = w.convertedLabel;
     final subtitle = [
-      if (w.createdAt != null) DateFormat('d MMM yyyy, h:mm a').format(w.createdAt!),
-      if (w.isFailed) '${w.failureMessage ?? 'The card refused the payout.'} The money is back in your wallet.',
-      if (w.isOnItsWay) 'Usually arrives within a minute.',
-    ].join('\n');
+      [
+        if (w.createdAt != null) DateFormat('d MMM yyyy, h:mm a').format(w.createdAt!),
+        // Payoneer payouts are in USD, Stripe transfers in the platform's currency
+        if (converted != null) '${w.isFailed ? '' : 'received as '}$converted',
+      ].join(' · '),
+      if (w.isFailed)
+        '${w.failureMessage ?? (w.toPayoutAccount ? "${w.payoutProvider.label} couldn't send it." : 'The card refused the payout.')} '
+            'The money is back in your wallet.',
+      if (w.isOnItsWay) w.toPayoneer ? 'Usually reaches Payoneer within a few minutes.' : 'Usually arrives within a minute.',
+    ].where((line) => line.isNotEmpty).join('\n');
     return ListTile(
       leading: CircleAvatar(
         backgroundColor: AppColors.secondary.withValues(alpha: 0.08),
-        child: const Icon(Icons.north_east, color: AppColors.secondary, size: 20),
+        child: Icon(_icon(w), color: AppColors.secondary, size: 20),
       ),
       title: Text('${formatRupees(w.amount)} to ${w.cardLabel}',
           style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
@@ -228,5 +237,18 @@ class _WithdrawalHistoryListState extends State<WithdrawalHistoryList> {
       isThreeLine: subtitle.contains('\n'),
       trailing: WithdrawalStatusChip(withdrawal: w),
     );
+  }
+
+  /// A wallet for Payoneer (a balance the user withdraws from), a bank for
+  /// Stripe (it pays the bank), an arrow for a card
+  static IconData _icon(WithdrawalModel w) {
+    switch (w.payoutProvider) {
+      case PayoutProvider.payoneer:
+        return Icons.account_balance_wallet_outlined;
+      case PayoutProvider.stripe:
+        return Icons.account_balance_outlined;
+      case PayoutProvider.card:
+        return Icons.north_east;
+    }
   }
 }

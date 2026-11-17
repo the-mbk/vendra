@@ -80,7 +80,23 @@ export default function WithdrawalsPage() {
                     <td className="px-4 py-3.5 text-sm font-semibold text-on-surface text-right whitespace-nowrap">
                       {formatRs(w.amount)}
                     </td>
-                    <td className="px-4 py-3.5"><CardLabel card={w.card} /></td>
+                    <td className="px-4 py-3.5">
+                      {w.provider === "stripe" || w.provider === "payoneer" ? (
+                        <div className="text-sm text-on-surface whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1">
+                            <span className={`material-symbols-outlined text-[16px] ${w.provider === "payoneer" ? "text-orange-600" : "text-indigo-600"}`}>account_balance</span>
+                            {w.provider === "payoneer" ? `Payoneer ${w.destinationAccount || ""}` : `Stripe ····${String(w.destinationAccount || "").slice(-4)}`}
+                          </span>
+                          {w.gatewayAmount != null && (
+                            <p className="text-xs text-outline tabular-nums">
+                              {w.gatewayAmount.toFixed(2)} {String(w.gatewayCurrency || "").toUpperCase()}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <CardLabel card={w.card} />
+                      )}
+                    </td>
                     <td className="px-4 py-3.5 min-w-[130px] max-w-[240px]">
                       <Pill config={withdrawalStatusConfig[w.status]} fallback={humanize(w.status)} />
                       {w.failureMessage && <p className="text-xs text-error mt-1">{w.failureMessage}</p>}

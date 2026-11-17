@@ -3,7 +3,7 @@
 #
 #   .\run-local.ps1            database + backend + admin + the three apps
 #   .\run-local.ps1 -NoApps    database + backend + admin only
-#   .\run-local.ps1 -Reset     wipe the database, stored files and payment gateway, then reload the demo data
+#   .\run-local.ps1 -Reset     wipe the database, stored files, payment gateway and Payoneer simulator, then reload the demo data
 #   .\run-local.ps1 -Production  run the backend with APP_MODE=production (no test-card hints,
 #                               manual GPS, fast timers or demo logins; demo data is not loaded)
 #

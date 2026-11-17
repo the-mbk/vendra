@@ -1,27 +1,29 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Vendor App - POS receipt as a PDF laid out for an 80 mm roll
-// (PdfPageFormat.roll80: the page is as long as the slip). Used by the
-// receipt's Print (system print dialog / thermal printer driver) and
-// Share (PDF to WhatsApp, email…) buttons. Courier keeps the thermal
-// look; text is limited to what the built-in font can draw.
+// (PdfPageFormat.roll80: the page is as long as the slip), mirroring the
+// on-screen ReceiptSlip line for line. Used by the receipt's Print
+// (system / browser print dialog, thermal printer driver) and Share (PDF
+// to WhatsApp, email… or a download on the web) buttons; receipt_output
+// decides how per platform. Courier keeps the thermal look; text is
+// limited to what the built-in font can draw.
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:typed_data';
 
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
-
 import '../models/pos_receipt.dart';
+import 'receipt_output.dart';
 
 class ReceiptPdf {
   static String _t(String s) => ReceiptFormat.pdfSafe(s);
+  static const _muted = PdfColors.grey700;
 
   static Future<Uint8List> build(PosReceipt r) {
     final regular = pw.Font.courier();
     final bold = pw.Font.courierBold();
-    pw.TextStyle style({double size = 8, bool isBold = false}) =>
-        pw.TextStyle(font: isBold ? bold : regular, fontSize: size, lineSpacing: 1);
+    pw.TextStyle style({double size = 8, bool isBold = false, PdfColor color = PdfColors.black}) =>
+        pw.TextStyle(font: isBold ? bold : regular, fontSize: size, lineSpacing: 1, color: color);
 
     pw.Widget rule() => pw.Padding(
           padding: const pw.EdgeInsets.symmetric(vertical: 4),
@@ -31,13 +33,14 @@ class ReceiptPdf {
             ),
           ),
         );
-    pw.Widget center(String text, {double size = 8, bool isBold = false}) =>
-        pw.Text(_t(text), textAlign: pw.TextAlign.center, style: style(size: size, isBold: isBold));
-    pw.Widget kv(String key, String value, {double size = 8, bool isBold = false}) => pw.Row(
+    pw.Widget center(String text, {double size = 8, bool isBold = false, PdfColor color = PdfColors.black}) =>
+        pw.Text(_t(text), textAlign: pw.TextAlign.center, style: style(size: size, isBold: isBold, color: color));
+    // Label column + right-aligned value that wraps, like the on-screen slip
+    pw.Widget kv(String key, String value) => pw.Row(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            pw.Expanded(child: pw.Text(_t(key), style: style(size: size, isBold: isBold))),
-            pw.Text(_t(value), style: style(size: size, isBold: isBold)),
+            pw.SizedBox(width: 19 * PdfPageFormat.mm, child: pw.Text(_t(key), style: style(color: _muted))),
+            pw.Expanded(child: pw.Text(_t(value), textAlign: pw.TextAlign.right, style: style())),
           ],
         );
 
@@ -58,12 +61,28 @@ class ReceiptPdf {
           rule(),
           for (final line in r.items) ...[
             pw.Text(_t(line.name), style: style(isBold: true)),
-            kv('  ${ReceiptFormat.qtyLine(line)}', ReceiptFormat.money(line.total)),
-            pw.SizedBox(height: 2),
+            pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Expanded(
+                  child: pw.Padding(
+                    padding: const pw.EdgeInsets.only(left: 3 * PdfPageFormat.mm),
+                    child: pw.Text(_t(ReceiptFormat.qtyLine(line)), style: style(size: 7.5, color: _muted)),
+                  ),
+                ),
+                pw.Text(_t(ReceiptFormat.money(line.total)), style: style()),
+              ],
+            ),
+            pw.SizedBox(height: 3),
           ],
           rule(),
-          kv('TOTAL', ReceiptFormat.money(r.total), size: 10, isBold: true),
-          pw.Text(_t(ReceiptFormat.itemCount(r)), style: style(size: 7)),
+          pw.Row(
+            children: [
+              pw.Expanded(child: pw.Text('TOTAL', style: style(size: 10.5, isBold: true))),
+              pw.Text(_t(ReceiptFormat.money(r.total)), style: style(size: 11, isBold: true)),
+            ],
+          ),
+          pw.Text(_t(ReceiptFormat.itemCount(r)), style: style(size: 7.5, color: _muted)),
           if (r.paymentQr != null) ...[
             rule(),
             center('SCAN TO PAY', isBold: true),
@@ -83,22 +102,23 @@ class ReceiptPdf {
           rule(),
           center(r.footer ?? 'Thank you for shopping with us!'),
           pw.SizedBox(height: 2),
-          center('Powered by Vendra', size: 6),
+          center('Powered by Vendra', size: 6, color: PdfColors.grey600),
         ],
       ),
     ));
     return doc.save();
   }
 
-  /// System print dialog with the 80 mm roll pre-selected
-  static Future<void> printReceipt(PosReceipt r) async {
+  /// Print dialog with the 80 mm roll pre-selected (browser dialog on the web;
+  /// the share sheet on a phone without a print service)
+  static Future<ReceiptOutcome> printReceipt(PosReceipt r) async {
     final bytes = await build(r);
-    await Printing.layoutPdf(onLayout: (_) async => bytes, name: r.receiptNumber, format: PdfPageFormat.roll80);
+    return ReceiptOutput.instance.print(bytes, name: r.receiptNumber, format: PdfPageFormat.roll80);
   }
 
-  /// Share sheet (mobile) / download (web) with the PDF
-  static Future<void> shareReceipt(PosReceipt r) async {
+  /// Share sheet (mobile) / download of <receiptNumber>.pdf (web)
+  static Future<ReceiptOutcome> shareReceipt(PosReceipt r) async {
     final bytes = await build(r);
-    await Printing.sharePdf(bytes: bytes, filename: '${r.receiptNumber}.pdf');
+    return ReceiptOutput.instance.share(bytes, filename: '${r.receiptNumber}.pdf');
   }
 }

@@ -1,7 +1,9 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra App - Amount bottom sheet
 // Asks for a rupee amount within [min, max] (quick-pick chips + custom
-// field). Used before card top-ups and withdrawals.
+// field). Used before card top-ups and withdrawals. [note] adds a live line
+// under the field for the amount typed so far (e.g. the converted amount of a
+// Stripe withdrawal); [footer] goes under the button.
 //
 //   final amount = await showAmountSheet(context, title: 'Add money', min: 100, max: 500000);
 // ══════════════════════════════════════════════════════════════
@@ -39,6 +41,8 @@ Future<double?> showAmountSheet(
   List<double> quickAmounts = const [],
   String actionLabel = 'Continue',
   double? initial,
+  String? Function(double amount)? note,
+  Widget? footer,
 }) {
   return showModalBottomSheet<double>(
     context: context,
@@ -54,6 +58,8 @@ Future<double?> showAmountSheet(
       quickAmounts: quickAmounts.where((a) => a >= min && a <= max).toList(),
       actionLabel: actionLabel,
       initial: initial,
+      note: note,
+      footer: footer,
     ),
   );
 }
@@ -66,6 +72,8 @@ class _AmountSheet extends StatefulWidget {
   final List<double> quickAmounts;
   final String actionLabel;
   final double? initial;
+  final String? Function(double amount)? note;
+  final Widget? footer;
 
   const _AmountSheet({
     required this.title,
@@ -75,6 +83,8 @@ class _AmountSheet extends StatefulWidget {
     required this.quickAmounts,
     required this.actionLabel,
     this.initial,
+    this.note,
+    this.footer,
   });
 
   @override
@@ -88,9 +98,25 @@ class _AmountSheetState extends State<_AmountSheet> {
   );
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.note != null) _amount.addListener(_redraw);
+  }
+
+  void _redraw() => setState(() {});
+
+  @override
   void dispose() {
+    _amount.removeListener(_redraw);
     _amount.dispose();
     super.dispose();
+  }
+
+  /// The note for a valid amount typed so far
+  String? get _noteText {
+    final note = widget.note;
+    if (note == null || validateAmount(_amount.text, min: widget.min, max: widget.max) != null) return null;
+    return note(double.parse(_amount.text.trim().replaceAll(',', '')));
   }
 
   void _submit() {
@@ -140,6 +166,20 @@ class _AmountSheetState extends State<_AmountSheet> {
                 ),
                 validator: (v) => validateAmount(v ?? '', min: widget.min, max: widget.max),
               ),
+              if (_noteText != null) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.currency_exchange, size: 16, color: AppColors.secondary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(_noteText!,
+                          style: GoogleFonts.poppins(
+                              fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.secondary)),
+                    ),
+                  ],
+                ),
+              ],
               if (widget.quickAmounts.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Wrap(
@@ -158,6 +198,10 @@ class _AmountSheetState extends State<_AmountSheet> {
               ],
               const SizedBox(height: 20),
               VendraButton(text: widget.actionLabel, icon: Icons.arrow_forward, onPressed: _submit),
+              if (widget.footer != null) ...[
+                const SizedBox(height: 8),
+                Center(child: widget.footer!),
+              ],
             ],
           ),
         ),

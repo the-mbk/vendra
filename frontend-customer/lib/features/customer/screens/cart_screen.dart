@@ -455,7 +455,8 @@ class _CartScreenState extends State<CartScreen> {
             textAlign: TextAlign.center, style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 17)),
         content: Text(
           '${state.reason}\n\nThe ${formatRupees(state.amount)} charged to ${state.cardLabel} is safe in your '
-          'Vendra wallet. Update your cart and pay from the wallet, or withdraw it back to a card.',
+          'Vendra wallet. Update your cart and pay from the wallet, or withdraw it to '
+          '${AppConfig.current.payments.payoutDestination}.',
           textAlign: TextAlign.center,
           style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary),
         ),

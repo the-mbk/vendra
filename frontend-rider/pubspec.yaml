@@ -23,6 +23,14 @@ dependencies:
   socket_io_client: ^3.1.6
   url_launcher: ^6.3.1
   geolocator: ^14.0.2
+  # Stripe card field + 3-D Secure (payments.provider == 'stripe'). The whole 14.0.0 release is
+  # pinned: flutter_stripe_web 8.2.0 only compiles against stripe_platform_interface 14.0.x
+  # (14.1+ added an enum value it doesn't handle; the next web release, 9.0.0, needs intl 0.20).
+  flutter_stripe: 14.0.0
+  flutter_stripe_web: 8.2.0
+  stripe_platform_interface: 14.0.0
+  stripe_android: 14.0.0
+  stripe_ios: 14.0.0
 
 dev_dependencies:
   flutter_test:

@@ -1,11 +1,14 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra App - Store Screen
-// Shows vendor shop details with REAL MAP, and all products
-// Customer lands here when clicking a product on the homepage.
+// The store's cover photo and logo (initials / gradient when it has none),
+// its details, products, reviews and location on a real map.
 // Product stock is live (stock:update); sold-out items drop off and
 // catalog:update reloads the store's products (FR01/PR01).
-// Shows the store's rating (averageRating / ratingCount) and each
-// product's RatingBadge (SRDS §2.3).
+// Shows the store's rating (averageRating / ratingCount), each product's
+// RatingBadge and a "Store reviews" section: the 5 → 1 breakdown, the
+// latest reviews (with the product each is about) and "See all reviews"
+// (SRDS §2.3). Products open their page with openedFromStore, so its
+// "Visit store" comes back here instead of stacking another store page.
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -15,13 +18,16 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:vendra_customer/vendra_core.dart';
-import '../../../config/app_routes.dart';
 import '../../../core/services/customer_location_storage.dart';
 import '../bloc/cart_bloc.dart';
+import '../bloc/product_detail_bloc.dart' show ratingDistributionFrom;
+import '../services/catalog_api.dart';
 import '../widgets/rating_summary.dart';
+import '../widgets/store_widgets.dart';
 import '../widgets/trust_badges.dart';
 import 'cart_screen.dart';
-import 'dart:math';
+import 'product_detail_screen.dart';
+import 'store_reviews_screen.dart';
 
 class StoreScreen extends StatefulWidget {
   final int vendorId;
@@ -46,6 +52,8 @@ class _StoreScreenState extends State<StoreScreen> {
   List<ProductModel> _products = [];
   double _customerLat = CustomerLocationStorage.defaultLat;
   double _customerLng = CustomerLocationStorage.defaultLng;
+
+  List<ReviewModel> _latestReviews = const [];
 
   StreamSubscription<StockUpdateEvent>? _stockSub;
   StreamSubscription<void>? _catalogSub;
@@ -98,18 +106,18 @@ class _StoreScreenState extends State<StoreScreen> {
   Future<void> _loadVendorDetails({bool silent = false}) async {
     if (!silent) setState(() { _loading = true; _error = null; });
     try {
-      final response = await ApiService().get(ApiConfig.vendorDetails(widget.vendorId));
-      if (response.data['success'] == true) {
-        final data = response.data['data'];
-        _vendorData = data;
-        _products = (data['products'] as List)
-            .map((json) => ProductModel.fromJson(Map<String, dynamic>.from(json)))
-            .where((p) => p.publicStock > 0)
-            .toList();
-        _soldOut.clear();
-      } else if (!silent) {
-        _error = response.data['message'] ?? 'Failed to load store';
-      }
+      final data = await CatalogApi.instance.store(widget.vendorId);
+      _vendorData = data;
+      _products = (data['products'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map((json) => ProductModel.fromJson(Map<String, dynamic>.from(json)))
+          .where((p) => p.publicStock > 0)
+          .toList();
+      _latestReviews = (data['latestReviews'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map((r) => ReviewModel.fromJson(Map<String, dynamic>.from(r)))
+          .toList();
+      _soldOut.clear();
     } catch (e) {
       if (!silent) _error = ApiService.getErrorMessage(e);
     }
@@ -164,22 +172,94 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   double? _calculateDistance() {
-    if (_vendorData == null) return null;
-    final lat = _vendorData!['latitude'];
-    final lng = _vendorData!['longitude'];
+    final lat = toDoubleOrNull(_vendorData?['latitude']);
+    final lng = toDoubleOrNull(_vendorData?['longitude']);
     if (lat == null || lng == null) return null;
-    return _haversine(_customerLat, _customerLng, (lat as num).toDouble(), (lng as num).toDouble());
+    return haversineKm(_customerLat, _customerLng, lat, lng);
   }
 
-  double _haversine(double lat1, double lon1, double lat2, double lon2) {
-    const r = 6371.0;
-    final dLat = (lat2 - lat1) * pi / 180;
-    final dLon = (lon2 - lon1) * pi / 180;
-    final a = sin(dLat / 2) * sin(dLat / 2) +
-        cos(lat1 * pi / 180) * cos(lat2 * pi / 180) *
-        sin(dLon / 2) * sin(dLon / 2);
-    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
-    return r * c;
+  String get _storeName => _vendorData?['storeName']?.toString() ?? widget.storeName;
+  String? get _logoUrl => _vendorData?['logoUrl']?.toString();
+
+  /// A product's own page; its "Visit store" comes back here
+  void _openProduct(ProductModel product) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product, openedFromStore: true)),
+    );
+  }
+
+  void _openAllReviews() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => StoreReviewsScreen(
+          vendorId: widget.vendorId,
+          storeName: _storeName,
+          logoUrl: _logoUrl,
+          averageRating: toDoubleOrNull(_vendorData?['averageRating']),
+          ratingCount: toInt(_vendorData?['ratingCount']),
+          distribution: ratingDistributionFrom(_vendorData?['ratingDistribution']),
+        ),
+      ),
+    );
+  }
+
+  /// "Store reviews": breakdown, the latest few (with their product) and a link to all of them
+  Widget _reviewsSection() {
+    final average = toDoubleOrNull(_vendorData?['averageRating']);
+    final count = toInt(_vendorData?['ratingCount']);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Store reviews', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          RatingSummary(
+            average: average,
+            count: count,
+            distribution: ratingDistributionFrom(_vendorData?['ratingDistribution']),
+            emptyText: "No reviews yet. Customers can rate what they buy here once it's delivered.",
+          ),
+          if (_latestReviews.isNotEmpty) ...[
+            const Divider(height: 24),
+            for (var i = 0; i < _latestReviews.length; i++) ...[
+              if (i > 0) const Divider(height: 1),
+              ReviewTile(
+                review: _latestReviews[i],
+                showProduct: true,
+                onProductTap: _productTapFor(_latestReviews[i]),
+              ),
+            ],
+          ],
+          if (count > 0)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: _openAllReviews,
+                child: Text('See all reviews ($count) ›'),
+              ),
+            )
+          else
+            const SizedBox(height: 10),
+        ],
+      ),
+    );
+  }
+
+  /// Opens the reviewed product when it's still on sale here
+  VoidCallback? _productTapFor(ReviewModel review) {
+    final matches = _products.where((p) => p.id == review.productId);
+    if (matches.isEmpty) return null;
+    return () => _openProduct(matches.first);
   }
 
   @override
@@ -236,7 +316,7 @@ class _StoreScreenState extends State<StoreScreen> {
                         centerTitle: true,
                         titlePadding: const EdgeInsets.fromLTRB(56, 0, 56, 14),
                         title: Text(
-                          _vendorData?['storeName'] ?? widget.storeName,
+                          _storeName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           textAlign: TextAlign.center,
@@ -244,35 +324,19 @@ class _StoreScreenState extends State<StoreScreen> {
                             fontWeight: FontWeight.w600,
                             fontSize: 16,
                             color: Colors.white,
-                            shadows: const [Shadow(color: Colors.black26, blurRadius: 4)],
+                            shadows: const [Shadow(color: Colors.black45, blurRadius: 6)],
                           ),
                         ),
-                        background: Container(
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [Color(0xFF0D2137), Color(0xFF1565C0)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
+                        // The store's cover photo (brand gradient without one) and its logo
+                        background: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            StoreCover(coverUrl: _vendorData?['coverUrl']?.toString(), shade: true),
+                            Align(
+                              alignment: Alignment.center,
+                              child: StoreLogo(storeName: _storeName, logoUrl: _logoUrl, size: 72, ring: true),
                             ),
-                          ),
-                          child: Stack(
-                            children: [
-                              Positioned(right: -30, top: -30, child: Container(width: 160, height: 160, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.05)))),
-                              Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    const SizedBox(height: 8),
-                                    Container(
-                                      width: 72, height: 72,
-                                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), shape: BoxShape.circle, border: Border.all(color: Colors.white24, width: 2)),
-                                      child: const Icon(Icons.storefront, size: 36, color: Colors.white),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
+                          ],
                         ),
                       ),
                     ),
@@ -285,7 +349,11 @@ class _StoreScreenState extends State<StoreScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _storeRating(),
+                            InkWell(
+                              onTap: toInt(_vendorData?['ratingCount']) > 0 ? _openAllReviews : null,
+                              borderRadius: BorderRadius.circular(8),
+                              child: _storeRating(),
+                            ),
                             const SizedBox(height: 10),
                             if (_vendorData?['ownerName'] != null)
                               Row(
@@ -318,7 +386,7 @@ class _StoreScreenState extends State<StoreScreen> {
                                   const Icon(Icons.directions_walk, size: 16, color: AppColors.primary),
                                   const SizedBox(width: 6),
                                   Text(
-                                    dist < 1 ? '${(dist * 1000).toStringAsFixed(0)} m away' : '${dist.toStringAsFixed(1)} km away',
+                                    '${distanceLabel(dist)} away',
                                     style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary),
                                   ),
                                   const SizedBox(width: 12),
@@ -336,69 +404,16 @@ class _StoreScreenState extends State<StoreScreen> {
                                 children: [
                                   const Icon(Icons.verified_user, size: 16, color: Color(0xFF2E7D32)),
                                   const SizedBox(width: 6),
-                                  Text('Vendra Verified • Escrow Protected', style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: const Color(0xFF2E7D32))),
+                                  Flexible(
+                                    child: Text('Vendra Verified • Escrow Protected',
+                                        style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: const Color(0xFF2E7D32))),
+                                  ),
                                 ],
                               ),
                             ),
                           ],
                         ),
                       ),
-                    ),
-
-                    // ── MAP showing vendor location ──
-                    SliverToBoxAdapter(
-                      child: Builder(builder: (context) {
-                        final lat = _vendorData?['latitude'];
-                        final lng = _vendorData?['longitude'];
-                        if (lat == null || lng == null) {
-                          return Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Container(
-                              height: 150,
-                              decoration: BoxDecoration(
-                                color: Colors.grey.shade100,
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.map_outlined, size: 40, color: Colors.grey.shade400),
-                                    const SizedBox(height: 8),
-                                    Text('Location not set by vendor', style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        }
-
-                        final vendorLatLng = LatLng((lat as num).toDouble(), (lng as num).toDouble());
-                        return Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Store Location', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600)),
-                              const SizedBox(height: 8),
-                              MapPickerWidget(
-                                initialCenter: vendorLatLng,
-                                initialZoom: 15.0,
-                                interactive: false,
-                                height: 200,
-                                markers: [
-                                  MapMarkerData(
-                                    position: vendorLatLng,
-                                    label: _vendorData?['storeName'] ?? 'Store',
-                                    icon: Icons.storefront,
-                                    color: AppColors.primary,
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        );
-                      }),
                     ),
 
                     // Products section title
@@ -446,7 +461,7 @@ class _StoreScreenState extends State<StoreScreen> {
                                   final product = _products[index];
                                   return ProductCard(
                                     product: product,
-                                    onTap: () => Navigator.pushNamed(context, AppRoutes.productDetail, arguments: product),
+                                    onTap: () => _openProduct(product),
                                     onAddToCart: () {
                                       final inCart = context.read<CartBloc>().state.quantityOf(product.id);
                                       final full = inCart >= product.publicStock;
@@ -468,6 +483,65 @@ class _StoreScreenState extends State<StoreScreen> {
                               ),
                             ),
                           ),
+
+                    // Reviews of the store's products
+                    SliverToBoxAdapter(child: _reviewsSection()),
+
+                    // ── MAP showing vendor location ──
+                    SliverToBoxAdapter(
+                      child: Builder(builder: (context) {
+                        final lat = _vendorData?['latitude'];
+                        final lng = _vendorData?['longitude'];
+                        if (lat == null || lng == null) {
+                          return Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Container(
+                              height: 150,
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.map_outlined, size: 40, color: Colors.grey.shade400),
+                                    const SizedBox(height: 8),
+                                    Text('Location not set by vendor', style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        }
+
+                        final vendorLatLng = LatLng((lat as num).toDouble(), (lng as num).toDouble());
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Store Location', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 8),
+                              MapPickerWidget(
+                                initialCenter: vendorLatLng,
+                                initialZoom: 15.0,
+                                interactive: false,
+                                height: 200,
+                                markers: [
+                                  MapMarkerData(
+                                    position: vendorLatLng,
+                                    label: _vendorData?['storeName'] ?? 'Store',
+                                    icon: Icons.storefront,
+                                    color: AppColors.primary,
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ),
 
                     const SliverToBoxAdapter(child: SizedBox(height: 24)),
                   ],
@@ -534,7 +608,10 @@ class _ProductQuickSheet extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: () {
                       Navigator.pop(context);
-                      Navigator.pushNamed(context, AppRoutes.productDetail, arguments: product);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product, openedFromStore: true)),
+                      );
                     },
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),

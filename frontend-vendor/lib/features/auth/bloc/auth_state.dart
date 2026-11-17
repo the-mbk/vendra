@@ -23,7 +23,17 @@ class Authenticated extends AuthState {
   final String token;
   const Authenticated({required this.user, required this.token});
   @override
-  List<Object?> get props => [user.id, user.walletBalance, user.platformEscrowBalance, user.mustChangePassword, token];
+  List<Object?> get props => [
+        user.id,
+        user.walletBalance,
+        user.platformEscrowBalance,
+        user.mustChangePassword,
+        // A new logo / cover photo must rebuild every screen that shows it
+        user.storeName,
+        user.storeLogoUrl,
+        user.storeCoverUrl,
+        token,
+      ];
 }
 
 /// User is not authenticated

@@ -206,15 +206,18 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                 ),
                 child: Row(
                   children: [
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
+                    if (user?.storeName != null)
+                      StoreLogo(storeName: user!.storeName!, logoUrl: user.storeLogoUrl, size: 48, square: true, ring: true)
+                    else
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.storefront, color: Colors.white, size: 26),
                       ),
-                      child: const Icon(Icons.storefront, color: Colors.white, size: 26),
-                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -397,23 +400,35 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
           title: BlocBuilder<AuthBloc, auth_state.AuthState>(
             builder: (context, state) {
               String storeName = 'My Store';
+              String? logoUrl;
               String greeting = _greeting();
               if (state is auth_state.Authenticated) {
                 storeName = state.user.storeName ?? 'My Store';
+                logoUrl = state.user.storeLogoUrl;
                 final staff = state.user.staff;
                 if (staff != null) greeting = '$greeting, ${staff.fullName.split(' ').first}';
               }
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              return Row(
                 children: [
-                  Text(greeting,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary, fontWeight: FontWeight.w400)),
-                  Text(storeName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.secondary)),
+                  StoreLogo(storeName: storeName, logoUrl: logoUrl, size: 36),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(greeting,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.poppins(
+                                fontSize: 12, color: AppColors.textSecondary, fontWeight: FontWeight.w400)),
+                        Text(storeName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.poppins(
+                                fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.secondary)),
+                      ],
+                    ),
+                  ),
                 ],
               );
             },

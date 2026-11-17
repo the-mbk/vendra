@@ -14,6 +14,7 @@ const { submitOrderReview, formatReview } = require('../services/review.service'
 const { haversineKm, isValidCoordinate } = require('../utils/geo');
 const { paisaToNumber } = require('../utils/money');
 const { publicGatewayConfig } = require('../services/gateway.client');
+const payoutAccounts = require('../services/payoutAccounts.service');
 const { TOPUP_MIN_RS, TOPUP_MAX_RS } = require('../services/payments.service');
 const { APP_MODE, FEATURES } = require('../config/mode');
 const { DEMO_ACCOUNTS } = require('../config/demoAccounts');
@@ -26,6 +27,7 @@ function formatProduct(p) {
     vendorId: p.vendor_id,
     storeName: p.store_name,
     storeAddress: p.store_address,
+    storeLogoUrl: p.store_logo_url || null,
     vendorLat: num(p.vendor_lat),
     vendorLng: num(p.vendor_lng),
     categoryId: p.category_id,
@@ -51,9 +53,20 @@ async function storeRating(db, vendorId) {
   return { averageRating: r.rows[0].average, ratingCount: r.rows[0].count };
 }
 
+/** How many of a store's (or product's) reviews gave each number of stars */
+function starDistribution(rows) {
+  const distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+  for (const row of rows) distribution[row.rating] = row.n;
+  return distribution;
+}
+
+const REVIEW_SELECT = `
+  SELECT pr.*, u.full_name AS customer_name, p.name AS product_name
+  FROM product_reviews pr JOIN users u ON u.id = pr.customer_id JOIN products p ON p.id = pr.product_id`;
+
 const PRODUCT_SELECT = `
   SELECT p.*, v.store_name, v.store_address, v.latitude AS vendor_lat, v.longitude AS vendor_lng,
-         c.name AS category_name
+         v.logo_url AS store_logo_url, c.name AS category_name
   FROM products p
   JOIN vendors v ON p.vendor_id = v.id
   LEFT JOIN categories c ON c.id = p.category_id
@@ -81,7 +94,9 @@ const getPublicConfig = asyncHandler(async (req, res) => {
       vendorAcceptTimeoutMinutes: p.vendor_accept_timeout_min,
       riderAssignTimeoutMinutes: p.rider_assign_timeout_min,
       payments: {
-        ...publicGatewayConfig(),
+        ...publicGatewayConfig(), // provider: vendrapay | stripe, publishableKey, gatewayUrl (Vendra Pay only)
+        // Where withdrawals go: card (Vendra Pay), payoneer, or stripe_account (Stripe Connect)
+        payoutsTo: { card: 'card', payoneer: 'payoneer', stripe_connect: 'stripe_account' }[payoutAccounts.mode()],
         minTopup: TOPUP_MIN_RS,
         maxTopup: TOPUP_MAX_RS,
         minWithdrawal: p.min_withdrawal,
@@ -146,9 +161,11 @@ const getVendorDetails = asyncHandler(async (req, res) => {
   if (vendorResult.rows.length === 0) throw httpError(404, 'Vendor not found');
 
   const vendor = vendorResult.rows[0];
-  const [productsResult, rating] = await Promise.all([
+  const [productsResult, rating, stars, latest] = await Promise.all([
     pool.query(`${PRODUCT_SELECT} AND p.vendor_id = $1 ORDER BY p.created_at DESC`, [vendorId]),
     storeRating(pool, vendorId),
+    pool.query('SELECT rating, COUNT(*)::int AS n FROM product_reviews WHERE vendor_id = $1 GROUP BY rating', [vendorId]),
+    pool.query(`${REVIEW_SELECT} WHERE pr.vendor_id = $1 ORDER BY pr.created_at DESC, pr.id DESC LIMIT 3`, [vendorId]),
   ]);
 
   res.json({
@@ -161,7 +178,11 @@ const getVendorDetails = asyncHandler(async (req, res) => {
       ownerPhone: vendor.owner_phone,
       latitude: num(vendor.latitude),
       longitude: num(vendor.longitude),
+      logoUrl: vendor.logo_url || null,
+      coverUrl: vendor.cover_url || null,
       ...rating,
+      ratingDistribution: starDistribution(stars.rows),
+      latestReviews: latest.rows.map(formatReview),
       products: productsResult.rows.map(formatProduct),
     },
   });
@@ -174,7 +195,8 @@ const getVendorDetails = asyncHandler(async (req, res) => {
 const getProduct = asyncHandler(async (req, res) => {
   const productId = intParam(req.params.id);
   const r = await pool.query(
-    `SELECT p.*, v.store_name, v.store_address, v.latitude AS vendor_lat, v.longitude AS vendor_lng, c.name AS category_name
+    `SELECT p.*, v.store_name, v.store_address, v.latitude AS vendor_lat, v.longitude AS vendor_lng,
+            v.logo_url AS store_logo_url, c.name AS category_name
      FROM products p JOIN vendors v ON v.id = p.vendor_id LEFT JOIN categories c ON c.id = p.category_id
      WHERE p.id = $1 AND p.is_active AND p.is_approved AND v.is_approved`,
     [productId]
@@ -191,8 +213,7 @@ const getProduct = asyncHandler(async (req, res) => {
   ]);
   const product = formatProduct(r.rows[0]);
   const images = [product.imageUrl, ...gallery.rows.map((g) => g.url)].filter(Boolean);
-  const distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
-  for (const row of stars.rows) distribution[row.rating] = row.n;
+  const distribution = starDistribution(stars.rows);
   res.json({
     success: true,
     data: {
@@ -215,6 +236,34 @@ const getProductReviews = asyncHandler(async (req, res) => {
   );
   const { items, meta } = pageOf(r.rows, page);
   res.json({ success: true, data: items.map(formatReview), meta });
+});
+
+/** GET /api/vendors/:id/reviews?limit=&offset= — all of a store's product reviews, newest first */
+const getStoreReviews = asyncHandler(async (req, res) => {
+  const vendorId = intParam(req.params.id);
+  const page = paging(req.query);
+  const r = await pool.query(
+    `${REVIEW_SELECT} WHERE pr.vendor_id = $1 ORDER BY pr.created_at DESC, pr.id DESC LIMIT $2 OFFSET $3`,
+    [vendorId, page.limit + 1, page.offset]
+  );
+  const { items, meta } = pageOf(r.rows, page);
+  res.json({ success: true, data: items.map(formatReview), meta });
+});
+
+/**
+ * GET /api/customer/products/:id/review-order — the customer's latest delivered order with
+ * this product that they haven't reviewed yet → { orderId } (null when there is none).
+ * The product page shows "Write a review" for it; the review itself is POST /customer/orders/:id/review.
+ */
+const getReviewableOrder = asyncHandler(async (req, res) => {
+  const productId = intParam(req.params.id);
+  const r = await pool.query(
+    `SELECT o.id FROM orders o JOIN order_items oi ON oi.order_id = o.id
+     WHERE o.customer_id = $1 AND oi.product_id = $2 AND o.status = 'delivered' AND o.reviewed_at IS NULL
+     ORDER BY o.created_at DESC LIMIT 1`,
+    [req.user.userId, productId]
+  );
+  res.json({ success: true, data: { orderId: r.rows[0]?.id ?? null } });
 });
 
 /**
@@ -246,7 +295,8 @@ const getStores = asyncHandler(async (req, res) => {
   const near = isValidCoordinate(lat, lng);
   const { max_delivery_km: maxKm } = await getPolicies();
   const r = await pool.query(
-    `SELECT v.id, v.store_name, v.store_address, v.latitude, v.longitude, COUNT(p.id)::int AS product_count
+    `SELECT v.id, v.store_name, v.store_address, v.latitude, v.longitude, v.logo_url, v.cover_url,
+            COUNT(p.id)::int AS product_count
      FROM vendors v
      JOIN products p ON p.vendor_id = v.id AND p.is_active AND p.is_approved AND p.public_stock > 0
      WHERE v.is_approved AND v.latitude IS NOT NULL AND v.longitude IS NOT NULL
@@ -261,6 +311,8 @@ const getStores = asyncHandler(async (req, res) => {
     storeAddress: v.store_address,
     latitude: Number(v.latitude),
     longitude: Number(v.longitude),
+    logoUrl: v.logo_url || null,
+    coverUrl: v.cover_url || null,
     productCount: v.product_count,
     distanceKm: near ? Number(haversineKm(lat, lng, Number(v.latitude), Number(v.longitude)).toFixed(2)) : null,
   }));
@@ -510,6 +562,8 @@ module.exports = {
   getProducts,
   getProduct,
   getProductReviews,
+  getStoreReviews,
+  getReviewableOrder,
   getVendorDetails,
   reviewOrder,
   checkout,

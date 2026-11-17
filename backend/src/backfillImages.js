@@ -9,6 +9,9 @@
 //    most words in common with the product name, same category preferred.
 // 2. Catalogue products (cover from the demo catalogue) with no gallery yet
 //    get that product's other photos as their gallery.
+// 3. Stores without a cover photo get the catalogue photo of one of their
+//    own products (their priciest). Only catalogue photos are used: they are
+//    shared and never deleted, so the cover can't vanish with a product.
 // Photos come from the same DummyJSON catalogue the seed uses (cached in
 // backend/.cache/) and go into the configured file storage. Safe to rerun:
 // products that already have photos are left alone.
@@ -48,6 +51,20 @@ function bestMatch(product, catalog) {
 const coverName = (item) => `catalog-${item.key}.webp`;
 const extraName = (item, n) => `catalog-${item.key}-${n + 2}.webp`;
 const urlOf = (name) => `/uploads/products/${name}`;
+
+/** Step 3: a cover photo for every store that has none. Returns how many got one. */
+async function fillStoreCovers(client, { dryRun = false } = {}) {
+  const r = await client.query(
+    `SELECT DISTINCT ON (v.id) v.id, p.image_url
+     FROM vendors v JOIN products p ON p.vendor_id = v.id AND p.is_active AND p.image_url LIKE '/uploads/products/catalog-%'
+     WHERE v.cover_url IS NULL
+     ORDER BY v.id, p.price DESC, p.id`
+  );
+  if (!dryRun) {
+    for (const row of r.rows) await client.query('UPDATE vendors SET cover_url = $1 WHERE id = $2 AND cover_url IS NULL', [row.image_url, row.id]);
+  }
+  return r.rows.length;
+}
 
 async function backfill({ dryRun = false, log = console.log } = {}) {
   const { storageDriver, initStorage } = require('./services/storage.service');
@@ -105,10 +122,13 @@ async function backfill({ dryRun = false, log = console.log } = {}) {
       galleries++;
     }
 
+    const storeCovers = await fillStoreCovers(client, { dryRun });
+
     log(`✓ ${covers} product(s) got a cover photo (${tally.name} by name, ${tally.category} by category, ${tally.any} any)`);
     log(`✓ ${galleries} product(s) got a gallery (${photos} photos)`);
+    log(`✓ ${storeCovers} store(s) got a cover photo`);
     log(`  Files in ${where}`);
-    return { covers, galleries, photos };
+    return { covers, galleries, photos, storeCovers };
   } finally {
     await client.end();
   }
@@ -121,4 +141,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { backfill, bestMatch };
+module.exports = { backfill, bestMatch, fillStoreCovers };

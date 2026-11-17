@@ -5,7 +5,10 @@
 //   Card checkout card → gateway → customer wallet → escrow (placeOrder), in that order,
 //                 so escrow has a single entry path and a failed order leaves the money
 //                 safely in the wallet
-//   Withdrawal    wallet → gateway payout → card; a bounced payout returns to the wallet
+//   Withdrawal    wallet → gateway payout → card; a bounced payout returns to the wallet.
+//                 With Payoneer (default with Stripe): wallet → Payoneer payout → the user's Payoneer
+//                 account, in USD. With Stripe Connect: wallet → transfer → the user's Express
+//                 account. Either is set up once (payoutAccounts.service.js).
 //
 // The gateway is the source of truth. Every change arrives by one of three routes and
 // all of them converge on syncPayment / syncWithdrawal, which are idempotent:
@@ -14,11 +17,13 @@
 
 const pool = require('../db');
 const gateway = require('./gateway.client');
+const payoutAccounts = require('./payoutAccounts.service');
+const payoneer = require('./payouts/payoneer');
 const { creditWallet, debitWallet } = require('./wallet.service');
 const { notify } = require('./notification.service');
 const { getPolicies } = require('./policy.service');
 const { readCheckoutInput, quoteCheckout, placeOrder } = require('./checkout.service');
-const { FEATURES } = require('../config/mode');
+const { FEATURES, isDevelopment } = require('../config/mode');
 const { httpError, withTransaction } = require('../utils/http');
 const { toPaisa, paisaToString, paisaToNumber } = require('../utils/money');
 
@@ -30,9 +35,10 @@ const RETRY_AFTER_SEC = 20;
 const cardLabel = (brand, last4) => (last4 ? `${brand ? brand[0].toUpperCase() + brand.slice(1) : 'Card'} •••• ${last4}` : 'card');
 const rs = (paisa) => `Rs. ${paisaToString(paisa)}`;
 
+/** The card the app tokenized: tok_… at Vendra Pay, a PaymentMethod pm_… at Stripe */
 function readToken(body) {
   const token = String(body?.token ?? '');
-  if (!/^tok_[\w-]{8,}$/.test(token)) {
+  if (!gateway.isPaymentToken(token)) {
     throw httpError(400, 'Enter your card details to continue.', { code: 'CARD_TOKEN_REQUIRED' });
   }
   return token;
@@ -52,8 +58,25 @@ function readAmountPaisa(value, minRs, maxRs, what) {
 // Views
 // ──────────────────────────────────────
 
+/**
+ * What the app must do to finish a payment the bank wants to verify:
+ *   otp         Vendra Pay: send the one-time password to the gateway
+ *   stripe_sdk  Stripe: run 3-D Secure with Stripe's SDK (handleNextAction(clientSecret))
+ * then POST /api/payments/:id/refresh. Only known with the intent at hand.
+ */
+function nextActionView(intent) {
+  if (intent?.next_action?.type === 'stripe_sdk') {
+    return { type: 'stripe_sdk', clientSecret: intent.next_action.client_secret };
+  }
+  return {
+    type: 'otp',
+    attemptsLeft: intent?.next_action?.attempts_left ?? null,
+    // The sandbox code is only shown while test-card helpers are on
+    hint: FEATURES.testCards ? intent?.next_action?.otp_hint ?? null : null,
+  };
+}
+
 function paymentView(p, intent) {
-  const otp = p.status === 'requires_action';
   return {
     id: p.id,
     purpose: p.purpose,
@@ -61,14 +84,7 @@ function paymentView(p, intent) {
     status: p.status,
     card: p.card_last4 ? { brand: p.card_brand, last4: p.card_last4 } : null,
     gatewayIntentId: p.gateway_intent_id,
-    nextAction: otp
-      ? {
-        type: 'otp',
-        attemptsLeft: intent?.next_action?.attempts_left ?? null,
-        // The sandbox code is only shown while test-card helpers are on
-        hint: FEATURES.testCards ? intent?.next_action?.otp_hint ?? null : null,
-      }
-      : null,
+    nextAction: p.status === 'requires_action' ? nextActionView(intent) : null,
     failureMessage: p.failure_message,
     orderId: p.order_id,
     orderError: p.order_error,
@@ -81,7 +97,12 @@ function withdrawalView(w) {
     id: w.id,
     amount: Number(w.amount),
     status: w.status,
-    card: w.card_last4 ? { brand: w.card_brand, last4: w.card_last4 } : null,
+    provider: w.provider,
+    card: w.card_last4 && w.provider === 'vendrapay' ? { brand: w.card_brand, last4: w.card_last4 } : null,
+    // Payoneer / Stripe: the payee or connected account, and what it received in USD
+    destinationAccount: w.destination_account,
+    gatewayAmount: w.gateway_amount != null ? Number(w.gateway_amount) / 100 : null,
+    gatewayCurrency: w.gateway_currency,
     gatewayPayoutId: w.gateway_payout_id,
     failureMessage: w.failure_message,
     createdAt: w.created_at,
@@ -179,8 +200,8 @@ async function settlePayment(paymentId, intent) {
 
 async function chargeCard(userId, { purpose, amountPaisa, token, checkout, description }) {
   const p = (await pool.query(
-    `INSERT INTO payments (user_id, purpose, amount, checkout) VALUES ($1, $2, $3, $4) RETURNING *`,
-    [userId, purpose, paisaToString(amountPaisa), checkout ? JSON.stringify(checkout) : null]
+    `INSERT INTO payments (user_id, purpose, amount, checkout, provider) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [userId, purpose, paisaToString(amountPaisa), checkout ? JSON.stringify(checkout) : null, gateway.name]
   )).rows[0];
 
   let intent;
@@ -268,12 +289,17 @@ async function syncWithdrawal(withdrawalId, payout) {
     if (w.status === 'paid' || w.status === 'failed') return w;
 
     const status = payout.status === 'paid' || payout.status === 'failed' ? payout.status : 'in_transit';
-    const card = cardLabel(payout.destination?.brand, payout.destination?.last4);
+    const account = w.provider !== 'vendrapay'; // paid to an account in USD, not to a card
+    const card = w.provider === 'payoneer' ? 'Payoneer account'
+      : w.provider === 'stripe' ? 'Stripe payout account'
+        : cardLabel(payout.destination?.brand, payout.destination?.last4);
     const row = (await client.query(
       `UPDATE withdrawals SET gateway_payout_id = $2, status = $3::text, card_brand = $4, card_last4 = $5,
-              failure_message = $6, settled_at = CASE WHEN $3::text IN ('paid', 'failed') THEN NOW() END
+              failure_message = $6, settled_at = CASE WHEN $3::text IN ('paid', 'failed') THEN NOW() END,
+              gateway_amount = COALESCE($7, gateway_amount), gateway_currency = COALESCE($8, gateway_currency)
        WHERE id = $1 RETURNING *`,
-      [w.id, payout.id, status, payout.destination?.brand ?? null, payout.destination?.last4 ?? null, payout.failure_message ?? null]
+      [w.id, payout.id, status, payout.destination?.brand ?? null, payout.destination?.last4 ?? null, payout.failure_message ?? null,
+        account ? payout.amount ?? null : null, account ? payout.currency ?? null : null]
     )).rows[0];
     if (w.ledger_id) {
       await client.query(
@@ -286,7 +312,11 @@ async function syncWithdrawal(withdrawalId, payout) {
       await notify(client, afterCommit, w.user_id, {
         type: 'withdrawal_paid',
         title: `${rs(toPaisa(w.amount))} sent to your ${card}`,
-        body: `Withdrawal #${w.id} has arrived. Reference ${payout.id}.`,
+        body: w.provider === 'payoneer'
+          ? `Withdrawal #${w.id} is in your Payoneer balance; withdraw it to your bank from Payoneer. Reference ${payout.id}.`
+          : w.provider === 'stripe'
+            ? `Withdrawal #${w.id} is in your Stripe account; Stripe pays it to your bank. Reference ${payout.id}.`
+            : `Withdrawal #${w.id} has arrived. Reference ${payout.id}.`,
       });
     } else if (status === 'failed') {
       await creditWallet(client, {
@@ -324,7 +354,41 @@ async function reverseWithdrawal(withdrawalId, message) {
   });
 }
 
+/**
+ * Stripe: a Connect transfer to the user's account. In development with a test key, a
+ * platform balance too small for it (demo money never came through a card) is topped
+ * up with Stripe's bypassPending test card first, once.
+ */
+async function sendTransfer(w) {
+  const params = {
+    amountPaisa: toPaisa(w.amount),
+    destination: w.destination_account,
+    description: `Vendra withdrawal #${w.id}`,
+    metadata: { vendra_ref: `withdrawal:${w.id}`, user_id: String(w.user_id), amount_pkr: String(w.amount) },
+  };
+  try {
+    return await gateway.createTransfer(params, `vendra-withdrawal-${w.id}`);
+  } catch (err) {
+    if (!(isDevelopment && err.details?.code === 'BALANCE_INSUFFICIENT')) throw err;
+    const funding = await gateway.fundTestBalance(gateway.toPlatformMinor(params.amountPaisa) + 100, `vendra-fund-withdrawal-${w.id}`);
+    await pool.query(
+      'INSERT INTO gateway_fundings (amount, gateway_topup_id) VALUES ($1, $2) ON CONFLICT (gateway_topup_id) DO NOTHING',
+      [paisaToString(funding.amountPaisa), funding.id]
+    );
+    return gateway.createTransfer(params, `vendra-withdrawal-${w.id}-funded`);
+  }
+}
+
 async function sendPayout(w) {
+  if (w.provider === 'stripe') return sendTransfer(w);
+  if (w.provider === 'payoneer') {
+    return payoneer.submitPayout({
+      withdrawalId: w.id,
+      payeeId: w.destination_account,
+      amountPaisa: toPaisa(w.amount),
+      description: `Vendra withdrawal #${w.id}`,
+    });
+  }
   return gateway.createPayout({
     amount: toPaisa(w.amount),
     token: w.payout_token,
@@ -333,23 +397,31 @@ async function sendPayout(w) {
   }, `vendra-withdrawal-${w.id}`); // the same key on a retry returns the first result
 }
 
-/** POST /api/withdrawals — moves money out of the wallet to a card */
+/**
+ * POST /api/withdrawals — moves money out of the wallet: to a card (Vendra Pay, body
+ * { amount, token }) or to the user's Stripe payout account (Stripe, body { amount })
+ */
 async function startWithdrawal(userId, body) {
-  const token = readToken(body);
+  const provider = payoutAccounts.withdrawalProvider(); // vendrapay (card) | payoneer | stripe
+  const connect = provider !== 'vendrapay';
+  const token = connect ? null : readToken(body);
   const { min_withdrawal: minRs } = await getPolicies();
   const amountPaisa = readAmountPaisa(body?.amount, minRs, TOPUP_MAX_RS, 'A withdrawal');
+  const destination = connect ? await payoutAccounts.requireReadyAccount(userId) : null;
 
   const w = await withTransaction(async (client) => {
     const row = (await client.query(
-      `INSERT INTO withdrawals (user_id, amount, payout_token) VALUES ($1, $2, $3) RETURNING *`,
-      [userId, paisaToString(amountPaisa), token]
+      `INSERT INTO withdrawals (user_id, amount, payout_token, provider, destination_account) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [userId, paisaToString(amountPaisa), token, provider, destination]
     )).rows[0];
     let ledgerId;
     await debitWallet(client, {
       userId,
       amountPaisa,
       type: 'withdrawal',
-      description: `Withdrawal #${row.id} to card`,
+      description: provider === 'payoneer' ? `Withdrawal #${row.id} to your Payoneer account`
+        : provider === 'stripe' ? `Withdrawal #${row.id} to your Stripe payout account`
+          : `Withdrawal #${row.id} to card`,
       onLedger: (id) => { ledgerId = id; },
     });
     return (await client.query('UPDATE withdrawals SET ledger_id = $2 WHERE id = $1 RETURNING *', [row.id, ledgerId])).rows[0];
@@ -384,6 +456,45 @@ async function listWithdrawals(userId, { limit, offset }) {
 // Webhooks and the reconcile sweep
 // ──────────────────────────────────────
 
+/** Stripe took a transfer back (e.g. reversed from the dashboard): the money returns to the wallet */
+async function transferReversed(withdrawalId, transfer) {
+  await withTransaction(async (client, afterCommit) => {
+    const w = (await client.query('SELECT * FROM withdrawals WHERE id = $1 FOR UPDATE', [withdrawalId])).rows[0];
+    if (!w || w.status === 'failed') return;
+    await creditWallet(client, {
+      userId: w.user_id,
+      amountPaisa: toPaisa(w.amount),
+      type: 'withdrawal_reversal',
+      reference: transfer.id,
+      description: `Withdrawal #${w.id} returned: the transfer was reversed`,
+    });
+    await client.query(
+      `UPDATE withdrawals SET status = 'failed', failure_message = 'The transfer was reversed.', settled_at = NOW() WHERE id = $1`,
+      [w.id]
+    );
+    await notify(client, afterCommit, w.user_id, {
+      type: 'withdrawal_failed',
+      title: `Withdrawal of ${rs(toPaisa(w.amount))} returned to your wallet`,
+      body: 'The transfer to your payout account was reversed.',
+    });
+  });
+}
+
+/**
+ * GET /api/payouts/payoneer/ipcn — Payoneer's notification callback (query parameters).
+ * It only says that something changed, so the payee or payout is re-read from Payoneer
+ * rather than trusting the callback's values.
+ */
+async function handlePayoneerIpcn(query) {
+  const payeeId = String(query.apuid || '');
+  if ('PAYMENT' in query && query.paymentid) {
+    const m = /^vendra-withdrawal-(\d+)$/.exec(String(query.paymentid));
+    if (m) await syncWithdrawal(Number(m[1]), await payoneer.getPayout(String(query.paymentid)));
+  } else if (payeeId) {
+    await payoutAccounts.setPayoneerStatus(payeeId, await payoneer.payeeStatus(payeeId));
+  }
+}
+
 /** Handles one verified gateway event. Safe to receive more than once. */
 async function handleGatewayEvent(event) {
   const object = event?.data?.object;
@@ -393,6 +504,8 @@ async function handleGatewayEvent(event) {
 
   if (event.type?.startsWith('payment_intent.') && payment) await settlePayment(Number(payment[1]), object);
   else if (event.type?.startsWith('payout.') && withdrawal) await syncWithdrawal(Number(withdrawal[1]), object);
+  else if (event.type === 'transfer.reversed' && withdrawal) await transferReversed(Number(withdrawal[1]), object);
+  else if (event.type === 'account.updated' && object?.object === 'account') await payoutAccounts.syncFromStripe(object);
 
   await pool.query('INSERT INTO gateway_events (id, type) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING', [event.id, event.type]);
 }
@@ -420,14 +533,18 @@ async function reconcileOpen() {
     }
   }
 
+  // Only rows of the gateway that's on now (another provider's open withdrawals wait for it)
   const withdrawals = await pool.query(
     `SELECT * FROM withdrawals
-     WHERE (status = 'in_transit') OR (status = 'pending' AND created_at < ${stale})
-     ORDER BY id LIMIT 20`
+     WHERE provider = $1 AND ((status = 'in_transit') OR (status = 'pending' AND created_at < ${stale}))
+     ORDER BY id LIMIT 20`,
+    [payoutAccounts.withdrawalProvider()]
   );
   for (const w of withdrawals.rows) {
     try {
-      const payout = w.gateway_payout_id ? await gateway.getPayout(w.gateway_payout_id) : await sendPayout(w);
+      const payout = !w.gateway_payout_id ? await sendPayout(w)
+        : w.provider === 'payoneer' ? await payoneer.getPayout(w.gateway_payout_id)
+          : await gateway.getPayout(w.gateway_payout_id);
       if (payout.status !== 'in_transit' || !w.gateway_payout_id) {
         await syncWithdrawal(w.id, payout);
         fixed++;
@@ -464,6 +581,7 @@ async function ledgerTotals(db = pool) {
  * once, so withdrawals of that money work and reconciliation balances.
  */
 async function fundOpeningBalances() {
+  if (!gateway.capabilities.platformTopups) return 0; // Stripe: nothing to fund in PKR
   let added = 0;
   for (;;) {
     const t = await ledgerTotals();
@@ -484,8 +602,70 @@ async function fundOpeningBalances() {
   }
 }
 
+/**
+ * Stripe holds the platform's money in its own settlement currency, so its balance
+ * can't be compared with rupee books. Instead every Vendra card payment Stripe says
+ * succeeded (in PKR, as charged) is compared with the deposits the books credited.
+ */
+async function stripeReconciliation(t) {
+  const n = paisaToNumber;
+  const credited = toPaisa((await pool.query(
+    `SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE provider = 'stripe' AND credited_at IS NOT NULL`
+  )).rows[0].total);
+  // Stripe payments charged but not yet credited (Vendra Pay ones are another gateway's)
+  const uncredited = toPaisa((await pool.query(
+    `SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE provider = 'stripe' AND status = 'succeeded' AND credited_at IS NULL`
+  )).rows[0].total);
+  let atStripe = null;
+  let count = 0;
+  let platformBalance = null;
+  try {
+    let after = null;
+    atStripe = 0;
+    // Up to 5,000 intents (newest first); enough for a test account
+    for (let page = 0; page < 50; page++) {
+      const list = await gateway.call('GET', '/v1/payment_intents', { limit: 100, ...(after ? { starting_after: after } : {}) });
+      for (const pi of list.data) {
+        if (pi.status === 'succeeded' && /^payment:\d+$/.test(pi.metadata?.vendra_ref || '')) {
+          atStripe += pi.amount;
+          count++;
+        }
+      }
+      if (!list.has_more || list.data.length === 0) break;
+      after = list.data[list.data.length - 1].id;
+    }
+    platformBalance = await gateway.getBalance();
+  } catch {
+    atStripe = null;
+  }
+  const reachable = atStripe !== null;
+  return {
+    mode: 'stripe_payments',
+    gateway: {
+      reachable,
+      available: reachable ? n(atStripe) : null,
+      inTransit: 0,
+      succeededPayments: reachable ? count : null,
+      // The real Stripe balance, in Stripe's minor units and currency (e.g. usd cents)
+      platformBalance,
+    },
+    books: {
+      wallets: n(t.wallets),
+      escrow: n(t.escrow),
+      platformRevenue: n(t.platform),
+      pendingWithdrawals: n(t.pending_withdrawals),
+      uncreditedPayments: n(uncredited),
+    },
+    openingBalances: { total: n(t.opening), funded: n(t.funded), unfunded: n(t.opening - t.funded) },
+    expectedGatewayBalance: n(credited + uncredited),
+    difference: reachable ? n(atStripe - credited - uncredited) : null,
+    balanced: reachable ? atStripe === credited + uncredited : null,
+  };
+}
+
 /** GET /api/admin/finance/reconciliation */
 async function reconciliation() {
+  if (!gateway.capabilities.pkrBalance) return stripeReconciliation(await ledgerTotals());
   const [t, balance] = await Promise.all([ledgerTotals(), gateway.getBalance().catch(() => null)]);
   const unfunded = t.opening - t.funded;
   // What the gateway should hold for Vendra: everything owed to users, held in escrow and earned,
@@ -493,6 +673,7 @@ async function reconciliation() {
   const expected = t.wallets + t.escrow + t.platform + t.pending_withdrawals + t.uncredited - unfunded;
   const n = paisaToNumber;
   return {
+    mode: 'gateway_balance',
     gateway: balance
       ? { reachable: true, available: n(balance.available), inTransit: n(balance.in_transit) }
       : { reachable: false, available: null, inTransit: null },
@@ -519,6 +700,7 @@ module.exports = {
   startWithdrawal,
   listWithdrawals,
   handleGatewayEvent,
+  handlePayoneerIpcn,
   reconcileOpen,
   fundOpeningBalances,
   reconciliation,

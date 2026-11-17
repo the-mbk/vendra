@@ -291,6 +291,7 @@ const getMe = async (req, res) => {
     const result = await pool.query(
       `SELECT u.id, u.full_name, u.email, u.phone, u.role, u.vendor_id, u.wallet_balance, u.created_at, u.must_change_password,
               v.store_name, v.store_address, v.is_approved, v.cnic, v.latitude AS store_lat, v.longitude AS store_lng,
+              v.logo_url AS store_logo_url, v.cover_url AS store_cover_url,
               v.pending_latitude, v.pending_longitude, v.pending_address, v.location_requested_at, v.location_rejection_reason,
               r.vehicle_type, r.is_online, r.approval_status AS rider_approval_status, r.rejection_reason AS rider_rejection_reason,
               r.cnic AS rider_cnic, r.license_number, r.vehicle_number
@@ -324,6 +325,8 @@ const getMe = async (req, res) => {
         vendorId: user.vendor_id,
         storeName: user.store_name || null,
         storeAddress: user.store_address || null,
+        storeLogoUrl: user.store_logo_url || null,
+        storeCoverUrl: user.store_cover_url || null,
         isApproved: user.is_approved,
         cnic: user.cnic || null,
         storeLat: user.store_lat != null ? Number(user.store_lat) : null,

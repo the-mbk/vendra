@@ -1,6 +1,7 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra App - Vendor Profile Screen
-// Shows vendor info, wallet (+ withdraw to card) / disputes / change-password
+// Shows the store header (cover photo + logo; the owner can change them),
+// vendor info, wallet (+ withdraw to card) / disputes / change-password
 // shortcuts and logout, plus the shop-staff tools: who is signed in on this
 // device, Switch user / Back to owner, and (owner only) Shop staff and
 // Receipt settings. Customer reviews are open to everyone.
@@ -24,6 +25,7 @@ import '../../staff/screens/staff_screen.dart';
 import '../../staff/widgets/switch_user.dart';
 import 'receipt_settings_screen.dart';
 import 'vendor_reviews_screen.dart';
+import '../widgets/store_photo_header.dart';
 
 class VendorProfileScreen extends StatelessWidget {
   const VendorProfileScreen({super.key});
@@ -47,6 +49,13 @@ class VendorProfileScreen extends StatelessWidget {
                   padding: const EdgeInsets.all(20),
                   child: Column(
                     children: [
+                  // The store as customers see it; the owner changes its logo / cover photo here
+                  StorePhotoHeader(
+                    user: user,
+                    onChanged: () => context.read<AuthBloc>().add(RefreshUserRequested()),
+                  ),
+                  const SizedBox(height: 24),
+
                   // Avatar
                   CircleAvatar(
                     radius: 48,
@@ -119,7 +128,8 @@ class VendorProfileScreen extends StatelessWidget {
                         const ReceiptSettingsScreen()),
                     _linkTile(context, Icons.account_balance_wallet_outlined, 'Wallet',
                         'Rs. ${NumberFormat('#,##0').format(user.walletBalance)} · escrow releases', const WalletScreen()),
-                    _actionTile(Icons.north_east, 'Withdraw to card', 'Send your wallet balance to a debit card',
+                    _actionTile(Icons.north_east, AppConfig.current.payments.withdrawLabel,
+                        'Send your wallet balance to ${AppConfig.current.payments.payoutDestination}',
                         () => startWithdrawal(context, balance: user.walletBalance)),
                     _linkTile(context, Icons.gavel_outlined, 'Disputes', 'Disputes on your orders', const VendorDisputesScreen()),
                     _linkTile(context, Icons.lock_reset, 'Change password', 'Choose a new sign-in password',
