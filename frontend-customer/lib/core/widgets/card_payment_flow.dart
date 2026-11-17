@@ -4,6 +4,9 @@
 //   card sheet (tokenize at gateway) → API call with the token →
 //   one-time password if `requires_action` → POST /api/payments/:id/refresh
 //   → final PaymentResult { payment, order, walletBalance }
+// With payments.provider == 'stripe' the card sheet is Stripe's card field
+// (the token is a PaymentMethod, pm_…) and `requires_action` runs Stripe's
+// 3-D Secure (nextAction.type == 'stripe_sdk') instead of the OTP dialog.
 //
 //   final outcome = await CardPaymentFlow.run(
 //     context,
@@ -25,8 +28,10 @@ import '../models/payment_model.dart';
 import '../services/api_service.dart';
 import '../services/app_config.dart';
 import '../services/card_gateway.dart';
+import '../services/stripe_payments.dart';
 import 'card_entry_sheet.dart';
 import 'otp_dialog.dart';
+import 'stripe_card_sheet.dart';
 
 /// How a card payment ended
 class CardPaymentOutcome {
@@ -38,7 +43,7 @@ class CardPaymentOutcome {
   final String? errorCode;
   final Map<String, dynamic>? errorData;
 
-  /// The user closed the card sheet or the OTP dialog
+  /// The user closed the card sheet, the OTP dialog or Stripe's 3-D Secure page
   final bool cancelled;
 
   const CardPaymentOutcome({
@@ -70,7 +75,7 @@ class CardPaymentOutcome {
 class CardPaymentFlow {
   CardPaymentFlow._();
 
-  /// Runs card entry → [submit] → OTP → refresh. [submit] posts the API
+  /// Runs card entry → [submit] → 3-D Secure → refresh. [submit] posts the API
   /// request with the single-use card token (e.g. top-up or card checkout).
   static Future<CardPaymentOutcome> run(
     BuildContext context, {
@@ -80,28 +85,58 @@ class CardPaymentFlow {
     String actionLabel = 'Pay',
   }) async {
     if (!AppConfig.current.payments.isAvailable) await AppConfig.ensureLoaded();
-    if (!AppConfig.current.payments.isAvailable) {
+    final settings = AppConfig.current.payments;
+    if (!settings.isAvailable) {
       return const CardPaymentOutcome(errorMessage: 'Card payments are unavailable right now. Please try again later.');
     }
     if (!context.mounted) return const CardPaymentOutcome(cancelled: true);
 
+    // The card: Stripe's card field, or the Vendra Pay sheet (tokenized at the gateway)
     final gateway = CardGateway();
-    final token = await showCardEntrySheet(
-      context,
-      title: title,
-      subtitle: subtitle,
-      actionLabel: actionLabel,
-      gateway: gateway,
-    );
+    final CardToken? token;
+    if (settings.isStripe) {
+      try {
+        await runWithProgress(context, 'Loading the card form…', () => StripePayments.ensureReady(settings));
+      } on CardGatewayException catch (e) {
+        return CardPaymentOutcome(errorMessage: e.message, errorCode: e.code);
+      }
+      if (!context.mounted) return const CardPaymentOutcome(cancelled: true);
+      token = await showStripeCardSheet(context, title: title, subtitle: subtitle, actionLabel: actionLabel);
+    } else {
+      token = await showCardEntrySheet(
+        context,
+        title: title,
+        subtitle: subtitle,
+        actionLabel: actionLabel,
+        gateway: gateway,
+      );
+    }
     if (token == null || !context.mounted) return const CardPaymentOutcome(cancelled: true);
 
     // 1. The API charges the card
-    var outcome = await runWithProgress(context, 'Processing payment…', () => _call(() => submit(token.id)));
+    var outcome = await runWithProgress(context, 'Processing payment…', () => _call(() => submit(token!.id)));
     var payment = outcome.payment;
     if (payment == null || !context.mounted) return outcome;
 
-    // 2. 3-D Secure: the code goes to the gateway, then the API re-reads the payment
-    if (payment.needsOtp) {
+    // 2a. Stripe's 3-D Secure: Stripe's SDK shows the bank's check, then the API re-reads the payment
+    if (payment.needsStripeAction) {
+      final finished = await runWithProgress(
+        context,
+        'Waiting for your bank…',
+        () => runStripeAction(payment!.nextAction?.clientSecret),
+      );
+      if (!context.mounted) return outcome;
+      final refreshed = await runWithProgress(context, 'Confirming payment…', () => refresh(payment!.id));
+      if (refreshed.result != null) outcome = refreshed;
+      if (!finished && outcome.payment?.requiresAction == true) {
+        return CardPaymentOutcome(result: outcome.result, cancelled: true);
+      }
+      payment = outcome.payment;
+    }
+    if (!context.mounted) return outcome;
+
+    // 2b. Vendra Pay's 3-D Secure: the code goes to the gateway, then the API re-reads the payment
+    if (payment != null && payment.needsOtp) {
       final answered = await showOtpDialog(context, payment: payment, gateway: gateway);
       if (!context.mounted) return outcome;
       final refreshed = await runWithProgress(context, 'Confirming payment…', () => refresh(payment!.id));
@@ -121,6 +156,26 @@ class CardPaymentFlow {
       }
     }
     return outcome;
+  }
+
+  /// Runs Stripe's 3-D Secure for [clientSecret]. True once Stripe reached an
+  /// answer (approved or failed — refresh the payment to learn which); false
+  /// if the user closed the check or it couldn't start (the payment stays
+  /// unconfirmed and is not charged).
+  static Future<bool> runStripeAction(
+    String? clientSecret, {
+    @visibleForTesting Future<String?> Function(String clientSecret)? handleNextAction,
+  }) async {
+    if (clientSecret == null || clientSecret.isEmpty) return false;
+    try {
+      await (handleNextAction ?? StripePayments.handleNextAction)(clientSecret);
+      return true;
+    } on CardGatewayException catch (e) {
+      // A failed check is still an answer; the refresh reports it as declined
+      return !(e.isCancelled || e.code == 'network');
+    } catch (_) {
+      return false;
+    }
   }
 
   /// POST /api/payments/:id/refresh → `{ payment, order, walletBalance }`

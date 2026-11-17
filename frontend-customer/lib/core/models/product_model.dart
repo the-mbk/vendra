@@ -11,6 +11,8 @@ class ProductModel {
   final int vendorId;
   final String? storeName;
   final String? storeAddress;
+  /// The store's logo (relative /uploads path or absolute URL); null shows its initials
+  final String? storeLogoUrl;
   final double? vendorLat;
   final double? vendorLng;
   final int? categoryId;
@@ -38,6 +40,7 @@ class ProductModel {
     required this.vendorId,
     this.storeName,
     this.storeAddress,
+    this.storeLogoUrl,
     this.vendorLat,
     this.vendorLng,
     this.categoryId,
@@ -65,6 +68,7 @@ class ProductModel {
       vendorId: toInt(pick(json, 'vendorId', 'vendor_id')),
       storeName: pick(json, 'storeName', 'store_name'),
       storeAddress: pick(json, 'storeAddress', 'store_address'),
+      storeLogoUrl: pick(json, 'storeLogoUrl', 'store_logo_url'),
       vendorLat: toDoubleOrNull(pick(json, 'vendorLat', 'vendor_lat')),
       vendorLng: toDoubleOrNull(pick(json, 'vendorLng', 'vendor_lng')),
       categoryId: toIntOrNull(pick(json, 'categoryId', 'category_id')),
@@ -104,6 +108,7 @@ class ProductModel {
       vendorId: vendorId,
       storeName: storeName,
       storeAddress: storeAddress,
+      storeLogoUrl: storeLogoUrl,
       vendorLat: vendorLat,
       vendorLng: vendorLng,
       categoryId: categoryId,

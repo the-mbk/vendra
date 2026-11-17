@@ -31,6 +31,10 @@
 
   <title>Vendra</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- Stripe.js: Stripe's card field and 3-D Secure (payments.provider == 'stripe').
+       Card details are typed into Stripe's own iframe and never reach the app or the Vendra API. -->
+  <script src="https://js.stripe.com/v3/"></script>
 </head>
 <body>
   <!--

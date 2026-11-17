@@ -12,6 +12,9 @@ class UserModel {
   final int? vendorId;
   final String? storeName;
   final String? storeAddress;
+  /// Vendor's store pictures (relative /uploads paths); null when not set
+  final String? storeLogoUrl;
+  final String? storeCoverUrl;
   final bool? isApproved;
   final String? cnic;
   final double? storeLat;
@@ -43,6 +46,8 @@ class UserModel {
     this.vendorId,
     this.storeName,
     this.storeAddress,
+    this.storeLogoUrl,
+    this.storeCoverUrl,
     this.isApproved,
     this.cnic,
     this.storeLat,
@@ -70,6 +75,8 @@ class UserModel {
       vendorId: json['vendorId'] ?? json['vendor_id'],
       storeName: json['storeName'] ?? json['store_name'],
       storeAddress: json['storeAddress'] ?? json['store_address'],
+      storeLogoUrl: json['storeLogoUrl'] ?? json['store_logo_url'],
+      storeCoverUrl: json['storeCoverUrl'] ?? json['store_cover_url'],
       isApproved: json['isApproved'] ?? json['is_approved'],
       cnic: json['cnic'],
       storeLat: json['storeLat'] == null ? null : _toDouble(json['storeLat']),
@@ -130,6 +137,8 @@ class UserModel {
       vendorId: vendorId,
       storeName: storeName,
       storeAddress: storeAddress,
+      storeLogoUrl: storeLogoUrl,
+      storeCoverUrl: storeCoverUrl,
       isApproved: isApproved,
       cnic: cnic,
       storeLat: storeLat,

@@ -33,7 +33,14 @@ initStorage()
       console.log(`  📍 Running on http://localhost:${PORT}`);
       console.log(`  🔌 Realtime (Socket.IO) on the same port`);
       console.log(`  🗂  Files in ${storage}`);
-      console.log(`  💳 Payments via ${process.env.GATEWAY_URL || 'http://localhost:4242'}`);
+      const gatewayName = require('./services/gateway.client').name;
+      console.log(`  💳 Payments via ${gatewayName === 'stripe'
+        ? `Stripe (${(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_live_') ? 'LIVE' : 'test'} mode)`
+        : `Vendra Pay at ${process.env.GATEWAY_URL || 'http://localhost:4242'}`}`);
+      const payoutMode = require('./services/payoutAccounts.service').mode();
+      console.log(`  🏦 Withdrawals ${payoutMode === 'payoneer'
+        ? `to Payoneer at ${process.env.PAYONEER_API_URL || 'http://localhost:4343 (simulator)'}`
+        : payoutMode === 'stripe_connect' ? 'by Stripe Connect transfers' : 'to cards (Vendra Pay)'}`);
       console.log(`  🧪 Dev features: ${on.length ? on.join(', ') : 'none'}`);
       console.log(`  🕐 Started at ${new Date().toLocaleString()}`);
       console.log(`══════════════════════════════════════\n`);

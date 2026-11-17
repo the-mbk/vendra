@@ -73,6 +73,7 @@ class StoreCart {
   ProductModel get _first => items.first.product;
   String get storeName => _first.storeName ?? 'Store';
   String? get storeAddress => _first.storeAddress;
+  String? get storeLogoUrl => _first.storeLogoUrl;
   double? get storeLat => _first.vendorLat;
   double? get storeLng => _first.vendorLng;
   int get totalItems => items.fold(0, (sum, item) => sum + item.quantity);

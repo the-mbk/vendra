@@ -1,0 +1,13 @@
+{
+  "name": "payoneer-sim",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A local stand-in for Payoneer's Mass Payouts API, for Vendra's withdrawals",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

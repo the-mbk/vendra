@@ -148,7 +148,7 @@ class _WalletScreenState extends State<WalletScreen> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   icon: const Icon(Icons.north_east),
-                  label: Text('Withdraw to card', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                  label: Text(AppConfig.current.payments.withdrawLabel, style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
                   onPressed: () => _withdraw(wallet.balance),
                 ),
               ),
@@ -172,7 +172,8 @@ class _WalletScreenState extends State<WalletScreen> {
                   'Customer payments are held in escrow. After delivery and the dispute window, '
                   'the order subtotal minus the platform commission is released here. '
                   'Walk-in (POS) sales are paid at the counter and are not shown in the wallet. '
-                  'Withdraw sends your balance to a debit card; if the card refuses it, the money comes back here.',
+                  'Withdraw sends your balance to ${AppConfig.current.payments.payoutDestination}; '
+                  "if it can't be paid out, the money comes back here.",
                   style: GoogleFonts.poppins(fontSize: 12, color: AppColors.secondary),
                 ),
               ),

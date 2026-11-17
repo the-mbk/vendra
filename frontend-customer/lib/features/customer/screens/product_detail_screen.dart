@@ -6,7 +6,11 @@
 // - Live public stock via realtime stock:update events, with the dual
 //   inventory explainer (FR01)
 // - Escrow trust badge (FR03)
-// - Rating summary, latest reviews and "See all reviews" (SRDS §2.3)
+// - The store selling it: logo, name, address/distance and "Visit store"
+//   (pops back instead when the page was opened from that store's page)
+// - Rating summary, latest reviews and "See all reviews" (SRDS §2.3), plus
+//   "Write a review" when the customer has a delivered order with this
+//   product still to review (opens the order review sheet)
 // Details come from GET /api/products/:id (ProductDetailBloc).
 // ══════════════════════════════════════════════════════════════
 
@@ -14,30 +18,40 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:vendra_customer/vendra_core.dart';
+import '../../../core/services/customer_location_storage.dart';
 import '../bloc/cart_bloc.dart';
 import '../bloc/product_detail_bloc.dart';
+import '../services/catalog_api.dart';
+import '../widgets/order_review.dart';
 import '../widgets/product_gallery.dart';
 import '../widgets/rating_summary.dart';
+import '../widgets/store_widgets.dart';
 import '../widgets/trust_badges.dart';
 import 'cart_screen.dart';
 import 'product_reviews_screen.dart';
+import 'store_screen.dart';
 
 class ProductDetailScreen extends StatelessWidget {
   final ProductModel product;
 
-  const ProductDetailScreen({super.key, required this.product});
+  /// Opened from this product's own store page: "Visit store" goes back to it
+  /// instead of opening the store a second time
+  final bool openedFromStore;
+
+  const ProductDetailScreen({super.key, required this.product, this.openedFromStore = false});
 
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
       create: (_) => ProductDetailBloc(product: product)..add(const LoadProductDetail()),
-      child: const _ProductDetailView(),
+      child: _ProductDetailView(openedFromStore: openedFromStore),
     );
   }
 }
 
 class _ProductDetailView extends StatelessWidget {
-  const _ProductDetailView();
+  final bool openedFromStore;
+  const _ProductDetailView({required this.openedFromStore});
 
   /// Adds one unit unless the cart already holds every available unit
   bool _addToCart(BuildContext context, ProductModel product) {
@@ -84,10 +98,6 @@ class _ProductDetailView extends StatelessWidget {
           backgroundColor: AppColors.background,
           appBar: AppBar(
             title: Text('Product Details', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-            actions: [
-              IconButton(icon: const Icon(Icons.share_outlined), onPressed: () {}),
-              IconButton(icon: const Icon(Icons.favorite_border), onPressed: () {}),
-            ],
           ),
           body: SingleChildScrollView(
             child: Column(
@@ -107,26 +117,6 @@ class _ProductDetailView extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Vendor info
-                      Row(
-                        children: [
-                          const Icon(Icons.storefront_outlined, size: 16, color: AppColors.textSecondary),
-                          const SizedBox(width: 6),
-                          Text('Sold by ', style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
-                          Expanded(
-                            child: Text(
-                              product.storeName ?? 'Vendor',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.poppins(
-                                  fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.secondary),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 8),
-
                       // Product name
                       Text(
                         product.name,
@@ -184,6 +174,10 @@ class _ProductDetailView extends StatelessWidget {
                     ],
                   ),
                 ),
+
+                const SizedBox(height: 8),
+                // The store selling it
+                _ProductStoreCard(product: product, openedFromStore: openedFromStore),
 
                 const SizedBox(height: 8),
                 _reviewsSection(context, state),
@@ -294,7 +288,17 @@ class _ProductDetailView extends StatelessWidget {
               average: product.averageRating,
               count: count,
               distribution: details?.distribution ?? const {},
+              emptyText: state.reviewOrderId != null
+                  ? 'No reviews yet. You bought this, so yours can be the first.'
+                  : 'No reviews yet. Customers who buy this can rate it once it\'s delivered.',
             ),
+            if (state.reviewOrderId != null) ...[
+              const SizedBox(height: 12),
+              _WriteReviewButton(
+                orderId: state.reviewOrderId!,
+                onReviewed: () => context.read<ProductDetailBloc>().add(const LoadProductDetail()),
+              ),
+            ],
             if (details != null && details.latestReviews.isNotEmpty) ...[
               const Divider(height: 24),
               for (var i = 0; i < details.latestReviews.length; i++) ...[
@@ -317,6 +321,170 @@ class _ProductDetailView extends StatelessWidget {
               const SizedBox(height: 8),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// "Sold by": the store's logo, name, where it is and a way into it
+class _ProductStoreCard extends StatefulWidget {
+  final ProductModel product;
+  final bool openedFromStore;
+  const _ProductStoreCard({required this.product, required this.openedFromStore});
+
+  @override
+  State<_ProductStoreCard> createState() => _ProductStoreCardState();
+}
+
+class _ProductStoreCardState extends State<_ProductStoreCard> {
+  /// km from the customer's delivery location (null until known)
+  double? _distanceKm;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDistance();
+  }
+
+  Future<void> _loadDistance() async {
+    final p = widget.product;
+    if (p.vendorLat == null || p.vendorLng == null) return;
+    try {
+      final loc = await CustomerLocationStorage.load();
+      if (!mounted) return;
+      setState(() => _distanceKm = haversineKm(loc.lat, loc.lng, p.vendorLat!, p.vendorLng!));
+    } catch (_) {
+      // The distance is only a nice-to-have
+    }
+  }
+
+  void _visitStore() {
+    if (widget.openedFromStore && Navigator.canPop(context)) {
+      Navigator.pop(context);
+      return;
+    }
+    final p = widget.product;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => StoreScreen(vendorId: p.vendorId, storeName: p.storeName ?? 'Store')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.product;
+    final name = p.storeName ?? 'Store';
+    final address = (p.storeAddress ?? '').trim();
+    final where = [
+      if (_distanceKm != null) '${distanceLabel(_distanceKm!)} away',
+      if (address.isNotEmpty) address,
+    ].join(' · ');
+    return Material(
+      color: Colors.white,
+      child: InkWell(
+        onTap: _visitStore,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
+          child: Row(
+            children: [
+              StoreLogo(storeName: name, logoUrl: p.storeLogoUrl, size: 48),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Sold by', style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary)),
+                    Text(name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    if (where.isNotEmpty)
+                      Row(
+                        children: [
+                          const Icon(Icons.location_on_outlined, size: 13, color: AppColors.textSecondary),
+                          const SizedBox(width: 2),
+                          Expanded(
+                            child: Text(where,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: _visitStore,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.secondary,
+                  side: const BorderSide(color: AppColors.secondary),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  minimumSize: const Size(0, 36),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  textStyle: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                child: const Text('Visit store', maxLines: 1),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Loads the order the customer can review this product with, then opens
+/// the order review sheet; [onReviewed] runs once something was saved
+class _WriteReviewButton extends StatefulWidget {
+  final int orderId;
+  final VoidCallback onReviewed;
+  const _WriteReviewButton({required this.orderId, required this.onReviewed});
+
+  @override
+  State<_WriteReviewButton> createState() => _WriteReviewButtonState();
+}
+
+class _WriteReviewButtonState extends State<_WriteReviewButton> {
+  bool _opening = false;
+
+  Future<void> _open() async {
+    setState(() => _opening = true);
+    final OrderModel order;
+    try {
+      order = await CatalogApi.instance.order(widget.orderId);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _opening = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text("Couldn't open your order. ${ApiService.getErrorMessage(e)}"),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _opening = false);
+    if (await showOrderReviewSheet(context, order)) widget.onReviewed();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: _opening ? null : _open,
+        icon: _opening
+            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.rate_review_outlined, size: 18),
+        label: const Text('Write a review'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: starColor,
+          foregroundColor: AppColors.textPrimary,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
       ),
     );
   }

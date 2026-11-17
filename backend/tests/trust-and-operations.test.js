@@ -244,6 +244,33 @@ describe('Reviews and ratings', () => {
     const n = await query(`SELECT type FROM notifications WHERE order_id = $1 AND type IN ('review_received', 'rider_rated')`, [id]);
     assert.equal(n.rows.length, 2);
   });
+
+  test('store pages list every review with the product it is about', async () => {
+    const store = await api('GET', '/api/vendors/1');
+    assert.deepEqual(store.body.data.ratingDistribution, { 5: 1, 4: 0, 3: 1, 2: 0, 1: 0 });
+    assert.equal(store.body.data.latestReviews.length, 2);
+    const all = await api('GET', '/api/vendors/1/reviews?limit=1');
+    assert.equal(all.status, 200);
+    assert.equal(all.body.data.length, 1);
+    assert.equal(all.body.meta.hasMore, true);
+    const names = (await api('GET', '/api/vendors/1/reviews')).body.data.map((r) => r.productName);
+    assert.equal(names.length, 2);
+    assert.ok(names.every(Boolean), 'each review names its product');
+  });
+
+  test('the product page offers "Write a review" for the latest delivered, unreviewed order', async () => {
+    // The fixture already has delivered order 6 with product 2
+    const old = await api('GET', '/api/customer/products/2/review-order', undefined, tokens.ahmed);
+    assert.equal(old.status, 200);
+    assert.equal(old.body.data.orderId, 6);
+    const { id: orderId } = await deliveredOrder([{ productId: 2, quantity: 1 }]);
+    const ready = await api('GET', '/api/customer/products/2/review-order', undefined, tokens.ahmed);
+    assert.equal(ready.body.data.orderId, orderId, 'the newest one first');
+    assert.equal((await api('GET', '/api/customer/products/2/review-order', undefined, tokens.fatima)).body.data.orderId, null, 'never bought it');
+    assert.equal((await api('GET', '/api/customer/products/2/review-order')).status, 401);
+    await api('POST', `/api/customer/orders/${orderId}/review`, { items: [{ productId: 2, rating: 4 }] }, tokens.ahmed);
+    assert.equal((await api('GET', '/api/customer/products/2/review-order', undefined, tokens.ahmed)).body.data.orderId, 6, 'reviewed; the older order is next');
+  });
 });
 
 describe('Packing checklist (FR07)', () => {
@@ -435,6 +462,57 @@ describe('POS receipts', () => {
     assert.match(receipt.payment_qr.payload, /amount=9998\.00&ref=POS-\d+$/);
     const reprint = await api('GET', `/api/vendor/pos/sales/${sale.body.data.id}`, undefined, tokens.usman);
     assert.equal(reprint.body.data.receipt_number, receipt.receipt_number);
+  });
+});
+
+describe('Store pictures', () => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const photo = () => {
+    const form = new FormData();
+    form.append('image', new Blob([png], { type: 'image/png' }), 'store.png');
+    return form;
+  };
+
+  test('the owner sets a logo and a cover; customers see them everywhere', async () => {
+    const logo = await api('POST', '/api/vendor/store/photos/logo', photo(), tokens.usman);
+    assert.equal(logo.status, 200, JSON.stringify(logo.body));
+    assert.match(logo.body.data.logoUrl, /^\/uploads\/products\//);
+    const cover = await api('POST', '/api/vendor/store/photos/cover', photo(), tokens.usman);
+    assert.equal(cover.status, 200, JSON.stringify(cover.body));
+    const { logoUrl, coverUrl } = cover.body.data;
+    assert.ok(logoUrl && coverUrl && logoUrl !== coverUrl);
+
+    const store = (await api('GET', '/api/vendors/1')).body.data;
+    assert.deepEqual([store.logoUrl, store.coverUrl], [logoUrl, coverUrl]);
+    assert.equal(store.products[0].storeLogoUrl, logoUrl);
+    assert.equal((await api('GET', '/api/products/1')).body.data.storeLogoUrl, logoUrl);
+    const listed = (await api('GET', '/api/stores')).body.data.find((s) => s.id === 1);
+    assert.deepEqual([listed.logoUrl, listed.coverUrl], [logoUrl, coverUrl]);
+    const me = (await api('GET', '/api/auth/me', undefined, tokens.usman)).body.data;
+    assert.deepEqual([me.storeLogoUrl, me.storeCoverUrl], [logoUrl, coverUrl]);
+    assert.equal((await fetch(`${srv.baseUrl}${logoUrl}`)).status, 200, 'the file is served');
+  });
+
+  test('replacing a picture deletes the old file; removing clears it', async () => {
+    const before = (await api('GET', '/api/vendors/1')).body.data.logoUrl;
+    const r = await api('POST', '/api/vendor/store/photos/logo', photo(), tokens.usman);
+    assert.notEqual(r.body.data.logoUrl, before);
+    assert.equal((await fetch(`${srv.baseUrl}${before}`)).status, 404);
+    const del = await api('DELETE', '/api/vendor/store/photos/logo', undefined, tokens.usman);
+    assert.equal(del.status, 200);
+    assert.equal(del.body.data.logoUrl, null);
+    assert.ok(del.body.data.coverUrl, 'the cover stays');
+    assert.equal((await api('GET', '/api/vendors/1')).body.data.logoUrl, null);
+  });
+
+  test('only the store owner can change them, and only logo or cover', async () => {
+    assert.equal((await api('POST', '/api/vendor/store/photos/banner', photo(), tokens.usman)).status, 400);
+    assert.equal((await api('POST', '/api/vendor/store/photos/logo', undefined, tokens.usman)).status, 400);
+    assert.equal((await api('POST', '/api/vendor/store/photos/logo', photo(), tokens.ahmed)).status, 403);
+    const staff = await api('POST', '/api/vendor/staff', { fullName: 'Photo Cashier', role: 'cashier', pin: '2468' }, tokens.usman);
+    const cashier = (await api('POST', '/api/vendor/staff/switch', { staffId: staff.body.data.id, pin: '2468' }, tokens.usman)).body.data.token;
+    assert.equal((await api('POST', '/api/vendor/store/photos/cover', photo(), cashier)).status, 403);
+    await api('DELETE', `/api/vendor/staff/${staff.body.data.id}`, undefined, tokens.usman);
   });
 });
 

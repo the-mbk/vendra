@@ -10,6 +10,8 @@
 // If the backend can't be reached the app runs on safe defaults: treated as
 // production (no dev features, no demo logins, card payments unavailable).
 // Call AppConfig.ensureLoaded() before using a server value to retry.
+// With payments.provider == 'stripe', each load also sets Stripe up with the
+// publishable key (StripePayments.configure; only when the key changes).
 //
 //   void main() async {
 //     WidgetsFlutterBinding.ensureInitialized();
@@ -28,6 +30,7 @@ import '../models/app_config_model.dart';
 import '../models/json_utils.dart';
 import 'api_service.dart';
 import 'realtime_service.dart';
+import 'stripe_payments.dart';
 
 class AppConfig {
   /// development | production
@@ -147,6 +150,11 @@ class AppConfig {
     } catch (e) {
       debugPrint('AppConfig: could not load /api/public-config ($e) — using production defaults');
     }
+    // Stripe's card field needs the publishable key (no-op for Vendra Pay). Not
+    // awaited: the card sheet waits for it (StripePayments.ensureReady) if needed.
+    unawaited(StripePayments.configure(current.payments).catchError((Object e) {
+      debugPrint('AppConfig: could not set up Stripe ($e)');
+    }));
     return current;
   }
 

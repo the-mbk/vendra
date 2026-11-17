@@ -47,6 +47,9 @@ function assertProductionConfig(env = process.env) {
     problems.push('JWT_SECRET must be a random value of at least 32 characters');
   }
   if (!env.ALLOWED_ORIGINS) problems.push('ALLOWED_ORIGINS must list the deployed frontends');
+  if ((env.PAYMENT_PROVIDER || '').toLowerCase() === 'stripe' && (!env.STRIPE_SECRET_KEY || !env.STRIPE_PUBLISHABLE_KEY)) {
+    problems.push('PAYMENT_PROVIDER=stripe needs STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY');
+  }
   if (problems.length) throw new Error(`Production mode: ${problems.join('; ')}.`);
 }
 

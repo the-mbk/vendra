@@ -10,7 +10,6 @@
 // New products wait for admin approval before customers can see them.
 // ══════════════════════════════════════════════════════════════
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -18,6 +17,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:vendra_vendor/vendra_core.dart';
 import '../bloc/vendor_product_bloc.dart';
 import '../models/product_photo.dart';
+import '../services/photo_picker.dart';
 import 'barcode_scanner_screen.dart';
 
 class AddEditProductScreen extends StatefulWidget {
@@ -96,24 +96,15 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     super.dispose();
   }
 
-  bool get _cameraAvailable => !kIsWeb && _picker.supportsImageSource(ImageSource.camera);
+  bool get _cameraAvailable => photoCameraAvailable(_picker);
 
   /// Opens the picker; null if cancelled, too big or unreadable (the reason is shown)
   Future<ProductPhoto?> _pickImage(ImageSource source) async {
     try {
-      // Gallery on mobile, a file chooser on web / desktop
-      final file = await _picker.pickImage(source: source, maxWidth: 1600, maxHeight: 1600, imageQuality: 85);
-      if (file == null) return null;
-      final bytes = await file.readAsBytes();
-      if (!mounted) return null;
-      if (bytes.length > ProductPhoto.maxBytes) {
-        _snack('That photo is over 5 MB — please choose a smaller one.', error: true);
-        return null;
-      }
-      final name = file.name.isNotEmpty ? file.name : 'product_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      return ProductPhoto(name: name, bytes: bytes, mimeType: ProductPhoto.mimeFor(name, file.mimeType));
-    } catch (e) {
-      if (mounted) _snack('Could not open photos: $e', error: true);
+      final photo = await pickPhoto(_picker, source, namePrefix: 'product');
+      return mounted ? photo : null;
+    } on PhotoPickException catch (e) {
+      if (mounted) _snack(e.message, error: true);
       return null;
     }
   }
@@ -129,31 +120,8 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
 
   /// Gallery "+" tile: choose or take a photo, then upload it (saved product) or queue it (new product)
   Future<void> _addGalleryPhoto(ProductModel? live) async {
-    var source = ImageSource.gallery;
-    if (_cameraAvailable) {
-      final picked = await showModalBottomSheet<ImageSource>(
-        context: context,
-        builder: (ctx) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('Choose from gallery'),
-                onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-              ),
-              ListTile(
-                leading: const Icon(Icons.photo_camera_outlined),
-                title: const Text('Take a photo'),
-                onTap: () => Navigator.pop(ctx, ImageSource.camera),
-              ),
-            ],
-          ),
-        ),
-      );
-      if (picked == null) return;
-      source = picked;
-    }
+    final source = await choosePhotoSource(context, _picker);
+    if (source == null || !mounted) return;
     final photo = await _pickImage(source);
     if (photo == null || !mounted) return;
     if (live != null) {

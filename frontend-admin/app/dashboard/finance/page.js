@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getFinance, getReconciliation, isAuthError } from "../../lib/api";
 import { usePublicConfig } from "../../lib/hooks";
-import { PageLoader, ErrorBox, Spinner, Th, formatRs, formatDate, formatOrderId, humanize } from "../../lib/ui";
+import { PageLoader, ErrorBox, Spinner, Th, formatRs, formatNumber, formatDate, formatOrderId, humanize } from "../../lib/ui";
 
 const entryConfig = {
   commission: { label: "Commission", color: "bg-blue-100 text-blue-700", icon: "percent" },
@@ -111,6 +111,76 @@ function ReconStatus({ recon }) {
   );
 }
 
+/** Stripe holds funds in its own currency: amounts in minor units (cents) → "$12.34" */
+function formatMinor(amount, currency) {
+  if (amount == null || !currency) return "—";
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: currency.toUpperCase() }).format(amount / 100);
+  } catch {
+    return `${(amount / 100).toFixed(2)} ${currency.toUpperCase()}`;
+  }
+}
+
+/**
+ * PAYMENT_PROVIDER=stripe: Stripe's balance is in its own currency, so instead the
+ * card payments Stripe says succeeded (in rupees, as charged) are matched against
+ * the deposits the books credited.
+ */
+function StripeReconBody({ recon }) {
+  const g = recon.gateway || {};
+  const balance = g.platformBalance;
+  const diff = Number(recon.difference) || 0;
+  return (
+    <>
+      {!g.reachable ? (
+        <div className="flex items-center gap-3 rounded-xl px-4 py-3 bg-amber-50 border border-amber-200">
+          <span className="material-symbols-outlined text-amber-700 text-[28px]">cloud_off</span>
+          <p className="text-sm text-amber-800">Stripe didn&apos;t answer, so its payments can&apos;t be checked right now.</p>
+        </div>
+      ) : recon.balanced ? (
+        <div className="flex items-center gap-3 rounded-xl px-4 py-3 bg-emerald-50 border border-emerald-200">
+          <span className="material-symbols-outlined text-emerald-600 text-[32px]">verified</span>
+          <div>
+            <p className="text-2xl font-bold text-emerald-700 leading-tight">Balanced ✓</p>
+            <p className="text-xs text-emerald-700 mt-0.5">
+              Every rupee Stripe charged ({formatRs(g.available)} in {formatNumber(g.succeededPayments)} payments) reached a wallet.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 rounded-xl px-4 py-3 bg-red-50 border border-red-200">
+          <span className="material-symbols-outlined text-error text-[32px]">error</span>
+          <div>
+            <p className="text-2xl font-bold text-error leading-tight">Off by {formatRs(Math.abs(diff))}</p>
+            <p className="text-xs text-red-700 mt-0.5">
+              Stripe charged {formatRs(Math.abs(diff))} {diff > 0 ? "more" : "less"} than the books credited. Check Card Payments for anything stuck.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5">
+        <ReconColumn icon="credit_card" title="Charged at Stripe" subtitle="Vendra card payments that succeeded">
+          <p className="text-3xl font-bold text-on-surface tabular-nums">{g.reachable ? formatRs(g.available) : "—"}</p>
+          {g.reachable && <p className="text-xs text-outline mt-1">{formatNumber(g.succeededPayments)} payments</p>}
+        </ReconColumn>
+        <ReconColumn icon="menu_book" title="Credited in the books" subtitle="Card deposits that reached a wallet">
+          <p className="text-3xl font-bold text-on-surface tabular-nums">{formatRs(recon.expectedGatewayBalance)}</p>
+          {Number(recon.books?.uncreditedPayments) > 0 && (
+            <p className="text-xs text-outline mt-1">incl. {formatRs(recon.books.uncreditedPayments)} charged, not yet credited</p>
+          )}
+        </ReconColumn>
+        <ReconColumn icon="account_balance" title="Stripe balance" subtitle="The platform's own funds, in Stripe's currency">
+          <p className="text-3xl font-bold text-on-surface tabular-nums">{formatMinor(balance?.available, balance?.currency)}</p>
+          <p className="text-xs text-outline mt-1">
+            {formatMinor(balance?.pending, balance?.currency)} pending. Withdrawals leave it as Stripe Connect transfers.
+          </p>
+        </ReconColumn>
+      </div>
+    </>
+  );
+}
+
 function ReconciliationPanel({ gatewayUrl }) {
   const router = useRouter();
   const [state, setState] = useState(null); // { data, error, at }
@@ -145,6 +215,7 @@ function ReconciliationPanel({ gatewayUrl }) {
   const opening = recon?.openingBalances || {};
   const booksTotal = sumRs(books.wallets, books.escrow, books.platformRevenue, books.pendingWithdrawals, books.uncreditedPayments);
   const reachable = recon?.gateway?.reachable;
+  const stripe = recon?.mode === "stripe_payments";
 
   return (
     <div className="bg-white rounded-2xl p-6 border border-outline-variant/20 shadow-sm mb-5">
@@ -156,20 +227,22 @@ function ReconciliationPanel({ gatewayUrl }) {
             <h3 className="text-lg font-bold text-on-surface">Gateway reconciliation</h3>
           </div>
           <p className="text-sm text-on-surface-variant mt-1">
-            Does the money held at the payment gateway (Vendra Pay) match what Vendra&apos;s books say it should be?
+            {stripe
+              ? "Did every card payment Stripe charged reach a Vendra wallet?"
+              : "Does the money held at the payment gateway (Vendra Pay) match what Vendra's books say it should be?"}
           </p>
           {state?.at && <p className="text-[11px] text-outline mt-1">Checked {formatDate(state.at, true)}</p>}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {gatewayUrl && (
+          {(stripe || gatewayUrl) && (
             <a
-              href={gatewayUrl}
+              href={stripe ? "https://dashboard.stripe.com/test/payments" : gatewayUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-primary bg-primary/5 hover:bg-primary/10 transition-colors"
             >
               <span className="material-symbols-outlined text-[18px]">open_in_new</span>
-              Open Vendra Pay dashboard
+              {stripe ? "Open Stripe dashboard" : "Open Vendra Pay dashboard"}
             </a>
           )}
           <button
@@ -195,6 +268,7 @@ function ReconciliationPanel({ gatewayUrl }) {
             <p className="text-xs text-error mb-3">Last re-check failed ({state.error}); showing the previous result.</p>
           )}
 
+          {stripe ? <StripeReconBody recon={recon} /> : <>
           <ReconStatus recon={recon} />
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-5">
@@ -300,6 +374,8 @@ function ReconciliationPanel({ gatewayUrl }) {
               </div>
             </div>
           </div>
+
+          </>}
 
           <div className="flex flex-wrap gap-4 mt-4 text-sm">
             <button onClick={() => router.push("/dashboard/payments")} className="font-semibold text-primary hover:underline">

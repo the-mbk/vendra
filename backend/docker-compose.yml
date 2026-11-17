@@ -2,6 +2,7 @@
 #   db       Postgres
 #   storage  SeaweedFS, an S3-compatible stand-in for Cloudflare R2 (production only changes S3_*)
 #   gateway  Vendra Pay, the card payment gateway sandbox (test cards, payouts, signed webhooks)
+#   payoneer a stand-in for Payoneer's payouts API (withdrawals with PAYOUT_PROVIDER=payoneer)
 #   docker compose up -d        start (data persists in named volumes)
 #   docker compose down         stop (data kept)
 #   docker compose down -v      stop and wipe the data
@@ -63,7 +64,29 @@ services:
       - vendra-pay-data:/data
     restart: unless-stopped
 
+  payoneer:
+    build: ./payoneer-sim
+    image: vendra-payoneer-sim:local
+    container_name: vendra-payoneer
+    environment:
+      # Payoneer calls the backend (on the host) back with GET + query parameters (IPCN)
+      IPCN_URL: ${PAYONEER_IPCN_URL:-http://host.docker.internal:3000/api/payouts/payoneer/ipcn?token=ipcn_vendra}
+      PUBLIC_URL: http://localhost:4343
+      APPROVAL_DELAY_SEC: ${PAYONEER_APPROVAL_DELAY_SEC:-8}
+      PAYOUT_DELAY_SEC: ${PAYONEER_PAYOUT_DELAY_SEC:-15}
+      CLIENT_ID: vendra_sandbox
+      CLIENT_SECRET: vendra_sandbox_secret
+      PROGRAM_ID: "100086"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "4343:4343"   # API + program dashboard at http://localhost:4343
+    volumes:
+      - vendra-payoneer-data:/data
+    restart: unless-stopped
+
 volumes:
   vendra-pgdata:
   vendra-storage:
   vendra-pay-data:
+  vendra-payoneer-data:

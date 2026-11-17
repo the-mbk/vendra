@@ -5,12 +5,14 @@
 // account. ReceiptActions prints (80 mm PDF) or shares the same slip.
 // ══════════════════════════════════════════════════════════════
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:vendra_vendor/vendra_core.dart';
 
 import '../models/pos_receipt.dart';
+import '../services/receipt_output.dart';
 import '../services/receipt_pdf.dart';
 
 class ReceiptSlip extends StatelessWidget {
@@ -129,7 +131,8 @@ class ReceiptSlip extends StatelessWidget {
       );
 }
 
-/// Print (an 80 mm PDF to the system print dialog) and Share (the PDF)
+/// Print (an 80 mm PDF to the print dialog) and Share (the PDF; a download on the web).
+/// Problems show as a short, friendly snackbar - never the raw platform error.
 class ReceiptActions extends StatefulWidget {
   final PosReceipt receipt;
   const ReceiptActions({super.key, required this.receipt});
@@ -141,21 +144,30 @@ class ReceiptActions extends StatefulWidget {
 class _ReceiptActionsState extends State<ReceiptActions> {
   bool _busy = false;
 
-  Future<void> _run(Future<void> Function(PosReceipt) action, String failure) async {
+  Future<void> _run(Future<ReceiptOutcome> Function(PosReceipt) action, {required bool printing}) async {
     if (_busy) return;
     setState(() => _busy = true);
+    String? message;
+    var isError = false;
     try {
-      await action(widget.receipt);
+      final outcome = await action(widget.receipt);
+      message = receiptOutcomeMessage(outcome, printing: printing, filename: '${widget.receipt.receiptNumber}.pdf');
+    } on ReceiptOutputException catch (e) {
+      message = e.message;
+      isError = true;
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('$failure: $e'),
-          backgroundColor: AppColors.error,
-          behavior: SnackBarBehavior.floating,
-        ));
-      }
+      debugPrint('Receipt ${printing ? 'print' : 'share'} failed: $e');
+      message = printing ? "Couldn't print the receipt. Please try again." : "Couldn't share the receipt. Please try again.";
+      isError = true;
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+    if (message != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? AppColors.error : null,
+        behavior: SnackBarBehavior.floating,
+      ));
     }
   }
 
@@ -165,7 +177,7 @@ class _ReceiptActionsState extends State<ReceiptActions> {
       children: [
         Expanded(
           child: ElevatedButton.icon(
-            onPressed: _busy ? null : () => _run(ReceiptPdf.printReceipt, "Couldn't print"),
+            onPressed: _busy ? null : () => _run(ReceiptPdf.printReceipt, printing: true),
             icon: const Icon(Icons.print_outlined, size: 18),
             label: const Text('Print'),
             style: ElevatedButton.styleFrom(
@@ -178,9 +190,9 @@ class _ReceiptActionsState extends State<ReceiptActions> {
         const SizedBox(width: 10),
         Expanded(
           child: OutlinedButton.icon(
-            onPressed: _busy ? null : () => _run(ReceiptPdf.shareReceipt, "Couldn't share"),
-            icon: const Icon(Icons.share_outlined, size: 18),
-            label: const Text('Share'),
+            onPressed: _busy ? null : () => _run(ReceiptPdf.shareReceipt, printing: false),
+            icon: const Icon(kIsWeb ? Icons.download_outlined : Icons.share_outlined, size: 18),
+            label: const Text(kIsWeb ? 'Download' : 'Share'),
             style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
           ),
         ),

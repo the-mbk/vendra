@@ -15,6 +15,8 @@ const {
   updateProduct,
   deleteProduct,
   uploadProductImage,
+  uploadStorePhoto,
+  deleteStorePhoto,
   deleteProductImage,
   addGalleryImage,
   deleteGalleryImage,
@@ -56,6 +58,10 @@ router.delete('/products/:id/image', can('products.manage'), deleteProductImage)
 router.post('/products/:id/images', can('products.manage'), productImageUpload.single('image'), addGalleryImage);
 router.delete('/products/:id/images/:imageId', can('products.manage'), deleteGalleryImage);
 router.get('/reviews', can('products.view'), getVendorReviews);
+
+// Store logo and cover photo (owner only)
+router.post('/store/photos/:kind', requireOwner, productImageUpload.single('image'), uploadStorePhoto);
+router.delete('/store/photos/:kind', requireOwner, deleteStorePhoto);
 
 // Walk-in POS + receipts
 router.post('/pos/sales', can('pos'), createPosSale);

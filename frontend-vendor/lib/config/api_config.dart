@@ -40,6 +40,14 @@ class ApiConfig {
       '/api/vendor/products/barcode/${Uri.encodeComponent(code)}';
 
   // ──────────────────────────────────────
+  // Vendor Store Pictures (owner only)
+  // POST multipart field `image` (JPEG/PNG/WebP/HEIC ≤ 5 MB) · DELETE
+  // → { data: { logoUrl, coverUrl } }
+  // ──────────────────────────────────────
+  static const String storeLogo = '/api/vendor/store/photos/logo';
+  static const String storeCover = '/api/vendor/store/photos/cover';
+
+  // ──────────────────────────────────────
   // Vendor Walk-in POS
   // ──────────────────────────────────────
   static const String posSales = '/api/vendor/pos/sales';
@@ -110,7 +118,14 @@ class ApiConfig {
   // ──────────────────────────────────────
   // Withdrawals (money out, every role)
   // ──────────────────────────────────────
-  static const String withdrawals = '/api/withdrawals'; // POST { amount, token } · GET paged
+  static const String withdrawals = '/api/withdrawals'; // POST { amount, token? } · GET paged
+
+  // Payout accounts (payments.payoutsTo == 'payoneer' | 'stripe_account'): withdrawals
+  // go to the user's linked Payoneer account or Stripe Express account, set up
+  // once on the provider's page
+  static const String payoutAccount = '/api/payouts/account'; // { provider, required, account, currency, pkrPerUnit }
+  static const String payoutOnboarding = '/api/payouts/account/onboarding'; // POST → { url }
+  static const String payoutDashboard = '/api/payouts/account/dashboard'; // POST → { url }
 
   // ──────────────────────────────────────
   // Rider Endpoints

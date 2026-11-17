@@ -1,7 +1,8 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Customer App - Rating summary and review tiles (FR06)
 // RatingSummary  big average, stars, count and 5 → 1 breakdown bars
-// ReviewTile     one customer review ("Ahmed R.", stars, date, comment)
+// ReviewTile     one customer review ("Ahmed R.", stars, date, comment);
+//                showProduct adds which product it's about (store reviews)
 // ══════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -18,20 +19,26 @@ class RatingSummary extends StatelessWidget {
   final int count;
   final Map<int, int> distribution;
 
-  const RatingSummary({super.key, required this.average, required this.count, required this.distribution});
+  /// What to say when there are no reviews yet
+  final String emptyText;
+
+  const RatingSummary({
+    super.key,
+    required this.average,
+    required this.count,
+    required this.distribution,
+    this.emptyText = "No reviews yet. Customers can rate this product after it's delivered.",
+  });
 
   @override
   Widget build(BuildContext context) {
     if (average == null || count == 0) {
-      return const Row(
+      return Row(
         children: [
-          Icon(Icons.star_outline_rounded, color: starColor, size: 28),
-          SizedBox(width: 10),
+          const Icon(Icons.star_outline_rounded, color: starColor, size: 28),
+          const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              'No reviews yet. Customers can rate this product after it\'s delivered.',
-              style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
-            ),
+            child: Text(emptyText, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
           ),
         ],
       );
@@ -102,9 +109,41 @@ class RatingSummary extends StatelessWidget {
 
 class ReviewTile extends StatelessWidget {
   final ReviewModel review;
-  const ReviewTile({super.key, required this.review});
+
+  /// Shows which product the review is about (store-wide review lists)
+  final bool showProduct;
+
+  /// Tapping the product name (only with [showProduct])
+  final VoidCallback? onProductTap;
+
+  const ReviewTile({super.key, required this.review, this.showProduct = false, this.onProductTap});
 
   static final _date = DateFormat('d MMM yyyy');
+
+  Widget _productChip(String name) {
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: AppColors.secondary.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.shopping_bag_outlined, size: 12, color: AppColors.secondary),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: AppColors.secondary)),
+          ),
+        ],
+      ),
+    );
+    if (onProductTap == null) return chip;
+    return InkWell(onTap: onProductTap, borderRadius: BorderRadius.circular(6), child: chip);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -140,6 +179,10 @@ class ReviewTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 RatingStars(rating: review.rating.toDouble(), size: 14),
+                if (showProduct && (review.productName ?? '').trim().isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  _productChip(review.productName!.trim()),
+                ],
                 if ((review.comment ?? '').trim().isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(review.comment!.trim(),

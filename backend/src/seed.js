@@ -25,6 +25,7 @@ const { createRandom } = require('./demoData/random');
 const { MARKETS, NEIGHBOURHOODS, pointIn, homeAddress, shopAddress } = require('./demoData/places');
 const { personName, phone, cnic, makeEmails, STORE_TYPES, STORE_PREFIXES } = require('./demoData/people');
 const { loadCatalog } = require('./demoData/catalog');
+const { fillStoreCovers } = require('./backfillImages');
 const { haversineKm } = require('./utils/geo');
 const { deliveryFeePaisa } = require('./services/deliveryFee');
 const { payoutBreakdown } = require('./services/riderPayout.service');
@@ -484,6 +485,9 @@ async function writeDataset(client, d) {
     d.items.map((i) => [i.id, i.orderId, i.productId, i.qty, money(i.unit), money(i.unit * i.qty), i.qty]));
   await bulkInsert(client, 'product_reviews', ['order_id', 'product_id', 'vendor_id', 'customer_id', 'rating', 'comment', 'created_at'],
     d.reviews.map((x) => [x.orderId, x.productId, x.vendorId, x.customerId, x.rating, x.comment, x.at]));
+
+  // Each store's cover photo: one of its own products' photos
+  await fillStoreCovers(client);
 
   // The first demo store: receipt slip settings and a team for the switch-user screen
   const demoStore = d.vendors[0];

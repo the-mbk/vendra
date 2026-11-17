@@ -135,7 +135,7 @@ class _CartsScreenState extends State<CartsScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.storefront, color: AppColors.secondary),
+              StoreLogo(storeName: cart.storeName, logoUrl: cart.storeLogoUrl, size: 32),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(cart.storeName,

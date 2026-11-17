@@ -133,8 +133,13 @@ class _VendraCustomerAppState extends State<VendraCustomerApp> {
 
         onGenerateRoute: (settings) {
           if (settings.name == AppRoutes.productDetail) {
-            final product = settings.arguments as ProductModel;
-            return MaterialPageRoute(builder: (context) => ProductDetailScreen(product: product));
+            // A ProductModel, or { 'product': ProductModel, 'openedFromStore': bool }
+            final args = settings.arguments;
+            final product = args is Map ? args['product'] as ProductModel : args as ProductModel;
+            final fromStore = args is Map && args['openedFromStore'] == true;
+            return MaterialPageRoute(
+              builder: (context) => ProductDetailScreen(product: product, openedFromStore: fromStore),
+            );
           }
 
           if (settings.name == AppRoutes.storeDetail) {

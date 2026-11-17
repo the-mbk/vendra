@@ -12,6 +12,7 @@
     "images:backfill": "node src/backfillImages.js",
     "admin:create": "node src/createAdmin.js",
     "gateway": "node gateway/src/server.js",
+    "payoneer": "node payoneer-sim/src/server.js",
     "test": "node --test --test-concurrency=1 tests/*.test.js",
     "bench:concurrency": "node bench/inventory-concurrency.js",
     "db:up": "docker compose up -d --wait",

@@ -238,15 +238,25 @@ class _PosScreenState extends State<PosScreen> {
           Expanded(
             child: BlocBuilder<AuthBloc, auth_state.AuthState>(
               builder: (context, state) {
-                final store = state is auth_state.Authenticated ? state.user.storeName ?? 'My Store' : 'My Store';
+                final user = state is auth_state.Authenticated ? state.user : null;
+                final store = user?.storeName ?? 'My Store';
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Walk-in POS',
                         style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                    Text(store,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                    Row(
+                      children: [
+                        StoreLogo(storeName: store, logoUrl: user?.storeLogoUrl, size: 16),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(store,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                        ),
+                      ],
+                    ),
                   ],
                 );
               },

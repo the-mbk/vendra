@@ -295,7 +295,7 @@ class _CardEntrySheetState extends State<CardEntrySheet> {
 
               if (_error != null) ...[
                 const SizedBox(height: 12),
-                _ErrorBox(message: _error!),
+                CardErrorBox(message: _error!),
               ],
 
               const SizedBox(height: 12),
@@ -406,9 +406,10 @@ class _CardEntrySheetState extends State<CardEntrySheet> {
   }
 }
 
-class _ErrorBox extends StatelessWidget {
+/// A red message box for a refused card or a failed request (shared by the card sheets)
+class CardErrorBox extends StatelessWidget {
   final String message;
-  const _ErrorBox({required this.message});
+  const CardErrorBox({super.key, required this.message});
 
   @override
   Widget build(BuildContext context) {

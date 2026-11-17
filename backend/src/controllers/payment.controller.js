@@ -5,6 +5,8 @@
 
 const pool = require('../db');
 const payments = require('../services/payments.service');
+const payoutAccounts = require('../services/payoutAccounts.service');
+const payoneer = require('../services/payouts/payoneer');
 const { verifyWebhook } = require('../services/gateway.client');
 const { asyncHandler, intParam, paging, pageOf, searchPattern } = require('../utils/http');
 
@@ -57,10 +59,40 @@ const listMyWithdrawals = asyncHandler(async (req, res) => {
   res.json({ success: true, data: items, meta });
 });
 
+/** GET /api/payouts/account — Stripe: the user's payout account and whether withdrawals can go to it */
+const getPayoutAccount = asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await payoutAccounts.getPayoutAccount(req.user.userId) });
+});
+
+/** POST /api/payouts/account/onboarding — { url } of Stripe's setup page; open it in the browser */
+const startPayoutOnboarding = asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await payoutAccounts.startOnboarding(req.user.userId) });
+});
+
+/** POST /api/payouts/account/dashboard — { url } of the user's Stripe Express dashboard */
+const payoutDashboard = asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await payoutAccounts.dashboardLink(req.user.userId) });
+});
+
+/** GET /api/payouts/onboarding/done · /expired — the pages Stripe returns the browser to */
+const onboardingDone = (req, res) => res.type('html').send(payoutAccounts.onboardingPage(true));
+const onboardingExpired = (req, res) => res.type('html').send(payoutAccounts.onboardingPage(false));
+
+/**
+ * GET /api/payouts/payoneer/ipcn?token=…&APPROVED&apuid=… — Payoneer's notification callback.
+ * Payoneer doesn't sign these, so the registered URL carries PAYONEER_IPCN_TOKEN and the
+ * handler re-reads the payee / payout from Payoneer instead of trusting the parameters.
+ */
+const payoneerIpcn = asyncHandler(async (req, res) => {
+  if (!payoneer.ipcnTokenValid(req.query.token)) return res.status(403).type('text').send('Forbidden');
+  await payments.handlePayoneerIpcn(req.query);
+  res.type('text').send('OK');
+});
+
 /** POST /api/payments/webhook — signed events from the gateway (raw JSON body) */
 const gatewayWebhook = asyncHandler(async (req, res) => {
   const raw = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : '';
-  const event = verifyWebhook(raw, req.headers['vendra-signature']);
+  const event = verifyWebhook(raw, req.headers);
   if (!event) return res.status(400).json({ success: false, message: 'Invalid signature.' });
   await payments.handleGatewayEvent(event); // a failure returns 500 and the gateway retries
   res.json({ received: true });
@@ -122,6 +154,12 @@ module.exports = {
   withdraw,
   listMyWithdrawals,
   gatewayWebhook,
+  getPayoutAccount,
+  startPayoutOnboarding,
+  payoutDashboard,
+  onboardingDone,
+  onboardingExpired,
+  payoneerIpcn,
   adminReconciliation,
   adminListPayments,
   adminListWithdrawals,

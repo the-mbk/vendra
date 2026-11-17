@@ -36,7 +36,7 @@ Connect with `{ auth: { token } }` (or no token for public stock updates only). 
 |---|---|---|---|
 | POST | `/api/auth/signup` | `{ fullName, email, password, role: customer\|vendor\|rider, phone?, storeName?, cnic? (vendor) }`. Riders also send `{ cnic (13 digits), vehicleType: motorcycle\|motorbike\|scooter\|bicycle\|car, licenseNumber, vehicleNumber }` (licence and registration not needed for a bicycle) | Returns `{ token, user }`. A new rider has `user.riderApprovalStatus: pending` |
 | POST | `/api/auth/login` | `{ email, password, role? }` | Send the app's role; a mismatch returns **403 `WRONG_APP`** |
-| GET | `/api/auth/me` | | User incl. `walletBalance`, `mustChangePassword`, vendor `storeName/isApproved/storeLat/storeLng`, rider `vehicleType/isOnline/riderApprovalStatus (pending\|approved\|rejected)/riderRejectionReason/riderDocuments {cnic, licenseNumber, vehicleNumber}`. Vendors also get `permissions: [..]` and `staff: { id, fullName, role } \| null` (null = the store owner). Accepts staff tokens |
+| GET | `/api/auth/me` | | User incl. `walletBalance`, `mustChangePassword`, vendor `storeName/isApproved/storeLat/storeLng/storeLogoUrl/storeCoverUrl`, rider `vehicleType/isOnline/riderApprovalStatus (pending\|approved\|rejected)/riderRejectionReason/riderDocuments {cnic, licenseNumber, vehicleNumber}`. Vendors also get `permissions: [..]` and `staff: { id, fullName, role } \| null` (null = the store owner). Accepts staff tokens |
 | POST | `/api/auth/change-password` | `{ currentPassword, newPassword (≥8) }` | 401 `WRONG_PASSWORD` if the current one is wrong. Clears `mustChangePassword` |
 
 Login also returns `user.mustChangePassword`: when true (an admin issued a temporary password) the app should make the user choose a new one before continuing. There is no self-service "forgot password" (no email/SMS service); an admin resets it from the dashboard.
@@ -50,8 +50,9 @@ Login also returns `user.mustChangePassword`: when true (an admin issued a tempo
 | GET | `/api/products?search=&vendor_id=&category_id=` | *Paged.* Approved, in-stock products from approved vendors. `search` matches the product name, description or store name. Includes `categoryId`, `categoryName`, `publicStock`, `imageUrl` (public path like `/uploads/products/x.jpg`, or null), `vendorLat/Lng`, `averageRating` (1 decimal, null with no reviews), `ratingCount` |
 | GET | `/api/products/:id` | One product (also when sold out, `publicStock: 0`) + `images: [url…]` (cover first, then the gallery), `ratingDistribution: { 5: n, 4: n, 3: n, 2: n, 1: n }`, `latestReviews` (3) |
 | GET | `/api/products/:id/reviews` | *Paged*, newest first. Review: `{ id, orderId, productId, productName, rating, comment, customerName ("Ahmed R."), createdAt }` |
-| GET | `/api/vendors/:id` | Store + its products, plus the store's `averageRating, ratingCount` |
-| GET | `/api/stores?lat=&lng=&search=` | Every approved store with a location and something in stock, for the map and store search (`search` matches the store name or address): `[{ id, storeName, storeAddress, latitude, longitude, productCount, distanceKm, deliversToYou }]`. With `lat/lng`: nearest first, with `distanceKm` and `deliversToYou` (within `maxDeliveryKm`) |
+| GET | `/api/vendors/:id` | Store + its products, plus `logoUrl, coverUrl` (null when not set), the store's `averageRating, ratingCount, ratingDistribution ({5: n … 1: n})` and its 3 `latestReviews` |
+| GET | `/api/vendors/:id/reviews` | *Paged*, newest first: every review of the store's products (each names its `productName`) |
+| GET | `/api/stores?lat=&lng=&search=` | Every approved store with a location and something in stock, for the map and store search (`search` matches the store name or address): `[{ id, storeName, storeAddress, latitude, longitude, logoUrl, coverUrl, productCount, distanceKm, deliversToYou }]`. With `lat/lng`: nearest first, with `distanceKm` and `deliversToYou` (within `maxDeliveryKm`) |
 
 ## Customer (role `customer`)
 
@@ -66,6 +67,7 @@ Login also returns `user.mustChangePassword`: when true (an admin issued a tempo
 | POST | `/api/customer/orders/:id/picked-up` | Self pickup: ready_for_pickup → picked |
 | POST | `/api/customer/orders/:id/confirm-received` | Self pickup: → delivered, starts the dispute window |
 | POST | `/api/customer/orders/:id/review` | `{ items: [{ productId, rating (1–5), comment? (≤500) }], riderRating? (1–5, delivery orders) }` → 201. Once per delivered order: 409 `NOT_DELIVERED`, 409 `ALREADY_REVIEWED` |
+| GET | `/api/customer/products/:id/review-order` | `{ orderId }`: the customer's latest delivered, unreviewed order with this product (the product page's *Write a review*), or `null` |
 
 Orders also carry:
 - `deliveryOtp` — the 4-digit **handover code**, shown to the customer only while the order is open (null afterwards). The rider (or, for self pickup, the store) must enter it to complete the handover. `otpLockedUntil` is set when 5 wrong codes locked the handover for 10 minutes (the customer gets an `otp_locked` notification).
@@ -75,11 +77,23 @@ Orders also carry:
 
 ## Card payments and withdrawals
 
-Money enters Vendra only through the card gateway and leaves only through card payouts. The apps **never send card numbers to this API**: they tokenize the card directly at the gateway and send the single-use token.
+Money enters Vendra only through the card gateway and leaves only through payouts. The apps **never send card numbers to this API**: they tokenize the card directly at the gateway and send the single-use token.
 
-**Tokenize (app → gateway):** `POST {payments.gatewayUrl}/v1/tokens` with header `Authorization: Bearer {payments.publishableKey}` and body `{ number, exp_month, exp_year, cvc }` → `{ id: "tok_…", card: { brand, last4, funding, exp_month, exp_year } }`. Errors are `402 { error: { code, message } }` (`incomplete_number`, `invalid_number`, `test_card_required`, `invalid_expiry_month`, `invalid_expiry_year`, `incomplete_cvc`) — show `message`. Tokens are single-use and expire after 15 minutes. If the gateway URL's host is `localhost`, use the API's host instead (emulators and phones). Test cards: `GET {gatewayUrl}/v1/test-cards` (no key needed), shown only when `features.testCards` is on.
+**Two providers** (`PAYMENT_PROVIDER` on the backend; the apps read `payments.provider` from `/api/public-config`):
 
-**One-time password (3-D Secure):** when a payment comes back with `status: requires_action`, ask for the code and send it straight to the gateway: `POST {gatewayUrl}/v1/payment_intents/{payment.gatewayIntentId}/verify` with the publishable key and `{ otp }`. A wrong code returns `402 incorrect_otp` with the attempts left in `message`; after 3 wrong codes the payment fails. Then call `POST /api/payments/:id/refresh`.
+| | `vendrapay` (default) | `stripe` |
+|---|---|---|
+| Card entry | the app's own form, tokenized at Vendra Pay → `tok_…` | Stripe's card field (`flutter_stripe`) → PaymentMethod `pm_…` |
+| `token` sent to the API | `tok_…` | `pm_…` |
+| Bank check (3-D Secure) | `nextAction: { type: "otp" }` — send the code to the gateway | `nextAction: { type: "stripe_sdk", clientSecret }` — run Stripe's `handleNextAction(clientSecret)` |
+| Withdrawals (`payments.payoutsTo`) | `card`: to a tokenized card | `payoneer` (default): a Payoneer payout in USD to the user's linked Payoneer account · `stripe_account` (`PAYOUT_PROVIDER=stripe_connect`): a Stripe Connect transfer to the user's Express account |
+| Test cards | listed by the gateway | 4242 4242 4242 4242 · 4000 0025 0000 3155 (3-D Secure) · 4000 0000 0000 9995 (declined) |
+
+Everything below applies to both; the Vendra Pay–only parts say so.
+
+**Tokenize (app → Vendra Pay):** `POST {payments.gatewayUrl}/v1/tokens` with header `Authorization: Bearer {payments.publishableKey}` and body `{ number, exp_month, exp_year, cvc }` → `{ id: "tok_…", card: { brand, last4, funding, exp_month, exp_year } }`. Errors are `402 { error: { code, message } }` (`incomplete_number`, `invalid_number`, `test_card_required`, `invalid_expiry_month`, `invalid_expiry_year`, `incomplete_cvc`) — show `message`. Tokens are single-use and expire after 15 minutes. If the gateway URL's host is `localhost`, use the API's host instead (emulators and phones). Test cards: `GET {gatewayUrl}/v1/test-cards` (no key needed), shown only when `features.testCards` is on.
+
+**One-time password (3-D Secure, Vendra Pay):** when a payment comes back with `status: requires_action` and `nextAction.type: otp`, ask for the code and send it straight to the gateway: `POST {gatewayUrl}/v1/payment_intents/{payment.gatewayIntentId}/verify` with the publishable key and `{ otp }`. A wrong code returns `402 incorrect_otp` with the attempts left in `message`; after 3 wrong codes the payment fails. Then call `POST /api/payments/:id/refresh`.
 
 | Method | Path | Who | Body / notes |
 |---|---|---|---|
@@ -88,14 +102,18 @@ Money enters Vendra only through the card gateway and leaves only through card p
 | GET | `/api/payments` | any | *Paged.* The user's card payments |
 | GET | `/api/payments/:id` | owner | One payment |
 | POST | `/api/payments/:id/refresh` | owner | Re-reads it from the gateway → `{ payment, order, walletBalance }`. Call after the OTP step |
-| POST | `/api/withdrawals` | any | `{ amount (≥ payments.minWithdrawal), token }` → `{ withdrawal, walletBalance }`. The wallet is debited at once; the payout lands on the card after a short delay (`in_transit` → `paid`), or bounces (`failed`) and the money returns to the wallet. 400 `INSUFFICIENT_BALANCE`, `AMOUNT_OUT_OF_RANGE` |
+| POST | `/api/withdrawals` | any | Card `{ amount (≥ payments.minWithdrawal), token }`; Payoneer / Stripe account `{ amount }` → `{ withdrawal, walletBalance }`. The wallet is debited at once. Card: the payout lands after a short delay (`in_transit` → `paid`), or bounces (`failed`) and the money returns to the wallet. Payoneer: `in_transit` until Payoneer transfers it to the user's Payoneer balance (`paid`), or `failed` with the money returned. Stripe account: the transfer arrives at once (`paid`). 400 `INSUFFICIENT_BALANCE`, `AMOUNT_OUT_OF_RANGE`; 409 `PAYOUT_ACCOUNT_REQUIRED` / `PAYOUT_ACCOUNT_PENDING` |
 | GET | `/api/withdrawals` | any | *Paged.* The user's withdrawals |
+| GET | `/api/payouts/account` | any | `{ provider: payoneer\|stripe_connect\|card, required, account: { id, status?, detailsSubmitted, payoutsEnabled } \| null, currency, pkrPerUnit }`. `required: false` for cards. Payoneer `status`: `not_registered` (link opened, sign-up not finished) → `pending` (Payoneer reviewing) → `active` (can withdraw), or `inactive` |
+| POST | `/api/payouts/account/onboarding` | any | `{ url }` of the provider's setup page: Payoneer's registration page (create a Payoneer account or link an existing one) or Stripe's Express onboarding. Open it in the browser; it returns to a "go back to the app" page, then re-read `/api/payouts/account` |
+| POST | `/api/payouts/account/dashboard` | any | `{ url }` where the user sees their balance at the provider (Payoneer account page / Stripe Express dashboard) |
+| GET | `/api/payouts/payoneer/ipcn?token=…` | Payoneer | Payoneer's notification callback (not for the apps). Needs `PAYONEER_IPCN_TOKEN`; the payee or payout is re-read from Payoneer |
 
 `payment`: `{ id, purpose: topup|checkout, amount, status: processing|requires_action|succeeded|failed|canceled, card: { brand, last4 }, gatewayIntentId, nextAction: { type: "otp", attemptsLeft, hint } | null, failureMessage, orderId, orderError, createdAt }`. `hint` (the sandbox code) is only sent in development mode.
-`withdrawal`: `{ id, amount, status: pending|in_transit|paid|failed, card: { brand, last4 }, gatewayPayoutId, failureMessage, createdAt, settledAt }`.
+`withdrawal`: `{ id, amount, status: pending|in_transit|paid|failed, provider: vendrapay|payoneer|stripe, card: { brand, last4 } | null, gatewayPayoutId (po_… / vendra-withdrawal-N at Payoneer / Stripe tr_…), destinationAccount (Payoneer payee id / Stripe acct_…), gatewayAmount + gatewayCurrency (what was sent, e.g. 17.86 usd at PAYONEER_PKR_PER_USD / STRIPE_PKR_PER_UNIT rupees per dollar), failureMessage, createdAt, settledAt }`.
 Other codes: 400 `CARD_TOKEN_REQUIRED`, 400 `TOKEN_ALREADY_USED` / `TOKEN_EXPIRED` (enter the card again), 503 `GATEWAY_UNAVAILABLE`.
 
-`POST /api/payments/webhook` receives the gateway's signed events (`Vendra-Signature: t=…,v1=HMAC-SHA256(secret, "t.body")`); it is not for the apps.
+`POST /api/payments/webhook` receives the gateway's signed events (Vendra Pay `Vendra-Signature`, Stripe `Stripe-Signature`, both `t=…,v1=HMAC-SHA256(secret, "t.body")`); it is not for the apps. Stripe events used: `payment_intent.*`, `account.updated`, `transfer.reversed`. Missed events are caught up by the backend's 30-second sweep, so webhooks are optional locally.
 
 ## Vendor (role `vendor`)
 
@@ -110,6 +128,8 @@ Other codes: 400 `CARD_TOKEN_REQUIRED`, 400 `TOKEN_ALREADY_USED` / `TOKEN_EXPIRE
 | DELETE | `/api/vendor/products/:id/image` | Removes the photo |
 | POST | `/api/vendor/products/:id/images` | multipart `image`: adds a gallery photo (up to 5 besides the cover; the first photo of a product without a cover becomes the cover). Returns the product row |
 | DELETE | `/api/vendor/products/:id/images/:imageId` | Removes a gallery photo |
+| POST | `/api/vendor/store/photos/:kind` | Owner only. `kind` = `logo` (square) or `cover` (wide banner); multipart `image` → `{ logoUrl, coverUrl }`. Replaces and deletes the previous picture |
+| DELETE | `/api/vendor/store/photos/:kind` | Owner only. Removes the logo or cover → `{ logoUrl, coverUrl }` |
 | GET | `/api/vendor/reviews` | *Paged.* Reviews of this store's products (review shape above); `meta.count`, `meta.average` |
 | POST | `/api/vendor/pos/sales` | Walk-in sale `{ items: [{ productId, quantity }] }`. Sellable = `private_stock − reserved_quantity` (buffer can be sold, reserved units cannot). 409 `RESERVED_STOCK` `{ productId, sellable, reserved }`. Returns `{ id, total_amount, items: [{ product_id, product_name, quantity, unit_price, private_stock_after, public_stock_after, reserved_quantity }], receipt }` |
 | GET | `/api/vendor/pos/sales` | Today: `{ sales: [{ id, total_amount, created_at, cashier_name, cashier_role, items }], today_count, today_total }` |
@@ -202,7 +222,7 @@ Delivery fee (charged to the customer) = `delivery_fee + delivery_fee_per_km × 
 | GET | `/api/admin/riders?status=pending\|approved\|rejected` | Waiting riders first: `{ id (user id), fullName, email, phone, vehicleType, cnic, licenseNumber, vehicleNumber, approvalStatus, rejectionReason, reviewedAt, isOnline, deliveries, earnings, averageRating, walletBalance, activeOrderId }` |
 | PUT | `/api/admin/riders/:id/approve` · `/reject` `{ reason }` | Rider document review (`:id` = the rider's user id). Reject needs a reason, takes the rider offline, and is refused mid-delivery. The rider is notified |
 | GET | `/api/admin/finance` | `{ escrowPool, held {orders, amount}, disputed {orders, amount}, commission, deliveryMargin, platformRevenue, riderPayouts, recent }` |
-| GET | `/api/admin/finance/reconciliation` | Does the money at the gateway match the books? `{ gateway: { reachable, available, inTransit }, books: { wallets, escrow, platformRevenue, pendingWithdrawals, uncreditedPayments }, openingBalances: { total, funded, unfunded }, expectedGatewayBalance, difference, balanced }` |
+| GET | `/api/admin/finance/reconciliation` | Does the money at the gateway match the books? `{ mode, gateway: { reachable, available, inTransit }, books: { wallets, escrow, platformRevenue, pendingWithdrawals, uncreditedPayments }, openingBalances: { total, funded, unfunded }, expectedGatewayBalance, difference, balanced }`. `mode: gateway_balance` (Vendra Pay): the gateway's PKR balance vs the books. `mode: stripe_payments`: Stripe holds funds in its own currency, so `gateway.available` is the total of Vendra card payments Stripe charged (PKR, `succeededPayments` of them) vs the deposits credited; `gateway.platformBalance { currency, available, pending }` is the real Stripe balance in minor units |
 | GET | `/api/admin/payments?status=&search=` · `/api/admin/withdrawals?status=&search=` | *Paged*, default 50. `search` matches the user's name or email, the gateway id, the card's last 4 digits and (payments) the order number, e.g. `#VDR-03630`. The payment/withdrawal shapes above plus `user: { id, name, email, role }` |
 | GET | `/api/admin/orders` · `/api/admin/users` | Orders incl. `escrowStatus, deliveryType, riderName, riderPayout, paymentMethod (wallet\|card), cancellationReason` |
 | PUT | `/api/admin/users/:id/reset-password` | Sets a random 10-character temporary password and returns it once as `data.temporaryPassword`; the user must change it at next sign-in. Not allowed for admin accounts |

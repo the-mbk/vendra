@@ -389,7 +389,7 @@ class _Wallet extends StatelessWidget {
         const SizedBox(height: 8),
         WithdrawalHistoryList(
           refreshKey: state.withdrawalsVersion,
-          emptyText: 'No withdrawals yet. Use Withdraw to send your earnings to a card.',
+          emptyText: 'No withdrawals yet. Use Withdraw to send your earnings to ${AppConfig.current.payments.payoutDestination}.',
         ),
         const SizedBox(height: 16),
         Text('Transactions',

@@ -226,6 +226,52 @@ const uploadProductImage = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Photo updated.', data: product });
 });
 
+// ──────────────────────────────────────
+// Store pictures: logo (square) and cover (wide banner)
+// ──────────────────────────────────────
+
+const STORE_PHOTO_COLUMNS = { logo: 'logo_url', cover: 'cover_url' };
+
+function storePhotoColumn(kind) {
+  const column = STORE_PHOTO_COLUMNS[kind];
+  if (!column) throw httpError(400, 'The store photo must be "logo" or "cover".');
+  return column;
+}
+
+/** Sets (url) or clears (null) the store's logo or cover; deletes the file it replaces */
+async function setStorePhoto(vendorId, column, url) {
+  const r = await pool.query(
+    `UPDATE vendors v SET ${column} = $1
+     FROM (SELECT ${column} AS old_url FROM vendors WHERE id = $2 FOR NO KEY UPDATE) prev
+     WHERE v.id = $2 RETURNING prev.old_url, v.logo_url, v.cover_url`,
+    [url, vendorId]
+  );
+  if (r.rows.length === 0) throw httpError(404, 'Store not found');
+  if (r.rows[0].old_url !== url) removeProductImage(r.rows[0].old_url);
+  broadcast('catalog:update', { vendorId });
+  return { logoUrl: r.rows[0].logo_url, coverUrl: r.rows[0].cover_url };
+}
+
+/** POST /api/vendor/store/photos/:kind  (kind logo|cover; multipart, field "image") — replaces that picture */
+const uploadStorePhoto = asyncHandler(async (req, res) => {
+  const uploaded = req.file ? productImageUrl(req.file) : null;
+  try {
+    const column = storePhotoColumn(req.params.kind);
+    if (!uploaded) throw httpError(400, 'Attach a photo in the "image" field.');
+    const data = await setStorePhoto(vendorIdOf(req), column, uploaded);
+    res.json({ success: true, message: req.params.kind === 'logo' ? 'Store logo updated.' : 'Cover photo updated.', data });
+  } catch (err) {
+    removeProductImage(uploaded);
+    throw err;
+  }
+});
+
+/** DELETE /api/vendor/store/photos/:kind */
+const deleteStorePhoto = asyncHandler(async (req, res) => {
+  const data = await setStorePhoto(vendorIdOf(req), storePhotoColumn(req.params.kind), null);
+  res.json({ success: true, message: req.params.kind === 'logo' ? 'Store logo removed.' : 'Cover photo removed.', data });
+});
+
 /** DELETE /api/vendor/products/:id/image */
 const deleteProductImage = asyncHandler(async (req, res) => {
   const vendorId = vendorIdOf(req);
@@ -898,6 +944,8 @@ module.exports = {
   updateProduct,
   deleteProduct,
   uploadProductImage,
+  uploadStorePhoto,
+  deleteStorePhoto,
   deleteProductImage,
   addGalleryImage,
   deleteGalleryImage,
