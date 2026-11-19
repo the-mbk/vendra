@@ -204,7 +204,7 @@ const login = async (req, res) => {
     // Find user by email
     const result = await pool.query(
       `SELECT u.id, u.full_name, u.email, u.phone, u.password_hash, u.role, u.vendor_id, u.wallet_balance,
-              u.must_change_password, v.store_name, v.is_approved, v.cnic, r.approval_status AS rider_approval_status
+              u.avatar_url, u.must_change_password, v.store_name, v.is_approved, v.cnic, r.approval_status AS rider_approval_status
        FROM users u
        LEFT JOIN vendors v ON u.vendor_id = v.id
        LEFT JOIN riders r ON r.user_id = u.id
@@ -261,6 +261,7 @@ const login = async (req, res) => {
           fullName: user.full_name,
           email: user.email,
           phone: user.phone,
+          avatarUrl: user.avatar_url || null,
           role: user.role,
           walletBalance: parseFloat(user.wallet_balance),
           vendorId: user.vendor_id,
@@ -289,7 +290,7 @@ const login = async (req, res) => {
 const getMe = async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT u.id, u.full_name, u.email, u.phone, u.role, u.vendor_id, u.wallet_balance, u.created_at, u.must_change_password,
+      `SELECT u.id, u.full_name, u.email, u.phone, u.avatar_url, u.role, u.vendor_id, u.wallet_balance, u.created_at, u.must_change_password,
               v.store_name, v.store_address, v.is_approved, v.cnic, v.latitude AS store_lat, v.longitude AS store_lng,
               v.logo_url AS store_logo_url, v.cover_url AS store_cover_url,
               v.pending_latitude, v.pending_longitude, v.pending_address, v.location_requested_at, v.location_rejection_reason,
@@ -320,6 +321,7 @@ const getMe = async (req, res) => {
         fullName: user.full_name,
         email: user.email,
         phone: user.phone,
+        avatarUrl: user.avatar_url || null,
         role: user.role,
         walletBalance: parseFloat(user.wallet_balance),
         vendorId: user.vendor_id,

@@ -214,7 +214,7 @@ class _StoreScreenState extends State<StoreScreen> {
       margin: const EdgeInsets.fromLTRB(16, 20, 16, 0),
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(0, 2))],
       ),
@@ -295,7 +295,7 @@ class _StoreScreenState extends State<StoreScreen> {
               ? Center(child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.error_outline, size: 48, color: Colors.grey.shade400),
+                    Icon(Icons.error_outline, size: 48, color: AppColors.textLight),
                     const SizedBox(height: 16),
                     Text(_error!, textAlign: TextAlign.center),
                     const SizedBox(height: 16),
@@ -344,7 +344,7 @@ class _StoreScreenState extends State<StoreScreen> {
                     // Store info
                     SliverToBoxAdapter(
                       child: Container(
-                        color: Colors.white,
+                        color: AppColors.surface,
                         padding: const EdgeInsets.all(16),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -358,7 +358,7 @@ class _StoreScreenState extends State<StoreScreen> {
                             if (_vendorData?['ownerName'] != null)
                               Row(
                                 children: [
-                                  const Icon(Icons.person_outline, size: 16, color: AppColors.textSecondary),
+                                  Icon(Icons.person_outline, size: 16, color: AppColors.textSecondary),
                                   const SizedBox(width: 6),
                                   Expanded(
                                     child: Text(_vendorData!['ownerName'], style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
@@ -371,7 +371,7 @@ class _StoreScreenState extends State<StoreScreen> {
                             if (_vendorData?['storeAddress'] != null)
                               Row(
                                 children: [
-                                  const Icon(Icons.location_on_outlined, size: 16, color: AppColors.secondary),
+                                  Icon(Icons.location_on_outlined, size: 16, color: AppColors.secondary),
                                   const SizedBox(width: 6),
                                   Expanded(child: Text(_vendorData!['storeAddress'], style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textPrimary))),
                                 ],
@@ -398,15 +398,15 @@ class _StoreScreenState extends State<StoreScreen> {
                             // Trust badge
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                              decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(8)),
+                              decoration: BoxDecoration(color: AppColors.successSurface, borderRadius: BorderRadius.circular(8)),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.verified_user, size: 16, color: Color(0xFF2E7D32)),
+                                  Icon(Icons.verified_user, size: 16, color: AppColors.successInk),
                                   const SizedBox(width: 6),
                                   Flexible(
                                     child: Text('Vendra Verified • Escrow Protected',
-                                        style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: const Color(0xFF2E7D32))),
+                                        style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.successInk)),
                                   ),
                                 ],
                               ),
@@ -439,7 +439,7 @@ class _StoreScreenState extends State<StoreScreen> {
                                 padding: const EdgeInsets.all(32),
                                 child: Column(
                                   children: [
-                                    Icon(Icons.inventory_2_outlined, size: 64, color: Colors.grey.shade300),
+                                    Icon(Icons.inventory_2_outlined, size: 64, color: AppColors.textLight),
                                     const SizedBox(height: 16),
                                     Text('No products available', style: GoogleFonts.poppins(color: AppColors.textSecondary)),
                                   ],
@@ -498,14 +498,14 @@ class _StoreScreenState extends State<StoreScreen> {
                             child: Container(
                               height: 150,
                               decoration: BoxDecoration(
-                                color: Colors.grey.shade100,
+                                color: AppColors.surfaceMuted,
                                 borderRadius: BorderRadius.circular(14),
                               ),
                               child: Center(
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    Icon(Icons.map_outlined, size: 40, color: Colors.grey.shade400),
+                                    Icon(Icons.map_outlined, size: 40, color: AppColors.textLight),
                                     const SizedBox(height: 8),
                                     Text('Location not set by vendor', style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
                                   ],
@@ -569,7 +569,7 @@ class _ProductQuickSheet extends StatelessWidget {
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 12),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
+                  color: AppColors.hairline,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),

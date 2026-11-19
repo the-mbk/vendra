@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getFinance, getReconciliation, isAuthError } from "../../lib/api";
+import { getFinance, getReconciliation, getSettlement, runSettlement, isAuthError } from "../../lib/api";
 import { usePublicConfig } from "../../lib/hooks";
 import { PageLoader, ErrorBox, Spinner, Th, formatRs, formatNumber, formatDate, formatOrderId, humanize } from "../../lib/ui";
+import { CHANNELS, ChannelSwatch, ChannelSplitBar, ChannelSeriesChart } from "../../lib/channels";
 
 const entryConfig = {
   commission: { label: "Commission", color: "bg-blue-100 text-blue-700", icon: "percent" },
@@ -16,7 +17,7 @@ function StatCard({ title, value, subtitle, icon, iconClass, onClick }) {
   return (
     <Tag
       onClick={onClick}
-      className={`bg-white rounded-2xl p-6 border border-outline-variant/20 shadow-sm text-left w-full flex flex-col justify-start ${
+      className={`bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant/20 shadow-sm text-left w-full flex flex-col justify-start ${
         onClick ? "hover:shadow-md transition-shadow" : ""
       }`}
     >
@@ -88,7 +89,7 @@ function ReconStatus({ recon }) {
       <div className="flex items-center gap-3 rounded-xl px-4 py-3 bg-emerald-50 border border-emerald-200">
         <span className="material-symbols-outlined text-emerald-600 text-[32px]">verified</span>
         <div>
-          <p className="text-2xl font-bold text-emerald-700 leading-tight">Balanced ✓</p>
+          <p className="text-2xl font-bold text-emerald-700 leading-tight">Balanced</p>
           <p className="text-xs text-emerald-700 mt-0.5">
             The gateway holds exactly {formatRs(recon.gateway.available)}, the amount the books say it should.
           </p>
@@ -141,7 +142,7 @@ function StripeReconBody({ recon }) {
         <div className="flex items-center gap-3 rounded-xl px-4 py-3 bg-emerald-50 border border-emerald-200">
           <span className="material-symbols-outlined text-emerald-600 text-[32px]">verified</span>
           <div>
-            <p className="text-2xl font-bold text-emerald-700 leading-tight">Balanced ✓</p>
+            <p className="text-2xl font-bold text-emerald-700 leading-tight">Balanced</p>
             <p className="text-xs text-emerald-700 mt-0.5">
               Every rupee Stripe charged ({formatRs(g.available)} in {formatNumber(g.succeededPayments)} payments) reached a wallet.
             </p>
@@ -178,6 +179,147 @@ function StripeReconBody({ recon }) {
         </ReconColumn>
       </div>
     </>
+  );
+}
+
+/** "3:07" for a countdown */
+function clock(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/**
+ * Escrow settlement: what the background sweep pays stores now and over the next
+ * 24 hours, a countdown to its next run, and a manual "release now" (audited).
+ */
+function SettlementPanel({ onReleased }) {
+  const router = useRouter();
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [secondsLeft, setSecondsLeft] = useState(null);
+  const [deadline, setDeadline] = useState(null); // ms timestamp of the next sweep
+  const [running, setRunning] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [message, setMessage] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    getSettlement()
+      .then((res) => {
+        if (cancelled) return;
+        setData(res.data);
+        setError(null);
+        const next = res.data.sweep.nextRunInSeconds;
+        setSecondsLeft(next);
+        setDeadline(next == null ? null : Date.now() + next * 1000);
+      })
+      .catch((err) => {
+        if (isAuthError(err)) router.push("/");
+        if (!cancelled) setError(err.message);
+      });
+    return () => { cancelled = true; };
+  }, [router, reloadKey]);
+
+  // Tick the countdown; once the sweep has had time to run, re-read what is left
+  useEffect(() => {
+    if (deadline == null) return undefined;
+    const timer = setInterval(() => {
+      const left = Math.ceil((deadline - Date.now()) / 1000);
+      if (left > 0) {
+        setSecondsLeft(left);
+      } else {
+        clearInterval(timer);
+        setSecondsLeft(null);
+        setTimeout(() => setReloadKey((k) => k + 1), 3000);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [deadline]);
+
+  async function handleRun() {
+    setRunning(true);
+    setMessage(null);
+    try {
+      const res = await runSettlement();
+      setMessage({ ok: true, text: res.message });
+      setReloadKey((k) => k + 1);
+      if (res.data.released > 0) onReleased?.();
+    } catch (err) {
+      if (isAuthError(err)) router.push("/");
+      setMessage({ ok: false, text: err.message });
+    } finally {
+      setRunning(false);
+      setConfirming(false);
+    }
+  }
+
+  const due = data?.dueNow;
+  return (
+    <div className="bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant/20 shadow-sm mb-5">
+      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary text-[22px]">schedule_send</span>
+            <h3 className="text-lg font-bold text-on-surface">Escrow settlement</h3>
+          </div>
+          <p className="text-sm text-on-surface-variant mt-1">
+            Delivered orders pay the store once their dispute window ends. Orders with an open dispute are never released.
+          </p>
+        </div>
+        {data && (
+          <div className="flex items-center gap-2 shrink-0">
+            {confirming ? (
+              <>
+                <span className="text-xs text-on-surface-variant">Release {formatNumber(due.orders)} now?</span>
+                <button onClick={handleRun} disabled={running}
+                  className="px-3 py-2 rounded-xl text-sm font-semibold bg-primary text-white hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5">
+                  {running && <Spinner className="w-4 h-4" color="text-white" />}
+                  Yes, release
+                </button>
+                <button onClick={() => setConfirming(false)}
+                  className="px-3 py-2 rounded-xl text-sm font-semibold bg-surface-container-low text-on-surface-variant">Cancel</button>
+              </>
+            ) : (
+              <button onClick={() => setConfirming(true)} disabled={due.orders === 0}
+                className="px-3 py-2 rounded-xl text-sm font-semibold text-primary bg-primary/5 hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[18px]">bolt</span>
+                Release due now
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {error && <p className="text-sm text-error mt-4">{error}</p>}
+      {message && <p className={`text-sm mt-3 ${message.ok ? "text-emerald-700" : "text-error"}`}>{message.text}</p>}
+      {data && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-5">
+          <div className="p-4 rounded-xl bg-surface-container-low/60">
+            <p className="text-[11px] font-semibold text-outline uppercase tracking-wider">Due now</p>
+            <p className="text-xl font-bold text-on-surface mt-1 tabular-nums">{formatRs(due.amount)}</p>
+            <p className="text-xs text-outline">{formatNumber(due.orders)} order{due.orders === 1 ? "" : "s"}</p>
+          </div>
+          <div className="p-4 rounded-xl bg-surface-container-low/60">
+            <p className="text-[11px] font-semibold text-outline uppercase tracking-wider">Next 24 hours</p>
+            <p className="text-xl font-bold text-on-surface mt-1 tabular-nums">{formatRs(data.next24h.amount)}</p>
+            <p className="text-xs text-outline">
+              {formatNumber(data.next24h.orders)} order{data.next24h.orders === 1 ? "" : "s"}
+              {data.nextDueAt ? ` · next at ${formatDate(data.nextDueAt, true)}` : ""}
+            </p>
+          </div>
+          <div className="p-4 rounded-xl bg-surface-container-low/60">
+            <p className="text-[11px] font-semibold text-outline uppercase tracking-wider">Next automatic run</p>
+            <p className="text-xl font-bold text-on-surface mt-1 tabular-nums">
+              {secondsLeft != null ? clock(secondsLeft) : data.sweep.lastRunAt ? "Running…" : "—"}
+            </p>
+            <p className="text-xs text-outline">
+              {data.sweep.lastRunAt ? `Every ${data.sweep.intervalSeconds} s` : "Waiting for the server's first run"}
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -218,7 +360,7 @@ function ReconciliationPanel({ gatewayUrl }) {
   const stripe = recon?.mode === "stripe_payments";
 
   return (
-    <div className="bg-white rounded-2xl p-6 border border-outline-variant/20 shadow-sm mb-5">
+    <div className="bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant/20 shadow-sm mb-5">
       {/* Title row */}
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 mb-5">
         <div>
@@ -391,10 +533,122 @@ function ReconciliationPanel({ gatewayUrl }) {
   );
 }
 
+/** "1.8%" share of GMV kept as commission */
+function rate(part, whole) {
+  const p = Number(part) || 0;
+  const w = Number(whole) || 0;
+  return w > 0 ? `${Number(((p / w) * 100).toFixed(1))}%` : "—";
+}
+
+/**
+ * Walk-in POS sales carry no platform fee (SME incentive); online orders pay commission
+ * when their escrow is released (SRDS §2.1).
+ */
+function ChannelLedger({ channels }) {
+  const walkIn = channels.walkIn || {};
+  const online = channels.online || {};
+  const rows = [
+    {
+      channel: CHANNELS[0],
+      gmv: walkIn.gmv,
+      volume: `${formatNumber(walkIn.sales)} sales`,
+      fee: (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700 whitespace-nowrap">
+          0% · SME incentive
+        </span>
+      ),
+      commission: 0,
+    },
+    {
+      channel: CHANNELS[1],
+      gmv: online.gmv,
+      volume: `${formatNumber(online.orders)} orders`,
+      fee: <span className="text-sm text-on-surface whitespace-nowrap">Commission on release</span>,
+      commission: online.commission,
+    },
+  ];
+  const totalCommission = Number(online.commission) || 0;
+
+  return (
+    <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden mb-5">
+      <div className="px-6 pt-6 pb-4">
+        <div className="flex items-center gap-2">
+          <span className="material-symbols-outlined text-primary text-[22px]">storefront</span>
+          <h3 className="text-lg font-bold text-on-surface">Commission ledger by channel</h3>
+        </div>
+        <p className="text-sm text-on-surface-variant mt-1">
+          Walk-in POS sales stay commission-free so shopkeepers have no reason to keep sales off the system. The
+          platform earns only on online marketplace orders, once their escrow is released to the store.
+        </p>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="bg-surface-container-low/50 border-y border-outline-variant/20">
+              <Th>Channel</Th>
+              <Th align="right">GMV (all time)</Th>
+              <Th align="right">Share</Th>
+              <Th>Platform fee</Th>
+              <Th align="right">Commission earned</Th>
+              <Th align="right">Earned / GMV</Th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-outline-variant/10">
+            {rows.map((r) => (
+              <tr key={r.channel.key}>
+                <td className="px-4 py-3.5">
+                  <p className="text-sm font-semibold text-on-surface flex items-center gap-2 whitespace-nowrap">
+                    <ChannelSwatch channel={r.channel} />
+                    {r.channel.label}
+                  </p>
+                  <p className="text-xs text-outline pl-[18px]">{r.volume}</p>
+                </td>
+                <td className="px-4 py-3.5 text-sm font-semibold text-on-surface text-right tabular-nums whitespace-nowrap">{formatRs(r.gmv)}</td>
+                <td className="px-4 py-3.5 text-sm text-on-surface-variant text-right tabular-nums">{rate(r.gmv, channels.totalGmv)}</td>
+                <td className="px-4 py-3.5">{r.fee}</td>
+                <td className="px-4 py-3.5 text-sm font-semibold text-on-surface text-right tabular-nums whitespace-nowrap">{formatRs(r.commission)}</td>
+                <td className="px-4 py-3.5 text-sm text-on-surface-variant text-right tabular-nums">{rate(r.commission, r.gmv)}</td>
+              </tr>
+            ))}
+            <tr className="bg-surface-container-low/30">
+              <td className="px-4 py-3.5 text-sm font-bold text-on-surface">Total platform</td>
+              <td className="px-4 py-3.5 text-sm font-bold text-on-surface text-right tabular-nums whitespace-nowrap">{formatRs(channels.totalGmv)}</td>
+              <td className="px-4 py-3.5 text-sm text-on-surface-variant text-right">100%</td>
+              <td className="px-4 py-3.5" />
+              <td className="px-4 py-3.5 text-sm font-bold text-on-surface text-right tabular-nums whitespace-nowrap">{formatRs(totalCommission)}</td>
+              <td className="px-4 py-3.5 text-sm text-on-surface-variant text-right tabular-nums">{rate(totalCommission, channels.totalGmv)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="px-6 py-5 border-t border-outline-variant/20">
+        <ChannelSplitBar walkIn={walkIn.gmv} online={online.gmv} />
+        <div className="flex flex-wrap items-center justify-between gap-2 mt-5 mb-2">
+          <p className="text-[11px] font-semibold text-outline uppercase tracking-wider">
+            Daily GMV · last {channels.series?.length || 0} days
+          </p>
+          <div className="flex items-center gap-4">
+            {CHANNELS.map((c) => (
+              <span key={c.key} className="inline-flex items-center gap-1.5 text-xs text-on-surface-variant">
+                <ChannelSwatch channel={c} />
+                {c.label}
+              </span>
+            ))}
+          </div>
+        </div>
+        <ChannelSeriesChart series={channels.series} />
+      </div>
+    </div>
+  );
+}
+
 export default function FinancePage() {
   const [finance, setFinance] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0); // bumped after a manual escrow release
   const router = useRouter();
   const publicConfig = usePublicConfig();
 
@@ -414,7 +668,7 @@ export default function FinancePage() {
       }
     }
     fetchFinance();
-  }, [router]);
+  }, [router, reloadKey]);
 
   if (loading) return <PageLoader label="Loading finance..." />;
   if (error) return <ErrorBox title="Error loading finance" message={error} />;
@@ -447,6 +701,9 @@ export default function FinancePage() {
         </div>
       </div>
 
+      {/* Escrow settlement (batch release) */}
+      <SettlementPanel onReleased={() => setReloadKey((k) => k + 1)} />
+
       {/* Gateway reconciliation */}
       <ReconciliationPanel gatewayUrl={publicConfig?.payments?.gatewayUrl} />
 
@@ -457,7 +714,7 @@ export default function FinancePage() {
           value={formatRs(finance.escrowPool)}
           subtitle={
             reconciled
-              ? "Matches held + disputed orders ✓"
+              ? "Matches held + disputed orders"
               : `Held + disputed orders: ${formatRs(owed)}`
           }
           icon="account_balance"
@@ -490,7 +747,7 @@ export default function FinancePage() {
       </div>
 
       {/* Revenue split */}
-      <div className="bg-white rounded-2xl p-6 border border-outline-variant/20 shadow-sm mb-5">
+      <div className="bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant/20 shadow-sm mb-5">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
             <p className="text-sm text-on-surface-variant">Platform revenue</p>
@@ -529,8 +786,10 @@ export default function FinancePage() {
         )}
       </div>
 
+      {finance.channels && <ChannelLedger channels={finance.channels} />}
+
       {/* Ledger */}
-      <div className="bg-white rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
+      <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-outline-variant/20 flex items-center justify-between">
           <h3 className="text-lg font-bold text-on-surface">Recent platform ledger</h3>
           <span className="text-xs text-outline">{recent.length} most recent entr{recent.length === 1 ? "y" : "ies"}</span>

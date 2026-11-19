@@ -6,6 +6,8 @@
 //                the rest stays held for the dispute window
 //   release    → vendor gets subtotal − commission; platform keeps
 //                commission + (delivery fee − rider payout)
+//   split      → a dispute outcome: the customer gets refundPct % of the item
+//                subtotal back, the vendor the rest (less commission on it)
 //   refund     → everything still held goes back to the customer
 // All amounts are integer paisa.
 // ══════════════════════════════════════════════════════════════
@@ -16,7 +18,7 @@ const { creditWallet } = require('./wallet.service');
 const { getPolicies } = require('./policy.service');
 const { notify, announceOrder } = require('./notification.service');
 const { httpError, withTransaction } = require('../utils/http');
-const { toPaisa, paisaToString, paisaToNumber, percentOf } = require('../utils/money');
+const { toPaisa, paisaToString, paisaToNumber, percentOf, formatRs, commissionBreakdown } = require('../utils/money');
 
 async function lockOrder(client, orderId) {
   const r = await client.query('SELECT * FROM orders WHERE id = $1 FOR UPDATE', [orderId]);
@@ -65,7 +67,12 @@ async function scheduleEscrowRelease(client, afterCommit, orderId) {
   if (windowMin <= 0) await releaseEscrow(client, afterCommit, orderId);
 }
 
-async function releaseEscrow(client, afterCommit, orderId, { note, allowFrom = ['held'] } = {}) {
+/**
+ * Pays the vendor out of escrow. `refundPct` (dispute "split" outcome) first returns
+ * that share of the item subtotal to the customer; commission is only taken on what
+ * the vendor actually receives.
+ */
+async function releaseEscrow(client, afterCommit, orderId, { note, allowFrom = ['held'], refundPct = 0 } = {}) {
   const order = await lockOrder(client, orderId);
   if (!allowFrom.includes(order.escrow_status)) {
     throw httpError(409, `Escrow for Order #${orderId} is already ${order.escrow_status}.`);
@@ -74,12 +81,24 @@ async function releaseEscrow(client, afterCommit, orderId, { note, allowFrom = [
   const { commission_pct: commissionPct } = await getPolicies(client);
   const held = heldPaisa(order);
   const subtotal = toPaisa(order.subtotal);
-  const commission = percentOf(subtotal, commissionPct);
-  const vendorShare = subtotal - commission;
-  const deliveryMargin = held - vendorShare - commission; // delivery fee − rider payout
+  const customerRefund = percentOf(subtotal, refundPct);
+  const vendorGross = subtotal - customerRefund;
+  const commission = percentOf(vendorGross, commissionPct);
+  const vendorShare = vendorGross - commission;
+  const deliveryMargin = held - subtotal; // delivery fee − rider payout
 
   await lockEscrowRow(client);
   await debitEscrowPool(client, paisaToString(held));
+
+  if (customerRefund > 0) {
+    await creditWallet(client, {
+      userId: order.customer_id,
+      amountPaisa: customerRefund,
+      type: 'escrow_refund',
+      orderId,
+      description: `Partial refund (${Number(refundPct)}% of items) for Order #${orderId}`,
+    });
+  }
 
   const vendorUser = await client.query('SELECT user_id FROM vendors WHERE id = $1', [order.vendor_id]);
   const vendorUserId = vendorUser.rows[0].user_id;
@@ -88,7 +107,7 @@ async function releaseEscrow(client, afterCommit, orderId, { note, allowFrom = [
     amountPaisa: vendorShare,
     type: 'escrow_release',
     orderId,
-    description: note || `Escrow released for Order #${orderId} (after ${commissionPct}% commission)`,
+    description: `${note || `Escrow released for Order #${orderId}`}: ${commissionBreakdown(vendorGross, commissionPct, commission)}`,
   });
 
   const platformEntries = [['commission', commission], ['delivery_margin', deliveryMargin]];
@@ -121,31 +140,51 @@ async function releaseEscrow(client, afterCommit, orderId, { note, allowFrom = [
     deliveryMarginPaisa: deliveryMargin,
     vendorShare: paisaToNumber(vendorShare),
     commission: paisaToNumber(commission),
+    customerRefund: paisaToNumber(customerRefund),
   };
 }
 
-async function refundEscrow(client, afterCommit, orderId, { note, allowFrom = ['held'] } = {}) {
+/**
+ * Returns what is still held to the customer. `storeFeePct` (a late cancellation,
+ * policy cancel_penalty_pct) first pays that share of the item subtotal to the store
+ * for the work already done; no commission is taken on it.
+ */
+async function refundEscrow(client, afterCommit, orderId, { note, allowFrom = ['held'], storeFeePct = 0 } = {}) {
   const order = await lockOrder(client, orderId);
   if (!allowFrom.includes(order.escrow_status)) {
     throw httpError(409, `Escrow for Order #${orderId} is already ${order.escrow_status}.`);
   }
 
   const held = heldPaisa(order);
+  const storeFee = Math.min(held, percentOf(toPaisa(order.subtotal), storeFeePct));
+  const refund = held - storeFee;
   await lockEscrowRow(client);
   await debitEscrowPool(client, paisaToString(held));
-  await creditWallet(client, {
-    userId: order.customer_id,
-    amountPaisa: held,
-    type: 'escrow_refund',
-    orderId,
-    description: note || `Escrow refund for Order #${orderId}`,
-  });
+  if (refund > 0) {
+    await creditWallet(client, {
+      userId: order.customer_id,
+      amountPaisa: refund,
+      type: 'escrow_refund',
+      orderId,
+      description: note || `Escrow refund for Order #${orderId}`,
+    });
+  }
+  if (storeFee > 0) {
+    const vendorUserId = (await client.query('SELECT user_id FROM vendors WHERE id = $1', [order.vendor_id])).rows[0].user_id;
+    await creditWallet(client, {
+      userId: vendorUserId,
+      amountPaisa: storeFee,
+      type: 'escrow_release',
+      orderId,
+      description: `Late cancellation fee for Order #${orderId}: ${Number(storeFeePct)}% of items ${formatRs(toPaisa(order.subtotal))}`,
+    });
+  }
   await client.query(
     `UPDATE orders SET escrow_status = 'refunded', escrow_settled_at = NOW(), updated_at = NOW() WHERE id = $1`,
     [orderId]
   );
   await pruneTrip(client, orderId);
-  return { refundPaisa: held, refund: paisaToNumber(held) };
+  return { refundPaisa: refund, refund: paisaToNumber(refund), storeFee: paisaToNumber(storeFee) };
 }
 
 /** Releases every delivered order whose dispute window has passed. Returns count released. */

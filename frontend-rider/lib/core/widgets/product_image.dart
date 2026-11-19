@@ -6,6 +6,7 @@
 
 import 'package:flutter/material.dart';
 import '../../config/api_config.dart';
+import '../../config/app_theme.dart';
 import '../models/product_model.dart';
 
 class ProductImage extends StatelessWidget {
@@ -41,7 +42,7 @@ class ProductImage extends StatelessWidget {
         child: Icon(
           _placeholderIcons[product.id % _placeholderIcons.length],
           size: iconSize,
-          color: Colors.grey.shade400,
+          color: AppColors.textLight,
         ),
       );
 

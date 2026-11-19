@@ -83,7 +83,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                 children: [
                   VendraBrandHeader(
                     subtitle: 'Your Hyperlocal Marketplace',
-                    icon: Icons.storefront_rounded,
+                    variant: BrandVariant.customer,
                     iconStyle: HeaderIconStyle.top,
                     titleSize: 40,
                     isDark: true,

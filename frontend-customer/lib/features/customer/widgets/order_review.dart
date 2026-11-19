@@ -160,7 +160,7 @@ class _OrderReviewSheetState extends State<_OrderReviewSheet> {
                       width: 40,
                       height: 4,
                       margin: const EdgeInsets.only(bottom: 8),
-                      decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                      decoration: BoxDecoration(color: AppColors.hairline, borderRadius: BorderRadius.circular(2)),
                     ),
                     Row(
                       children: [
@@ -168,13 +168,13 @@ class _OrderReviewSheetState extends State<_OrderReviewSheet> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Rate your order',
+                              Text('Rate your order',
                                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                               Text(
                                 '#VDR-${order.id.toString().padLeft(5, '0')}${order.storeName != null ? ' · ${order.storeName}' : ''}',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                               ),
                             ],
                           ),
@@ -197,7 +197,7 @@ class _OrderReviewSheetState extends State<_OrderReviewSheet> {
                   children: [
                     for (final item in _items) _productRow(item),
                     if (canRateRider(order)) _riderRow(order.rider!),
-                    const Text(
+                    Text(
                       'Rate at least one product. Your first name and initial are shown with your review.',
                       style: TextStyle(fontSize: 11, color: AppColors.textLight),
                     ),
@@ -259,7 +259,7 @@ class _OrderReviewSheetState extends State<_OrderReviewSheet> {
                   item.productName ?? 'Product',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                 ),
               ),
             ],
@@ -308,12 +308,12 @@ class _OrderReviewSheetState extends State<_OrderReviewSheet> {
         children: [
           Row(
             children: [
-              const Icon(Icons.delivery_dining, color: AppColors.secondary),
+              Icon(Icons.delivery_dining, color: AppColors.secondary),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'How was your rider, ${rider.name ?? 'your rider'}?',
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                 ),
               ),
             ],
@@ -327,7 +327,7 @@ class _OrderReviewSheetState extends State<_OrderReviewSheet> {
               onChanged: _submitting ? (_) {} : (v) => setState(() => _riderRating = v),
             ),
           ),
-          const Text('Optional', style: TextStyle(fontSize: 11, color: AppColors.textLight)),
+          Text('Optional', style: TextStyle(fontSize: 11, color: AppColors.textLight)),
         ],
       ),
     );
@@ -375,7 +375,7 @@ class OrderReviewSection extends StatelessWidget {
       children: [
         Row(
           children: [
-            const Icon(Icons.rate_review_outlined, size: 16, color: AppColors.textSecondary),
+            Icon(Icons.rate_review_outlined, size: 16, color: AppColors.textSecondary),
             const SizedBox(width: 6),
             Text('Your review',
                 style: TextStyle(fontSize: compact ? 12 : 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
@@ -394,7 +394,7 @@ class OrderReviewSection extends StatelessWidget {
                       child: Text(item.productName ?? 'Product',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 12, color: AppColors.textPrimary)),
+                          style: TextStyle(fontSize: 12, color: AppColors.textPrimary)),
                     ),
                     const SizedBox(width: 8),
                     RatingStars(rating: item.myRating!.toDouble(), size: 14),
@@ -404,26 +404,26 @@ class OrderReviewSection extends StatelessWidget {
                   Text('“${item.myComment}”',
                       maxLines: compact ? 2 : 4,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: AppColors.textSecondary)),
+                      style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: AppColors.textSecondary)),
               ],
             ),
           ),
         if (order.riderRating != null)
           Row(
             children: [
-              const Icon(Icons.delivery_dining, size: 14, color: AppColors.secondary),
+              Icon(Icons.delivery_dining, size: 14, color: AppColors.secondary),
               const SizedBox(width: 4),
               Expanded(
                 child: Text('Rider ${order.rider?.name ?? ''}'.trim(),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: AppColors.textPrimary)),
+                    style: TextStyle(fontSize: 12, color: AppColors.textPrimary)),
               ),
               RatingStars(rating: order.riderRating!.toDouble(), size: 14),
             ],
           ),
         if (rated.isEmpty && order.riderRating == null)
-          const Text('Thanks — your review was saved.', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          Text('Thanks — your review was saved.', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
       ],
     );
 
@@ -432,7 +432,7 @@ class OrderReviewSection extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(0, 2))],
       ),

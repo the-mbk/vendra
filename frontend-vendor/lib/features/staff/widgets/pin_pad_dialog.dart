@@ -215,7 +215,7 @@ class _PinDots extends StatelessWidget {
             border: Border.all(
               color: filled
                   ? AppColors.secondary
-                  : (optional ? Colors.grey.shade300 : Colors.grey.shade500),
+                  : (optional ? AppColors.hairline : AppColors.textLight),
               width: 1.5,
             ),
           ),
@@ -238,8 +238,8 @@ class _PadKey extends StatelessWidget {
   Widget build(BuildContext context) {
     final key = Material(
       color: filled
-          ? (enabled ? AppColors.stockGreen : Colors.grey.shade300)
-          : (enabled ? AppColors.secondary.withValues(alpha: 0.06) : Colors.grey.shade100),
+          ? (enabled ? AppColors.stockGreen : AppColors.hairline)
+          : (enabled ? AppColors.secondary.withValues(alpha: 0.06) : AppColors.surfaceMuted),
       shape: const CircleBorder(),
       child: InkWell(
         customBorder: const CircleBorder(),

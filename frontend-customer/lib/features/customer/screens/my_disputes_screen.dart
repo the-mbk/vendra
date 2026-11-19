@@ -69,7 +69,7 @@ class MyDisputesScreen extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 56, color: Colors.grey.shade300),
+            Icon(icon, size: 56, color: AppColors.textLight),
             const SizedBox(height: 12),
             Text(text, textAlign: TextAlign.center, style: GoogleFonts.poppins(color: AppColors.textSecondary)),
             if (action != null) action,
@@ -86,12 +86,13 @@ class _DisputeCard extends StatelessWidget {
 
   Color get _color {
     if (dispute.status == 'open') return AppColors.reservedAmber;
-    return dispute.resolution == 'refund' ? AppColors.secondary : Colors.teal.shade700;
+    return dispute.resolution == 'refund' ? AppColors.secondary : AppColors.success;
   }
 
   String get _outcome {
     // Refunds always go back to the customer's wallet
     if (dispute.status == 'resolved' && dispute.resolution == 'refund') return 'Resolved — refunded to your wallet';
+    if (dispute.status == 'resolved' && dispute.resolution == 'split') return 'Resolved — partly refunded to your wallet';
     return dispute.outcomeText;
   }
 
@@ -130,7 +131,7 @@ class _DisputeCard extends StatelessWidget {
           const SizedBox(height: 10),
           Row(
             children: [
-              const Icon(Icons.report_problem_outlined, size: 16, color: AppColors.textSecondary),
+              Icon(Icons.report_problem_outlined, size: 16, color: AppColors.textSecondary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(dispute.issueLabel, style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
@@ -161,8 +162,8 @@ class _DisputeCard extends StatelessWidget {
                         errorBuilder: (_, __, ___) => Container(
                           width: 64,
                           height: 64,
-                          color: Colors.grey.shade200,
-                          child: const Icon(Icons.broken_image_outlined, color: AppColors.textLight),
+                          color: AppColors.surfaceMuted,
+                          child: Icon(Icons.broken_image_outlined, color: AppColors.textLight),
                         ),
                       ),
                     ),

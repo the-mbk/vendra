@@ -33,7 +33,7 @@ class PackingChecklist extends StatelessWidget {
     final bloc = context.read<VendorOrderBloc>();
     final done = order.isFullyPacked;
     final scanning = bloc.isScanningOrder(order.id);
-    final color = done ? AppColors.stockGreen : Colors.indigo;
+    final color = done ? AppColors.stockGreen : AppColors.secondary;
 
     return Container(
       margin: const EdgeInsets.only(top: 4),
@@ -65,7 +65,7 @@ class PackingChecklist extends StatelessWidget {
                 TextButton.icon(
                   onPressed: scanning || done ? null : () => _scan(context),
                   style: TextButton.styleFrom(
-                    foregroundColor: Colors.indigo,
+                    foregroundColor: AppColors.secondary,
                     visualDensity: VisualDensity.compact,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                   ),
@@ -82,7 +82,7 @@ class PackingChecklist extends StatelessWidget {
             child: LinearProgressIndicator(
               value: packingFraction(order),
               minHeight: 6,
-              backgroundColor: Colors.grey.shade200,
+              backgroundColor: AppColors.surfaceMuted,
               color: color,
             ),
           ),

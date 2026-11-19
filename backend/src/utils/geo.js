@@ -15,6 +15,12 @@ function haversineKm(lat1, lon1, lat2, lon2) {
   return EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+/** Whole metres between two points, or null when either is missing (evidence views) */
+function metersBetween(aLat, aLng, bLat, bLng) {
+  if ([aLat, aLng, bLat, bLng].some((v) => v == null)) return null;
+  return Math.round(haversineKm(Number(aLat), Number(aLng), Number(bLat), Number(bLng)) * 1000);
+}
+
 /** Total length in km of a path of { lat, lng } points */
 function pathLengthKm(points) {
   let total = 0;
@@ -32,4 +38,4 @@ function isValidCoordinate(lat, lng) {
   );
 }
 
-module.exports = { haversineKm, pathLengthKm, isValidCoordinate };
+module.exports = { haversineKm, metersBetween, pathLengthKm, isValidCoordinate };

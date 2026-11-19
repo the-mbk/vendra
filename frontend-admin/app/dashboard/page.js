@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getDashboardStats, isAuthError } from "../lib/api";
-import { formatRs } from "../lib/ui";
+import { ErrorBox, formatRs, formatNumber, formatDate, formatOrderId, humanize, roleColors } from "../lib/ui";
+import { CHANNELS, ChannelSwatch, ChannelSplitBar, ChannelSeriesChart } from "../lib/channels";
 
 function KPICard({ title, value, subtitle, icon, color, trend, href, alert }) {
   const router = useRouter();
@@ -58,7 +59,7 @@ function KPICard({ title, value, subtitle, icon, color, trend, href, alert }) {
     </>
   );
 
-  const baseClass = `bg-white rounded-2xl p-6 border shadow-sm hover:shadow-md transition-shadow ${
+  const baseClass = `bg-surface-container-lowest rounded-2xl p-6 border shadow-sm hover:shadow-md transition-shadow ${
     alert ? "border-error/40" : "border-outline-variant/20"
   }`;
 
@@ -68,6 +69,193 @@ function KPICard({ title, value, subtitle, icon, color, trend, href, alert }) {
     <button onClick={() => router.push(href)} className={`${baseClass} text-left w-full flex flex-col justify-start`}>
       {content}
     </button>
+  );
+}
+
+/** Total platform GMV = walk-in POS + online marketplace, with the daily split (SRDS §2.1) */
+function ChannelGmvCard({ channels }) {
+  const router = useRouter();
+  const total = Number(channels.totalGmv) || 0;
+  const subtitles = {
+    walkIn: `${formatNumber(channels.walkIn?.sales)} sales · ${formatRs(channels.walkIn?.today)} today`,
+    online: `${formatNumber(channels.online?.orders)} orders · ${formatRs(channels.online?.today)} today`,
+  };
+
+  return (
+    <div className="bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant/20 shadow-sm mb-8">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
+        <div>
+          <h3 className="text-lg font-bold text-on-surface">Platform GMV by channel</h3>
+          <p className="text-sm text-on-surface-variant mt-0.5">
+            Walk-in POS sales plus online marketplace orders (item value; delivery fees excluded).
+          </p>
+        </div>
+        <button
+          onClick={() => router.push("/dashboard/finance")}
+          className="text-sm font-semibold text-primary hover:underline flex items-center gap-1"
+        >
+          Commission ledger
+          <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+        <div>
+          <p className="text-[11px] font-semibold text-outline uppercase tracking-wider">Total platform GMV</p>
+          <p className="text-3xl font-bold text-on-surface tabular-nums mt-1">{formatRs(total)}</p>
+          <p className="text-xs text-outline mt-1 mb-4">Walk-in POS + online, all time</p>
+          <ChannelSplitBar walkIn={channels.walkIn?.gmv} online={channels.online?.gmv} />
+          <div className="mt-4 space-y-3">
+            {CHANNELS.map((c) => {
+              const gmv = Number(channels[c.key]?.gmv) || 0;
+              return (
+                <div key={c.key} className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-on-surface flex items-center gap-2">
+                      <ChannelSwatch channel={c} />
+                      {c.label}
+                    </p>
+                    <p className="text-xs text-outline mt-0.5 pl-[18px]">{subtitles[c.key]}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-semibold text-on-surface tabular-nums">{formatRs(gmv)}</p>
+                    <p className="text-xs text-outline tabular-nums">{total > 0 ? Math.round((gmv / total) * 100) : 0}%</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="xl:col-span-2 min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <p className="text-[11px] font-semibold text-outline uppercase tracking-wider">
+              Daily GMV · last {channels.series?.length || 0} days
+            </p>
+            <div className="flex items-center gap-4">
+              {CHANNELS.map((c) => (
+                <span key={c.key} className="inline-flex items-center gap-1.5 text-xs text-on-surface-variant">
+                  <ChannelSwatch channel={c} />
+                  {c.label}
+                </span>
+              ))}
+            </div>
+          </div>
+          <ChannelSeriesChart series={channels.series} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The latest disputes, open ones first (SRDS Fig 2.9 recent-disputes panel) */
+function RecentDisputesCard({ disputes }) {
+  const router = useRouter();
+  return (
+    <div className="bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant/20 shadow-sm">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-bold text-on-surface">Recent Disputes</h3>
+        <button onClick={() => router.push("/dashboard/disputes")} className="text-sm font-semibold text-primary hover:underline">
+          View all
+        </button>
+      </div>
+      {disputes.length === 0 ? (
+        <p className="text-sm text-outline py-6 text-center">No disputes yet.</p>
+      ) : (
+        <ul className="divide-y divide-outline-variant/15">
+          {disputes.map((d) => (
+            <li key={d.id}>
+              <button
+                onClick={() => router.push(`/dashboard/disputes/${d.id}`)}
+                className="w-full flex items-center gap-3 py-3 text-left hover:bg-surface-container-low/40 rounded-lg px-2 -mx-2 transition-colors"
+              >
+                <span className={`w-2 h-2 rounded-full shrink-0 ${d.status === "open" ? "bg-red-500" : "bg-outline-variant"}`} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-on-surface truncate">
+                    {humanize(d.issueType)} · {formatOrderId(d.orderId)}
+                  </p>
+                  <p className="text-xs text-outline truncate">
+                    {d.storeName} · {formatDate(d.createdAt, true)}
+                  </p>
+                </div>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${roleColors[d.raisedByRole] || ""}`}>
+                  {d.raisedByRole}
+                </span>
+                <span className="text-sm font-semibold text-on-surface tabular-nums whitespace-nowrap">{formatRs(d.heldAmount)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function HealthRow({ ok, warn = false, icon, title, detail }) {
+  const tone = ok ? "text-emerald-700 bg-emerald-100" : warn ? "text-amber-700 bg-amber-100" : "text-red-700 bg-red-100";
+  return (
+    <li className="flex items-start gap-3 py-3">
+      <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${tone}`}>
+        <span className="material-symbols-outlined text-[20px]">{icon}</span>
+      </span>
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-on-surface">{title}</p>
+        <p className="text-xs text-outline">{detail}</p>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * Live checks from GET /api/admin/stats (SRDS Fig 2.9 platform health, §4.3.2):
+ * database round trip, escrow reconciliation (SSR 02), background jobs, realtime.
+ */
+function PlatformHealthCard({ health }) {
+  const { database, escrow, sweep, realtime } = health;
+  const sweepOk = sweep.lastRunAt && !sweep.lastError && sweep.secondsAgo <= sweep.intervalSeconds * 3;
+  return (
+    <div className="bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant/20 shadow-sm">
+      <h3 className="text-lg font-bold text-on-surface mb-1">Platform Health</h3>
+      <p className="text-xs text-outline mb-2">Checked when this page loaded</p>
+      <ul className="divide-y divide-outline-variant/15">
+        <HealthRow
+          ok={database.ok && database.latencyMs < 200}
+          warn={database.ok}
+          icon="database"
+          title="Database"
+          detail={`Responding in ${database.latencyMs} ms`}
+        />
+        <HealthRow
+          ok={escrow.balanced}
+          icon="account_balance"
+          title={escrow.balanced ? "Escrow reconciled" : "Escrow mismatch"}
+          detail={
+            escrow.balanced
+              ? `Pool ${formatRs(escrow.pool)} equals what ${formatNumber(escrow.orders)} open order${escrow.orders === 1 ? "" : "s"} hold`
+              : `Pool ${formatRs(escrow.pool)} but open orders hold ${formatRs(escrow.heldByOrders)}`
+          }
+        />
+        <HealthRow
+          ok={Boolean(sweepOk)}
+          warn={!sweep.lastRunAt}
+          icon="update"
+          title="Background jobs"
+          detail={
+            sweep.lastError
+              ? `Last run failed: ${sweep.lastError}`
+              : sweep.lastRunAt
+                ? `Escrow release, timeouts and payment checks ran ${sweep.secondsAgo}s ago (every ${sweep.intervalSeconds}s)`
+                : "Not run yet since the server started"
+          }
+        />
+        <HealthRow
+          ok
+          icon="sensors"
+          title="Realtime"
+          detail={`${formatNumber(realtime.connections)} app${realtime.connections === 1 ? "" : "s"} connected for live updates`}
+        />
+      </ul>
+    </div>
   );
 }
 
@@ -114,14 +302,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (error) {
-    return (
-      <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl">
-        <p className="font-semibold">Error loading dashboard</p>
-        <p className="text-sm mt-1">{error}</p>
-      </div>
-    );
-  }
+  if (error) return <ErrorBox title="Error loading dashboard" message={error} />;
 
   const openDisputes = Number(stats?.openDisputes) || 0;
   const pendingProducts = Number(stats?.pendingProducts) || 0;
@@ -133,7 +314,7 @@ export default function DashboardPage() {
     <div>
       {/* Welcome Header */}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-on-surface">Welcome back, Admin 👋</h1>
+        <h1 className="text-2xl font-bold text-on-surface">Welcome back, Admin</h1>
         <p className="text-on-surface-variant mt-1">Here&apos;s what&apos;s happening on your marketplace today.</p>
       </div>
 
@@ -270,8 +451,17 @@ export default function DashboardPage() {
         />
       </div>
 
+      {stats?.channels && <ChannelGmvCard channels={stats.channels} />}
+
+      {stats?.health && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-8">
+          <RecentDisputesCard disputes={stats.recentDisputes || []} />
+          <PlatformHealthCard health={stats.health} />
+        </div>
+      )}
+
       {/* Quick Actions */}
-      <div className="bg-white rounded-2xl p-6 border border-outline-variant/20 shadow-sm">
+      <div className="bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant/20 shadow-sm">
         <h3 className="text-lg font-bold text-on-surface mb-4">Quick Actions</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <button

@@ -16,7 +16,7 @@ bool showsHandoverCode(OrderModel o) =>
 
 /// What the customer should do with the code
 String handoverInstruction(OrderModel o) => o.isDelivery
-    ? 'Give this code to the rider only when you have your items'
+    ? 'Share this code with the rider only when the parcel is in your hands'
     : 'Show this code at the counter when you collect your order';
 
 /// Whether wrong codes have locked the handover right now
@@ -82,26 +82,26 @@ class HandoverCodeCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.key_rounded, size: 16, color: AppColors.secondary),
+              Icon(Icons.key_rounded, size: 16, color: AppColors.secondary),
               const SizedBox(width: 6),
-              const Expanded(
+              Expanded(
                 child: Text('Handover code',
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
               ),
               Text(
                 code.split('').join(' '),
                 semanticsLabel: 'Handover code ${code.split('').join(' ')}',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 2,
                   color: AppColors.secondary,
-                  fontFeatures: [FontFeature.tabularFigures()],
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
             ],
           ),
-          Text(handoverInstruction(order), style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+          Text(handoverInstruction(order), style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
           if (locked) _lockWarning(small: true),
         ],
       ),
@@ -112,7 +112,7 @@ class HandoverCodeCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.secondary.withValues(alpha: 0.25)),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(0, 2))],
@@ -122,12 +122,12 @@ class HandoverCodeCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.key_rounded, size: 20, color: AppColors.secondary),
+              Icon(Icons.key_rounded, size: 20, color: AppColors.secondary),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   order.isDelivery ? 'Delivery handover code' : 'Pickup code',
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                 ),
               ),
             ],
@@ -153,7 +153,7 @@ class HandoverCodeCard extends StatelessWidget {
                       ),
                       child: Text(
                         digit,
-                        style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: AppColors.secondary),
+                        style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: AppColors.secondary),
                       ),
                     ),
                   ),
@@ -164,15 +164,15 @@ class HandoverCodeCard extends StatelessWidget {
           Text(
             handoverInstruction(order),
             textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary),
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary),
           ),
           const SizedBox(height: 4),
           Text(
             order.isDelivery
-                ? 'The delivery is completed only when the rider enters this code — never share it by phone or message.'
+                ? 'The delivery completes only when the rider enters this code. Never share it by phone call or SMS.'
                 : 'The store enters this code to hand your order over. Keep it to yourself until then.',
             textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 11, height: 1.35, color: AppColors.textSecondary),
+            style: TextStyle(fontSize: 11, height: 1.35, color: AppColors.textSecondary),
           ),
           if (locked) _lockWarning(small: false),
         ],

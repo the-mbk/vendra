@@ -59,7 +59,7 @@ export default function WithdrawalsPage() {
       ) : list.error ? (
         <ErrorBox title="Error loading withdrawals" message={list.error} />
       ) : (
-        <div className="bg-white rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
+        <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>

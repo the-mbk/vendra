@@ -81,7 +81,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                 children: [
                   VendraBrandHeader(
                     subtitle: 'Vendor Portal · Business & POS',
-                    icon: Icons.storefront_rounded,
+                    variant: BrandVariant.vendor,
                     iconStyle: HeaderIconStyle.top,
                     titleSize: 40,
                     isDark: true,

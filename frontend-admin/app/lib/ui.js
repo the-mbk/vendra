@@ -6,6 +6,7 @@
 // ══════════════════════════════════════════════════════════════
 
 import { useState } from "react";
+import { useTheme } from "./hooks";
 
 /** Event fired after an admin action that changes sidebar badge counts */
 export const COUNTS_EVENT = "vendra:counts-changed";
@@ -34,6 +35,18 @@ export function formatDate(value, withTime = false) {
     year: "numeric",
     ...(withTime && { hour: "numeric", minute: "2-digit" }),
   });
+}
+
+/** "3:42 pm" — time of day only (for today's timelines) */
+export function formatTime(value) {
+  if (!value) return "—";
+  return new Date(value).toLocaleTimeString("en-PK", { hour: "numeric", minute: "2-digit" });
+}
+
+/** "6.5 min" — waiting times arrive in minutes with one decimal */
+export function formatMinutes(value) {
+  if (value == null) return "—";
+  return `${Number((Number(value) || 0).toFixed(1))} min`;
 }
 
 export function formatOrderId(id) {
@@ -92,6 +105,13 @@ export const orderStatusConfig = {
   on_the_way: { label: "On the Way", color: "bg-orange-100 text-orange-700", dot: "bg-orange-500" },
   delivered: { label: "Delivered", color: "bg-emerald-100 text-emerald-700", dot: "bg-emerald-500" },
   cancelled: { label: "Cancelled", color: "bg-red-100 text-red-700", dot: "bg-red-500" },
+};
+
+/** How a resolved dispute was settled (PUT /api/admin/disputes/:id/resolve) */
+export const resolutionConfig = {
+  refund: { label: "Refund", title: "Refunded to the customer", icon: "undo", color: "bg-blue-100 text-blue-700", dot: "bg-blue-500" },
+  release: { label: "Release", title: "Released to the store", icon: "storefront", color: "bg-emerald-100 text-emerald-700", dot: "bg-emerald-500" },
+  split: { label: "Split", title: "Split between customer and store", icon: "call_split", color: "bg-purple-100 text-purple-700", dot: "bg-purple-500" },
 };
 
 /** Badge colours for the party that raised a dispute */
@@ -183,6 +203,71 @@ export function CopyId({ value }) {
         }`}
       >
         {copied ? "check" : "content_copy"}
+      </button>
+    </span>
+  );
+}
+
+/** "0312-1234566" → "0312-***566" (same rule as the apps) */
+export function maskPhone(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (!digits) return null;
+  if (digits.length < 7) return "***";
+  return `${digits.slice(0, 4)}-***${digits.slice(-3)}`;
+}
+
+/**
+ * A personal phone number, masked until the admin chooses to see it
+ * (privacy by default; the full number is one deliberate click away).
+ */
+export function MaskedPhone({ phone, className = "text-xs" }) {
+  const [shown, setShown] = useState(false);
+  if (!phone) return <span className={`${className} text-outline`}>—</span>;
+  return (
+    <span className={`${className} inline-flex items-center gap-1 font-mono text-on-surface-variant whitespace-nowrap`}>
+      {shown ? phone : maskPhone(phone)}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setShown((s) => !s);
+        }}
+        title={shown ? "Hide number" : "Show full number"}
+        aria-label={shown ? "Hide phone number" : "Show full phone number"}
+        className="material-symbols-outlined text-[14px] p-0.5 rounded text-outline hover:text-on-surface hover:bg-surface-container-low transition-colors"
+      >
+        {shown ? "visibility_off" : "visibility"}
+      </button>
+    </span>
+  );
+}
+
+/**
+ * A destructive action that needs a second, deliberate tap: the first shows what will
+ * happen and a "Yes" button; nothing runs until that is pressed.
+ */
+export function ConfirmButton({ label, confirmLabel, consequence, onConfirm, disabled = false, size = "sm" }) {
+  const [asking, setAsking] = useState(false);
+  const pad = size === "sm" ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm";
+  if (!asking) {
+    return (
+      <button type="button" disabled={disabled} onClick={() => setAsking(true)}
+        className={`${pad} font-semibold rounded-lg bg-red-50 text-red-700 hover:bg-red-100 transition-colors disabled:opacity-50`}>
+        {label}
+      </button>
+    );
+  }
+  return (
+    <span className="inline-flex flex-wrap items-center justify-end gap-2">
+      {consequence && <span className="text-xs text-on-surface-variant max-w-[260px] text-left">{consequence}</span>}
+      <button type="button" disabled={disabled}
+        onClick={() => { setAsking(false); onConfirm(); }}
+        className={`${pad} font-semibold rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50`}>
+        {confirmLabel || `Yes, ${label.toLowerCase()}`}
+      </button>
+      <button type="button" onClick={() => setAsking(false)}
+        className={`${pad} font-semibold rounded-lg bg-surface-container-low text-on-surface-variant hover:bg-surface-container transition-colors`}>
+        Cancel
       </button>
     </span>
   );
@@ -298,7 +383,7 @@ export function SearchBox({ value, onChange, placeholder = "Search", count, tota
           }}
           placeholder={placeholder}
           aria-label={placeholder}
-          className="w-full pl-10 pr-9 py-2 bg-white border border-outline-variant/50 rounded-xl text-sm text-on-surface text-ellipsis placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all [&::-webkit-search-cancel-button]:hidden"
+          className="w-full pl-10 pr-9 py-2 bg-surface-container-lowest border border-outline-variant/50 rounded-xl text-sm text-on-surface text-ellipsis placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all [&::-webkit-search-cancel-button]:hidden"
         />
         {active && (
           <button
@@ -330,6 +415,24 @@ export function NoSearchResults({ query, onClear }) {
         Clear search
       </button>
     </>
+  );
+}
+
+/** Sun / moon button that switches between the light and dark theme (remembered per browser) */
+export function ThemeToggle({ className = "" }) {
+  const [theme, setTheme] = useTheme();
+  const dark = theme === "dark";
+  const label = dark ? "Switch to light mode" : "Switch to dark mode";
+  return (
+    <button
+      type="button"
+      onClick={() => setTheme(dark ? "light" : "dark")}
+      title={label}
+      aria-label={label}
+      className={`w-9 h-9 rounded-xl border border-outline-variant/30 bg-surface-container-lowest flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors ${className}`}
+    >
+      <span className="material-symbols-outlined text-[20px]">{dark ? "light_mode" : "dark_mode"}</span>
+    </button>
   );
 }
 

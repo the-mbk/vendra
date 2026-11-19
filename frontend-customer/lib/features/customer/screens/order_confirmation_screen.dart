@@ -14,8 +14,10 @@ import 'package:vendra_customer/vendra_core.dart';
 import '../../../config/app_routes.dart';
 import '../../auth/bloc/auth_bloc.dart';
 import '../../auth/bloc/auth_event.dart';
+import '../bloc/cart_bloc.dart';
 import '../widgets/reservation_countdown.dart';
 import '../widgets/trust_badges.dart';
+import 'cart_screen.dart';
 
 class OrderConfirmationScreen extends StatefulWidget {
   final OrderModel order;
@@ -85,7 +87,7 @@ class _OrderConfirmationScreenState extends State<OrderConfirmationScreen> {
                     const SizedBox(height: 24),
 
                     Text(
-                      cancelled ? 'Order cancelled' : 'Order Placed! ✨',
+                      cancelled ? 'Order cancelled' : 'Order placed',
                       style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
                     ),
 
@@ -113,7 +115,7 @@ class _OrderConfirmationScreenState extends State<OrderConfirmationScreen> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: AppColors.surface,
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 12)],
                       ),
@@ -150,6 +152,15 @@ class _OrderConfirmationScreenState extends State<OrderConfirmationScreen> {
                                     fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.secondary)),
                         ],
                       ),
+                    ),
+
+                    // Carts from other stores: check the next one out straight away (pin and address are kept)
+                    BlocBuilder<CartBloc, CartState>(
+                      builder: (context, cart) {
+                        final others = cart.stores.where((s) => s.vendorId != order.vendorId).toList();
+                        if (others.isEmpty) return const SizedBox.shrink();
+                        return Padding(padding: const EdgeInsets.only(top: 16), child: _NextCartCard(carts: others));
+                      },
                     ),
 
                     const Spacer(),
@@ -200,6 +211,63 @@ class _OrderConfirmationScreenState extends State<OrderConfirmationScreen> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// "You also have a cart at Lahore Fashion" with a one-tap checkout of the next one
+class _NextCartCard extends StatelessWidget {
+  final List<StoreCart> carts;
+  const _NextCartCard({required this.carts});
+
+  @override
+  Widget build(BuildContext context) {
+    final next = carts.first;
+    final more = carts.length - 1;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              StoreLogo(storeName: next.storeName, logoUrl: next.storeLogoUrl, size: 36),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Next cart: ${next.storeName}',
+                        style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    Text(
+                      '${next.totalItems} item${next.totalItems == 1 ? '' : 's'} · ${formatRupees(next.totalAmount)}'
+                      '${more > 0 ? ' · $more more cart${more == 1 ? '' : 's'} after this' : ''}',
+                      style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text('Each store sends its own rider, so carts are paid one store at a time. Your pin and address carry over.',
+              style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+          const SizedBox(height: 10),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => CartScreen(vendorId: next.vendorId)),
+            ),
+            icon: const Icon(Icons.shopping_cart_checkout),
+            label: const Text('Check out next cart'),
+          ),
+        ],
+      ),
     );
   }
 }

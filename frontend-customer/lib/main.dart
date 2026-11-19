@@ -42,11 +42,13 @@ Future<void> main() async {
   // app starts on production-safe defaults and retries when a value is needed
   await AppConfig.load(role: 'customer');
   AppConfig.startLiveUpdates(); // admin policy changes reach the app straight away
-  runApp(const VendraCustomerApp());
+  runApp(VendraCustomerApp(themeMode: await ThemeCubit.loadSaved()));
 }
 
 class VendraCustomerApp extends StatefulWidget {
-  const VendraCustomerApp({super.key});
+  /// The saved light / dark / system choice
+  final ThemeMode themeMode;
+  const VendraCustomerApp({super.key, this.themeMode = ThemeMode.system});
 
   @override
   State<VendraCustomerApp> createState() => _VendraCustomerAppState();
@@ -56,6 +58,7 @@ class _VendraCustomerAppState extends State<VendraCustomerApp> {
   /// Lets the session-expiry handler navigate from outside any screen
   final _navigatorKey = GlobalKey<NavigatorState>();
   final _authBloc = AuthBloc();
+  late final _themeCubit = ThemeCubit(widget.themeMode);
   StreamSubscription<AuthState>? _authSub;
 
   /// Set while a session expiry is being handled, so a burst of 401s from
@@ -77,6 +80,7 @@ class _VendraCustomerAppState extends State<VendraCustomerApp> {
     ApiService.onSessionExpired = null;
     _authSub?.cancel();
     _authBloc.close();
+    _themeCubit.close();
     super.dispose();
   }
 
@@ -104,98 +108,77 @@ class _VendraCustomerAppState extends State<VendraCustomerApp> {
     return MultiBlocProvider(
       providers: [
         BlocProvider<AuthBloc>.value(value: _authBloc),
+        BlocProvider<ThemeCubit>.value(value: _themeCubit),
         BlocProvider<CustomerProductBloc>(create: (_) => CustomerProductBloc()),
         BlocProvider<CartBloc>(create: (_) => CartBloc()),
         BlocProvider<OrderBloc>(create: (_) => OrderBloc()),
         BlocProvider<CategoryBloc>(create: (_) => CategoryBloc()),
       ],
-      child: MaterialApp(
-        title: 'Vendra',
-        navigatorKey: _navigatorKey,
-        debugShowCheckedModeBanner: false,
-        theme: _customerTheme(),
-        // FR09: lets NotificationCenter show a banner for each new notification
-        scaffoldMessengerKey: NotificationCenter.messengerKey,
-        // Small "DEVELOPMENT" badge while the backend runs in development mode
-        builder: (context, child) => DevBanner(child: child ?? const SizedBox.shrink()),
+      child: BlocBuilder<ThemeCubit, ThemeMode>(
+        builder: (context, themeMode) => MaterialApp(
+          title: 'Vendra',
+          navigatorKey: _navigatorKey,
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: themeMode,
+          // FR09: lets NotificationCenter show a banner for each new notification
+          scaffoldMessengerKey: NotificationCenter.messengerKey,
+          // ThemeScope keeps AppColors in step with light / dark; the small
+          // "DEVELOPMENT" badge shows while the backend runs in development mode
+          builder: (context, child) => ThemeScope(child: DevBanner(child: ConnectionBanner(child: child ?? const SizedBox.shrink()))),
 
-        initialRoute: AppRoutes.splash,
+          initialRoute: AppRoutes.splash,
 
-        routes: {
-          AppRoutes.splash: (context) => const SplashScreen(),
-          AppRoutes.login: (context) => const LoginScreen(),
-          AppRoutes.customerHome: (context) => const CustomerHomeScreen(),
-          AppRoutes.cart: (context) => const CartsScreen(), // one cart per store
-          AppRoutes.customerOrders: (context) => const CustomerOrdersScreen(),
-          AppRoutes.wallet: (context) => const WalletScreen(),
-          AppRoutes.myDisputes: (context) => const MyDisputesScreen(),
-        },
+          routes: {
+            AppRoutes.splash: (context) => const SplashScreen(),
+            AppRoutes.login: (context) => const LoginScreen(),
+            AppRoutes.customerHome: (context) => const CustomerHomeScreen(),
+            AppRoutes.cart: (context) => const CartsScreen(), // one cart per store
+            AppRoutes.customerOrders: (context) => const CustomerOrdersScreen(),
+            AppRoutes.wallet: (context) => const WalletScreen(),
+            AppRoutes.myDisputes: (context) => const MyDisputesScreen(),
+          },
 
-        onGenerateRoute: (settings) {
-          if (settings.name == AppRoutes.productDetail) {
-            // A ProductModel, or { 'product': ProductModel, 'openedFromStore': bool }
-            final args = settings.arguments;
-            final product = args is Map ? args['product'] as ProductModel : args as ProductModel;
-            final fromStore = args is Map && args['openedFromStore'] == true;
-            return MaterialPageRoute(
-              builder: (context) => ProductDetailScreen(product: product, openedFromStore: fromStore),
-            );
-          }
+          onGenerateRoute: (settings) {
+            if (settings.name == AppRoutes.productDetail) {
+              // A ProductModel, or { 'product': ProductModel, 'openedFromStore': bool }
+              final args = settings.arguments;
+              final product = args is Map ? args['product'] as ProductModel : args as ProductModel;
+              final fromStore = args is Map && args['openedFromStore'] == true;
+              return MaterialPageRoute(
+                builder: (context) => ProductDetailScreen(product: product, openedFromStore: fromStore),
+              );
+            }
 
-          if (settings.name == AppRoutes.storeDetail) {
-            final args = settings.arguments as Map<String, dynamic>;
-            return MaterialPageRoute(
-              builder: (context) => StoreScreen(
-                vendorId: args['vendorId'],
-                storeName: args['storeName'] ?? 'Store',
-              ),
-            );
-          }
+            if (settings.name == AppRoutes.storeDetail) {
+              final args = settings.arguments as Map<String, dynamic>;
+              return MaterialPageRoute(
+                builder: (context) => StoreScreen(
+                  vendorId: args['vendorId'],
+                  storeName: args['storeName'] ?? 'Store',
+                ),
+              );
+            }
 
-          if (settings.name == AppRoutes.orderConfirmation) {
-            final order = settings.arguments as OrderModel;
-            return MaterialPageRoute(builder: (context) => OrderConfirmationScreen(order: order));
-          }
+            if (settings.name == AppRoutes.orderConfirmation) {
+              final order = settings.arguments as OrderModel;
+              return MaterialPageRoute(builder: (context) => OrderConfirmationScreen(order: order));
+            }
 
-          if (settings.name == AppRoutes.orderTracking) {
-            final args = settings.arguments;
-            final order = args is OrderModel ? args : null;
-            final orderId = order?.id ?? (args as int);
-            return MaterialPageRoute(
-              builder: (context) => OrderTrackingScreen(orderId: orderId, initialOrder: order),
-            );
-          }
+            if (settings.name == AppRoutes.orderTracking) {
+              final args = settings.arguments;
+              final order = args is OrderModel ? args : null;
+              final orderId = order?.id ?? (args as int);
+              return MaterialPageRoute(
+                builder: (context) => OrderTrackingScreen(orderId: orderId, initialOrder: order),
+              );
+            }
 
-          return null;
-        },
+            return null;
+          },
+        ),
       ),
     );
   }
-}
-
-/// The shared theme with a few customer-app refinements: neutral (not
-/// orange-tinted) surfaces for sheets, drawers, dialogs and dividers, and
-/// dark default body text so headings without an explicit colour stay readable.
-ThemeData _customerTheme() {
-  final base = AppTheme.lightTheme;
-  const hairline = Color(0xFFE6E8EB);
-  return base.copyWith(
-    colorScheme: base.colorScheme.copyWith(
-      surfaceTint: Colors.transparent,
-      surfaceContainerLowest: Colors.white,
-      surfaceContainerLow: Colors.white,
-      surfaceContainer: Colors.white,
-      surfaceContainerHigh: Colors.white,
-      outlineVariant: hairline,
-    ),
-    dividerColor: hairline,
-    dividerTheme: const DividerThemeData(color: hairline, thickness: 1),
-    textTheme: base.textTheme.copyWith(
-      bodyMedium: base.textTheme.bodyMedium?.copyWith(color: AppColors.textPrimary),
-    ),
-    appBarTheme: base.appBarTheme.copyWith(surfaceTintColor: Colors.transparent),
-    bottomSheetTheme: const BottomSheetThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
-    drawerTheme: const DrawerThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
-    dialogTheme: const DialogThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
-  );
 }

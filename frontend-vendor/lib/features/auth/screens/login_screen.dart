@@ -119,7 +119,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                       const VendraBrandHeader(
                         subtitle: 'Vendor Portal · Business & POS',
-                        icon: Icons.storefront_rounded,
+                        variant: BrandVariant.vendor,
                         titleSize: 34,
                       ),
 
@@ -128,7 +128,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 20, offset: const Offset(0, 4)),
@@ -263,8 +263,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   const SizedBox(height: 24),
 
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text(
                         _isSignup ? 'Already have an account?  ' : "Don't have an account?  ",

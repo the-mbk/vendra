@@ -17,6 +17,7 @@ import '../../config/api_config.dart';
 import '../../config/app_theme.dart';
 import '../models/notification_model.dart';
 import '../models/page_meta.dart';
+import '../widgets/notification_bell.dart' show notificationStyleFor;
 import 'api_service.dart';
 import 'realtime_service.dart';
 
@@ -128,18 +129,42 @@ class NotificationCenter extends ChangeNotifier {
     _items = [n, ..._items];
     _unread += 1;
     notifyListeners();
+    // Same icon / accent as the inbox row, on a dark navy (light theme) or raised slate (dark theme) banner
+    final style = notificationStyleFor(n.type);
     messengerKey.currentState
       ?..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: AppColors.secondary,
+        backgroundColor: AppColors.isDark ? AppColors.darkSurfaceMuted : AppColors.navy,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         duration: const Duration(seconds: 4),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
+        content: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(n.title, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
-            if (n.body != null) Text(n.body!, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(10)),
+              child: Icon(style.icon, color: Colors.white, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(n.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white)),
+                  if (n.body != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(n.body!,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13, height: 1.35)),
+                    ),
+                ],
+              ),
+            ),
           ],
         ),
       ));

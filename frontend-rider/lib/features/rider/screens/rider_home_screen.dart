@@ -20,6 +20,7 @@ import '../bloc/earnings_bloc.dart';
 import '../bloc/rider_home_bloc.dart';
 import '../models/rider_models.dart';
 import '../widgets/approval_status_card.dart';
+import '../widgets/demand_map_card.dart';
 import '../widgets/location_settings_sheet.dart';
 import '../widgets/task_card.dart';
 import 'earnings_screen.dart';
@@ -213,7 +214,7 @@ class _HomeTab extends StatelessWidget {
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const Icon(Icons.radar, size: 14, color: AppColors.secondary),
+                                      Icon(Icons.radar, size: 14, color: AppColors.secondary),
                                       const SizedBox(width: 4),
                                       Text('within ${state.radiusKm!.toStringAsFixed(0)} km',
                                           style: GoogleFonts.poppins(
@@ -290,12 +291,14 @@ class _HomeTab extends StatelessWidget {
     final tasks = state.tasks;
     if (tasks.isEmpty) {
       return [
-        const _InfoCard(
+        _InfoCard(
           icon: Icons.radar,
           color: AppColors.secondary,
           title: 'No requests right now',
           body: 'New requests from nearby stores show up here automatically. Pull down to refresh.',
         ),
+        // Idle: show where orders are coming from (demand map)
+        const DemandMapCard(),
       ];
     }
     return [
@@ -375,6 +378,7 @@ class _Header extends StatelessWidget {
                     onPressed: () => showLocationSettings(context),
                     icon: const Icon(Icons.my_location, color: Colors.white),
                   ),
+                  const ThemeToggleButton(color: Colors.white),
                   NotificationBell(color: Colors.white, onOpenOrder: onOpenOrder),
                 ],
               ),
@@ -484,7 +488,7 @@ class _EarningsCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(18),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))],
       ),
@@ -518,7 +522,7 @@ class _EarningsCard extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: _Stat(icon: Icons.two_wheeler, value: '${e.todayCount}', label: 'Deliveries today')),
+              Expanded(child: _Stat(icon: AppIcons.rider, value: '${e.todayCount}', label: 'Deliveries today')),
               const SizedBox(width: 12),
               Expanded(child: _Stat(icon: Icons.date_range, value: rs(e.week), label: 'This week')),
             ],
@@ -594,7 +598,7 @@ class _InfoCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: color.withValues(alpha: 0.25)),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 12, offset: const Offset(0, 4))],

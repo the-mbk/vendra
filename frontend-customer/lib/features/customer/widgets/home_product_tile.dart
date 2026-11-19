@@ -34,7 +34,7 @@ class HomeProductTile extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(14),
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 2))],
         ),
@@ -115,14 +115,14 @@ class HomeProductTile extends StatelessWidget {
                     Row(
                       children: [
                         if (distance.isNotEmpty) ...[
-                          Icon(Icons.location_on, size: 12, color: Colors.grey.shade500),
+                          Icon(Icons.location_on, size: 12, color: AppColors.textLight),
                           const SizedBox(width: 2),
                           Text(distance, style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary)),
                           const SizedBox(width: 8),
                         ],
-                        Icon(Icons.shield_outlined, size: 12, color: Colors.green.shade600),
+                        const Icon(Icons.shield_outlined, size: 12, color: AppColors.success),
                         const SizedBox(width: 2),
-                        Text('Escrow', style: GoogleFonts.poppins(fontSize: 11, color: Colors.green.shade600, fontWeight: FontWeight.w500)),
+                        Text('Escrow', style: GoogleFonts.poppins(fontSize: 11, color: AppColors.success, fontWeight: FontWeight.w500)),
                       ],
                     ),
                     const SizedBox(height: 6),
@@ -156,7 +156,7 @@ class HomeProductTile extends StatelessWidget {
             // Arrow
             Padding(
               padding: const EdgeInsets.only(right: 12),
-              child: Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey.shade400),
+              child: Icon(Icons.arrow_forward_ios, size: 14, color: AppColors.textLight),
             ),
           ],
         ),

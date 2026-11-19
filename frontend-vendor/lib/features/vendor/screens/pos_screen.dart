@@ -10,6 +10,11 @@
 // events), so when a customer orders online the reserved units show up
 // here within seconds and the cashier can't sell them.
 //
+// Ringing up units reserved for online orders opens the conflict modal
+// (FR02): drop the walk-in item, or override and cancel the online order.
+// "Complete sale" asks for the cash tendered (quick Exact / Rs 500 /
+// Rs 1,000 / Rs 5,000 chips) and shows the change to return.
+//
 // After "Complete sale" the sale pane shows the 80 mm thermal receipt
 // (with the store's scan-to-pay QR) with Print and Share; today's sales
 // list can reopen any receipt for a reprint.
@@ -26,6 +31,7 @@ import '../../auth/bloc/auth_state.dart' as auth_state;
 import '../bloc/pos_bloc.dart';
 import '../bloc/vendor_product_bloc.dart';
 import '../models/pos_sale_model.dart';
+import '../widgets/pos_dialogs.dart';
 import '../widgets/receipt_slip.dart';
 import 'barcode_scanner_screen.dart';
 import 'receipt_screen.dart';
@@ -105,11 +111,12 @@ class _PosScreenState extends State<PosScreen> {
     }).toList();
   }
 
-  // ── Notices: 409 RESERVED_STOCK dialog, everything else as a snackbar ──
+  // ── Notices: reservation conflicts open the conflict modal, everything else is a snackbar ──
   void _onNotice(BuildContext context, PosNotice notice) {
-    if (notice.code == 'RESERVED_STOCK') {
+    final conflict = notice.code == 'RESERVATION_CONFLICT';
+    if ((conflict || notice.code == 'RESERVED_STOCK') && notice.productId != null) {
       _refreshStock();
-      _showReservedDialog(context, notice);
+      _showConflict(context, notice, fromServer: !conflict);
       return;
     }
     ScaffoldMessenger.of(context)
@@ -122,45 +129,29 @@ class _PosScreenState extends State<PosScreen> {
       ));
   }
 
-  void _showReservedDialog(BuildContext context, PosNotice notice) {
+  /// [fromServer]: the sale was refused (409) — stock changed after the line was rung up
+  Future<void> _showConflict(BuildContext context, PosNotice notice, {required bool fromServer}) async {
     final bloc = context.read<PosBloc>();
-    final sellable = notice.sellable ?? 0;
-    showDialog(
+    final product = context.read<VendorProductBloc>().productById(notice.productId!);
+    if (product == null) return;
+    final requested = notice.requested ?? bloc.state.quantityOf(product.id);
+    final sellable = notice.sellable ?? product.sellableInStore;
+
+    final choice = await showDialog<ConflictChoice>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        icon: const Icon(Icons.lock_outline, color: AppColors.reservedAmber, size: 36),
-        title: Text('Reserved for online orders', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Server message, e.g. Only 3 "X" can be sold — 2 are reserved for online orders.
-            Text(notice.message, textAlign: TextAlign.center, style: GoogleFonts.poppins(fontSize: 14)),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _MiniStat(label: 'Sellable', value: '$sellable', color: AppColors.stockGreen),
-                const SizedBox(width: 8),
-                _MiniStat(label: 'Reserved', value: '${notice.reserved ?? 0}', color: AppColors.reservedAmber),
-              ],
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
-          if (notice.productId != null)
-            ElevatedButton(
-              onPressed: () {
-                bloc.add(PosSetQuantity(notice.productId!, sellable));
-                Navigator.pop(ctx);
-              },
-              style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
-              child: Text(sellable > 0 ? 'Sell $sellable instead' : 'Remove item'),
-            ),
-        ],
-      ),
+      builder: (_) => ReservationConflictDialog(product: product, requested: requested, sellable: sellable),
     );
+    switch (choice) {
+      case ConflictChoice.override:
+        bloc.add(PosOverrideReservation(product, requested));
+        // The sale was already being completed: retry it with the same cash
+        if (fromServer) bloc.add(PosCompleteSale(cashReceived: bloc.state.cashReceived));
+      case ConflictChoice.dropWalkIn:
+        // A refused sale keeps only what can be sold; a new line is simply not added
+        if (fromServer) bloc.add(PosSetQuantity(product.id, sellable));
+      case null:
+        break;
+    }
   }
 
   @override
@@ -221,7 +212,7 @@ class _PosScreenState extends State<PosScreen> {
   // ── Header: title + today's walk-in totals ──
   Widget _buildHeader(BuildContext context) {
     return Container(
-      color: Colors.white,
+      color: AppColors.surface,
       padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
       child: Row(
         children: [
@@ -232,7 +223,7 @@ class _PosScreenState extends State<PosScreen> {
               color: AppColors.secondary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.point_of_sale, color: AppColors.secondary),
+            child: Icon(Icons.point_of_sale, color: AppColors.secondary),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -270,18 +261,18 @@ class _PosScreenState extends State<PosScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.green.shade50,
+                  color: AppColors.successSurface,
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.green.shade200),
+                  border: Border.all(color: AppColors.success.withValues(alpha: 0.35)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text('Today · ${state.todayCount} sale${state.todayCount == 1 ? '' : 's'}',
-                        style: GoogleFonts.poppins(fontSize: 11, color: Colors.green.shade800)),
+                        style: GoogleFonts.poppins(fontSize: 11, color: AppColors.successInk)),
                     Text(_rs(state.todayTotal),
                         style: GoogleFonts.poppins(
-                            fontSize: 14, fontWeight: FontWeight.w700, color: Colors.green.shade800)),
+                            fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.successInk)),
                   ],
                 ),
               ),
@@ -330,7 +321,7 @@ class _PosScreenState extends State<PosScreen> {
                   textInputAction: TextInputAction.search,
                   decoration: InputDecoration(
                     filled: true,
-                    fillColor: Colors.white,
+                    fillColor: AppColors.surface,
                     hintText: 'Search products or type a barcode + Enter',
                     prefixIcon: const Icon(Icons.search, size: 20),
                     suffixIcon: Row(
@@ -345,13 +336,13 @@ class _PosScreenState extends State<PosScreen> {
                           IconButton(icon: const Icon(Icons.close, size: 18), onPressed: _clearSearch),
                         IconButton(
                           tooltip: 'Type a barcode',
-                          icon: const Icon(Icons.keyboard_outlined, color: AppColors.secondary),
+                          icon: Icon(Icons.keyboard_outlined, color: AppColors.secondary),
                           onPressed: _typeBarcode,
                         ),
                         if (cameraScanSupported)
                           IconButton(
                             tooltip: 'Scan with camera',
-                            icon: const Icon(Icons.qr_code_scanner, color: AppColors.secondary),
+                            icon: Icon(Icons.qr_code_scanner, color: AppColors.secondary),
                             onPressed: _scan,
                           ),
                       ],
@@ -389,9 +380,9 @@ class _PosScreenState extends State<PosScreen> {
         selected: selected,
         onSelected: (_) => onTap(),
         selectedColor: AppColors.secondary,
-        backgroundColor: Colors.white,
+        backgroundColor: AppColors.surface,
         showCheckmark: false,
-        side: BorderSide(color: selected ? AppColors.secondary : Colors.grey.shade300),
+        side: BorderSide(color: selected ? AppColors.secondary : AppColors.hairline),
       ),
     );
   }
@@ -457,8 +448,9 @@ class _PosProductTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final sellable = product.sellableInStore;
     final soldOut = sellable <= 0;
+    final badge = posStockBadge(product);
     return Material(
-      color: Colors.white,
+      color: AppColors.surface,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
@@ -468,7 +460,7 @@ class _PosProductTile extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: inSale > 0 ? AppColors.primary : Colors.grey.shade200,
+              color: inSale > 0 ? AppColors.primary : AppColors.hairline,
               width: inSale > 0 ? 1.5 : 1,
             ),
           ),
@@ -504,13 +496,21 @@ class _PosProductTile extends StatelessWidget {
                 ],
               ),
               const Spacer(),
+              if (badge == PosStockBadge.low)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text('Only $sellable left for counter',
+                      style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.warningInk)),
+                ),
               Row(
                 children: [
                   Expanded(
                     child: Text(_rs(product.price),
                         style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.primary)),
                   ),
-                  if (soldOut)
+                  if (badge == PosStockBadge.allReserved)
+                    const _ReservedBadge()
+                  else if (soldOut)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
@@ -524,7 +524,7 @@ class _PosProductTile extends StatelessWidget {
                     Container(
                       width: 30,
                       height: 30,
-                      decoration: const BoxDecoration(color: AppColors.secondary, shape: BoxShape.circle),
+                      decoration: BoxDecoration(color: AppColors.secondary, shape: BoxShape.circle),
                       child: const Icon(Icons.add, color: Colors.white, size: 18),
                     ),
                 ],
@@ -548,6 +548,62 @@ class _PosProductTile extends StatelessWidget {
                   ),
                 ],
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+enum PosStockBadge { none, low, allReserved, soldOut }
+
+/// What the POS tile warns about: a nearly empty counter (2 or fewer sellable), every
+/// unit on the shelf held by online orders, or nothing on the shelf at all
+PosStockBadge posStockBadge(ProductModel p) {
+  final sellable = p.sellableInStore;
+  if (sellable > 0) return sellable <= 2 ? PosStockBadge.low : PosStockBadge.none;
+  return p.privateStock > 0 && p.reservedQuantity > 0 ? PosStockBadge.allReserved : PosStockBadge.soldOut;
+}
+
+/// Padlock badge, gently pulsing: the units are on the shelf but promised to online orders
+class _ReservedBadge extends StatefulWidget {
+  const _ReservedBadge();
+
+  @override
+  State<_ReservedBadge> createState() => _ReservedBadgeState();
+}
+
+class _ReservedBadgeState extends State<_ReservedBadge> with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.55, end: 1).animate(_pulse),
+      child: Tooltip(
+        message: 'Every unit on the shelf is reserved for online orders',
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: AppColors.reservedAmber.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.reservedAmber),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.lock, size: 12, color: AppColors.warningInk),
+              const SizedBox(width: 3),
+              Text('Reserved online',
+                  style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.warningInk)),
             ],
           ),
         ),
@@ -640,27 +696,6 @@ class _StockLegend extends StatelessWidget {
   }
 }
 
-class _MiniStat extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-  const _MiniStat({required this.label, required this.value, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
-      child: Column(
-        children: [
-          Text(value, style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700, color: color)),
-          Text(label, style: GoogleFonts.poppins(fontSize: 11, color: color)),
-        ],
-      ),
-    );
-  }
-}
-
 // ══════════════════════════════════════════════════════════════
 // Current sale pane (right pane on tablets, bottom panel on phones)
 // ══════════════════════════════════════════════════════════════
@@ -679,7 +714,7 @@ class _SalePane extends StatelessWidget {
         final productBloc = context.watch<VendorProductBloc>();
 
         final body = pos.receipt != null && pos.isEmpty
-            ? _ReceiptView(sale: pos.receipt!)
+            ? _ReceiptView(sale: pos.receipt!, cashReceived: pos.cashReceived)
             : pos.isEmpty
                 ? _emptySale()
                 : ListView.separated(
@@ -718,7 +753,7 @@ class _SalePane extends StatelessWidget {
                     if (!pos.isEmpty)
                       IconButton(
                         tooltip: 'Clear sale',
-                        icon: const Icon(Icons.delete_outline, color: AppColors.textSecondary),
+                        icon: Icon(Icons.delete_outline, color: AppColors.textSecondary),
                         onPressed: () => context.read<PosBloc>().add(PosClearSale()),
                       ),
                     if (onToggle != null)
@@ -760,7 +795,7 @@ class _SalePane extends StatelessWidget {
                     text: 'Complete sale',
                     icon: Icons.check_circle_outline,
                     isLoading: pos.isSubmitting,
-                    onPressed: pos.isEmpty ? null : () => context.read<PosBloc>().add(PosCompleteSale()),
+                    onPressed: pos.isEmpty ? null : () => _checkout(context, pos.total),
                   ),
                 ],
               ),
@@ -768,16 +803,23 @@ class _SalePane extends StatelessWidget {
           ],
         );
 
-        if (!compact) return ColoredBox(color: Colors.white, child: pane);
+        if (!compact) return ColoredBox(color: AppColors.surface, child: pane);
         return Material(
           elevation: 12,
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
           clipBehavior: Clip.antiAlias,
           child: pane,
         );
       },
     );
+  }
+
+  /// Cash tender first, then the sale is submitted with the amount received
+  Future<void> _checkout(BuildContext context, double bill) async {
+    final bloc = context.read<PosBloc>();
+    final received = await showDialog<double>(context: context, builder: (_) => TenderDialog(bill: bill));
+    if (received != null) bloc.add(PosCompleteSale(cashReceived: received));
   }
 
   Widget _emptySale() {
@@ -788,7 +830,7 @@ class _SalePane extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.shopping_basket_outlined, size: 48, color: Colors.grey.shade300),
+          Icon(Icons.shopping_basket_outlined, size: 48, color: AppColors.textLight),
           const SizedBox(height: 8),
           Text('Tap a product or scan a barcode to start a sale',
               textAlign: TextAlign.center, style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
@@ -836,8 +878,8 @@ class _SaleLineRow extends StatelessWidget {
               child: product != null
                   ? ProductImage(product: product!, iconSize: 18, borderRadius: BorderRadius.circular(8))
                   : DecoratedBox(
-                      decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
-                      child: Icon(Icons.inventory_2_outlined, size: 18, color: Colors.grey.shade400),
+                      decoration: BoxDecoration(color: AppColors.surfaceMuted, borderRadius: BorderRadius.circular(8)),
+                      child: Icon(Icons.inventory_2_outlined, size: 18, color: AppColors.textLight),
                     ),
             ),
             const SizedBox(width: 10),
@@ -902,7 +944,7 @@ class _RoundIcon extends StatelessWidget {
       child: Container(
         width: 30,
         height: 30,
-        decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.grey.shade400)),
+        decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppColors.hairline)),
         child: Icon(icon, size: 16, color: AppColors.textPrimary),
       ),
     );
@@ -914,7 +956,8 @@ class _RoundIcon extends StatelessWidget {
 // ══════════════════════════════════════════════════════════════
 class _ReceiptView extends StatelessWidget {
   final PosSale sale;
-  const _ReceiptView({required this.sale});
+  final double? cashReceived;
+  const _ReceiptView({required this.sale, this.cashReceived});
 
   @override
   Widget build(BuildContext context) {
@@ -940,11 +983,15 @@ class _ReceiptView extends StatelessWidget {
             ),
           ],
         ),
+        if (cashReceived != null && cashReceived! >= sale.totalAmount) ...[
+          const SizedBox(height: 12),
+          CashChangeLine(bill: sale.totalAmount, received: cashReceived!),
+        ],
         const SizedBox(height: 16),
         if (receipt != null) ...[
           Container(
             padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
-            decoration: BoxDecoration(color: const Color(0xFFE9EBEE), borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(color: AppColors.surfaceMuted, borderRadius: BorderRadius.circular(12)),
             child: ReceiptSlip(receipt: receipt),
           ),
           const SizedBox(height: 12),

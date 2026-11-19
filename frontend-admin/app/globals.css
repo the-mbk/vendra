@@ -1,28 +1,196 @@
 @import "tailwindcss";
 
+/* Dark mode follows the .dark class on <html> (set before paint by the script in app/layout.js) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f8f9ff;
+  --surface: #f8f9ff;
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #eff4ff;
+  --surface-container: #e5eeff;
+  --surface-container-high: #dce9ff;
+  --surface-container-highest: #d3e4fe;
+  --on-surface: #0b1c30;
+  --on-surface-variant: #464651;
+  --outline: #777682;
+  --outline-variant: #c7c5d3;
+  --primary: #232774;
+  --primary-container: #3b3f8c;
+  --secondary: #9d4300;
+  --secondary-container: #fd761a;
+  --tertiary: #003a16;
+  --tertiary-container: #005422;
+  --error: #ba1a1a;
+  --channel-walkin: #155e9e;
+  --channel-online: #e8581f;
+}
+
+html.dark, .dark {
+  color-scheme: dark;
+  --background: #0f172a;
+  --surface: #0f172a;
+  --surface-container-lowest: #1e293b;
+  --surface-container-low: #243044;
+  --surface-container: #2b384e;
+  --surface-container-high: #334155;
+  --surface-container-highest: #3b4a61;
+  --on-surface: #f8fafc;
+  --on-surface-variant: #cbd5e1;
+  --outline: #94a3b8;
+  --outline-variant: #475569;
+  --primary: #7178ee;
+  --primary-container: #8a90f2;
+  --secondary: #fb923c;
+  --secondary-container: #f97316;
+  --tertiary: #4ade80;
+  --tertiary-container: #16a34a;
+  --error: #ef4444;
+  --channel-walkin: #4a90d9;
+  --channel-online: #e8642b;
+
+  /* Status pills and banners in dark mode */
+  --color-red-50: rgb(239 68 68 / 0.15);
+  --color-red-100: rgb(239 68 68 / 0.22);
+  --color-red-200: rgb(239 68 68 / 0.35);
+  --color-red-700: #fca5a5;
+  --color-red-800: #fecaca;
+  --color-red-900: #fee2e2;
+
+  --color-amber-50: rgb(245 158 11 / 0.15);
+  --color-amber-100: rgb(245 158 11 / 0.22);
+  --color-amber-200: rgb(245 158 11 / 0.35);
+  --color-amber-300: rgb(245 158 11 / 0.5);
+  --color-amber-600: #fbbf24;
+  --color-amber-700: #fcd34d;
+  --color-amber-800: #fde68a;
+  --color-amber-900: #fef3c7;
+
+  --color-emerald-50: rgb(16 185 129 / 0.15);
+  --color-emerald-100: rgb(16 185 129 / 0.22);
+  --color-emerald-200: rgb(16 185 129 / 0.35);
+  --color-emerald-700: #6ee7b7;
+  --color-emerald-800: #a7f3d0;
+
+  --color-blue-50: rgb(59 130 246 / 0.15);
+  --color-blue-100: rgb(59 130 246 / 0.22);
+  --color-blue-200: rgb(59 130 246 / 0.35);
+  --color-blue-700: #93c5fd;
+  --color-blue-900: #dbeafe;
+
+  --color-purple-50: rgb(168 85 247 / 0.15);
+  --color-purple-100: rgb(168 85 247 / 0.22);
+  --color-purple-200: rgb(168 85 247 / 0.35);
+  --color-purple-700: #d8b4fe;
+
+  --color-cyan-100: rgb(6 182 212 / 0.22);
+  --color-cyan-700: #67e8f9;
+
+  --color-orange-50: rgb(249 115 22 / 0.15);
+  --color-orange-100: rgb(249 115 22 / 0.22);
+  --color-orange-600: #fb923c;
+  --color-orange-700: #fdba74;
+
+  --color-indigo-600: #a5b4fc;
+
+  --color-slate-100: rgb(148 163 184 / 0.2);
+  --color-slate-600: #94a3b8;
+  --color-slate-700: #cbd5e1;
+}
+
 @theme {
   --font-inter: "Inter", sans-serif;
   
-  --color-primary: #232774;
-  --color-primary-container: #3b3f8c;
-  --color-secondary: #9d4300;
-  --color-secondary-container: #fd761a;
-  --color-tertiary: #003a16;
-  --color-tertiary-container: #005422;
-  --color-error: #ba1a1a;
-  --color-background: #f8f9ff;
-  --color-surface: #f8f9ff;
-  --color-surface-container: #e5eeff;
-  --color-surface-container-low: #eff4ff;
-  --color-surface-container-high: #dce9ff;
-  --color-surface-container-highest: #d3e4fe;
-  --color-on-surface: #0b1c30;
-  --color-on-surface-variant: #464651;
-  --color-outline: #777682;
-  --color-outline-variant: #c7c5d3;
+  --color-primary: var(--primary);
+  --color-primary-container: var(--primary-container);
+  --color-secondary: var(--secondary);
+  --color-secondary-container: var(--secondary-container);
+  --color-tertiary: var(--tertiary);
+  --color-tertiary-container: var(--tertiary-container);
+  --color-error: var(--error);
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-container-lowest: var(--surface-container-lowest);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-low: var(--surface-container-low);
+  --color-surface-container-high: var(--surface-container-high);
+  --color-surface-container-highest: var(--surface-container-highest);
+  --color-on-surface: var(--on-surface);
+  --color-on-surface-variant: var(--on-surface-variant);
+  --color-outline: var(--outline);
+  --color-outline-variant: var(--outline-variant);
   --color-success: #16a34a;
   --color-warning: #f59e0b;
   --color-info: #2563eb;
+
+  /* Sales channels (walk-in POS vs online marketplace): Vendra navy & orange, contrast-checked */
+  --color-channel-walkin: var(--channel-walkin);
+  --color-channel-online: var(--channel-online);
+}
+
+/* Explicit class-level dark mode styling for complete guarantee */
+html.dark body, .dark body {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+}
+
+.dark .bg-background {
+  background-color: #0f172a !important;
+}
+
+.dark .bg-surface,
+.dark .bg-surface-container-lowest {
+  background-color: #1e293b !important;
+}
+
+.dark .bg-surface-container-low {
+  background-color: #243044 !important;
+}
+
+.dark .bg-surface-container {
+  background-color: #2b384e !important;
+}
+
+.dark .bg-surface-container-high {
+  background-color: #334155 !important;
+}
+
+.dark .text-on-surface {
+  color: #f8fafc !important;
+}
+
+.dark .text-on-surface-variant {
+  color: #cbd5e1 !important;
+}
+
+.dark .text-outline {
+  color: #94a3b8 !important;
+}
+
+.dark aside {
+  background-color: #1e293b !important;
+  border-color: rgba(71, 85, 105, 0.4) !important;
+}
+
+.dark header {
+  background-color: rgba(30, 41, 59, 0.9) !important;
+  border-color: rgba(71, 85, 105, 0.4) !important;
+}
+
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: #1e293b !important;
+  color: #f8fafc !important;
+  border-color: #475569 !important;
+}
+
+.dark table {
+  color: #f8fafc;
+}
+
+.dark tr:hover td {
+  background-color: #243044 !important;
 }
 
 * {
@@ -48,12 +216,12 @@ body {
   position: sticky;
   right: 0;
   z-index: 1;
-  background-color: #ffffff;
+  background-color: var(--color-surface-container-lowest);
   box-shadow: -10px 0 12px -12px rgb(11 28 48 / 0.35);
 }
 .sticky-actions thead th:last-child {
-  background-color: #f7f9ff;
+  background-color: color-mix(in oklab, var(--color-surface-container-low) 50%, var(--color-surface-container-lowest));
 }
 .sticky-actions tbody tr:hover td:last-child:not([colspan]) {
-  background-color: #fbfcff;
+  background-color: color-mix(in oklab, var(--color-surface-container-low) 30%, var(--color-surface-container-lowest));
 }

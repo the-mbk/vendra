@@ -6,6 +6,8 @@
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
 
+import '../../config/app_theme.dart';
+
 class LoadingShimmer extends StatelessWidget {
   final int itemCount;
   final bool isGrid;
@@ -41,8 +43,8 @@ class LoadingShimmer extends StatelessWidget {
 
   Widget _buildShimmerCard() {
     return Shimmer.fromColors(
-      baseColor: Colors.grey.shade300,
-      highlightColor: Colors.grey.shade100,
+      baseColor: AppColors.hairline,
+      highlightColor: AppColors.surfaceMuted,
       child: Card(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Column(
@@ -51,9 +53,9 @@ class LoadingShimmer extends StatelessWidget {
             Expanded(
               flex: 3,
               child: Container(
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
                 ),
               ),
             ),
@@ -64,11 +66,11 @@ class LoadingShimmer extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(height: 14, width: double.infinity, color: Colors.white),
+                    Container(height: 14, width: double.infinity, color: AppColors.surface),
                     const SizedBox(height: 8),
-                    Container(height: 14, width: 80, color: Colors.white),
+                    Container(height: 14, width: 80, color: AppColors.surface),
                     const Spacer(),
-                    Container(height: 16, width: 60, color: Colors.white),
+                    Container(height: 16, width: 60, color: AppColors.surface),
                   ],
                 ),
               ),
@@ -81,26 +83,26 @@ class LoadingShimmer extends StatelessWidget {
 
   Widget _buildShimmerListTile() {
     return Shimmer.fromColors(
-      baseColor: Colors.grey.shade300,
-      highlightColor: Colors.grey.shade100,
+      baseColor: AppColors.hairline,
+      highlightColor: AppColors.surfaceMuted,
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
           children: [
-            Container(width: 50, height: 50, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
+            Container(width: 50, height: 50, decoration: BoxDecoration(color: AppColors.surface, shape: BoxShape.circle)),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(height: 14, width: double.infinity, color: Colors.white),
+                  Container(height: 14, width: double.infinity, color: AppColors.surface),
                   const SizedBox(height: 8),
-                  Container(height: 12, width: 120, color: Colors.white),
+                  Container(height: 12, width: 120, color: AppColors.surface),
                 ],
               ),
             ),

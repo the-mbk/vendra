@@ -54,6 +54,10 @@ class AuthWalletBalanceUpdated extends AuthEvent {
   List<Object?> get props => [walletBalance];
 }
 
+/// Re-read the signed-in user from /api/auth/me without a loading state
+/// (after a profile edit); errors keep the current user.
+class AuthUserRefreshRequested extends AuthEvent {}
+
 /// Logout: stop tracking, go offline (best effort), clear token
 class LogoutRequested extends AuthEvent {}
 

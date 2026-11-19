@@ -217,7 +217,7 @@ class _ReceiptSettingsScreenState extends State<ReceiptSettingsScreen> {
                             Container(
                               padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFE9EBEE),
+                                color: AppColors.surfaceMuted,
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: ReceiptSlip(receipt: _preview(user)),

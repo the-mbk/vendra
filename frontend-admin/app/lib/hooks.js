@@ -4,9 +4,10 @@
 // Vendra Admin Dashboard - Shared hooks
 // ══════════════════════════════════════════════════════════════
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { getPublicConfig, isAuthError } from "./api";
+import { THEME_STORAGE_KEY } from "./theme";
 
 /**
  * GET /api/public-config?role=admin, fetched once and shared.
@@ -25,6 +26,55 @@ export function usePublicConfig() {
   }, []);
 
   return config;
+}
+
+// ── Theme ──
+const THEME_EVENT = "vendra:theme-changed";
+
+function applyTheme(theme) {
+  document.documentElement.classList.toggle("dark", theme === "dark");
+  window.dispatchEvent(new Event(THEME_EVENT));
+}
+
+function savedTheme() {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    return null; // storage blocked: follow the system setting
+  }
+}
+
+function subscribeTheme(onChange) {
+  // Without a saved choice the theme keeps following the operating system setting
+  const media = window.matchMedia("(prefers-color-scheme: dark)");
+  function onSystemChange(e) {
+    if (!savedTheme()) applyTheme(e.matches ? "dark" : "light");
+  }
+  window.addEventListener(THEME_EVENT, onChange);
+  media.addEventListener("change", onSystemChange);
+  return () => {
+    window.removeEventListener(THEME_EVENT, onChange);
+    media.removeEventListener("change", onSystemChange);
+  };
+}
+
+const currentTheme = () => (document.documentElement.classList.contains("dark") ? "dark" : "light");
+
+/**
+ * ["light" | "dark", setTheme]. The class on <html> (set before paint by app/lib/theme.js)
+ * is the source of truth; setTheme also remembers the choice in localStorage.
+ */
+export function useTheme() {
+  const theme = useSyncExternalStore(subscribeTheme, currentTheme, () => "light");
+  const setTheme = useCallback((next) => {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // Not persisted (private mode); still applies for this page load
+    }
+    applyTheme(next);
+  }, []);
+  return [theme, setTheme];
 }
 
 /** `value`, updated only after it has stopped changing for `delay` ms (for search-as-you-type) */

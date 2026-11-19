@@ -13,6 +13,7 @@ const { readCheckoutInput, quoteCheckout, placeOrder } = require('../services/ch
 const { submitOrderReview, formatReview } = require('../services/review.service');
 const { haversineKm, isValidCoordinate } = require('../utils/geo');
 const { paisaToNumber } = require('../utils/money');
+const { shortName, contactWhile } = require('../utils/privacy');
 const { publicGatewayConfig } = require('../services/gateway.client');
 const payoutAccounts = require('../services/payoutAccounts.service');
 const { TOPUP_MIN_RS, TOPUP_MAX_RS } = require('../services/payments.service');
@@ -90,9 +91,22 @@ const getPublicConfig = asyncHandler(async (req, res) => {
       disputeWindowMinutes: p.dispute_window_min,
       geofenceMeters: p.geofence_m,
       taskRadiusKm: p.task_radius_km,
+      // Rider payout rates (FR04): the rider app's store waiting clock uses the wait ones
+      riderBaseFee: p.rider_base_fee,
+      riderPerKm: p.rider_per_km,
+      riderPerWaitMin: p.rider_per_wait_min,
+      riderFreeWaitMinutes: p.rider_free_wait_min,
       defaultBuffer: p.default_buffer,
       vendorAcceptTimeoutMinutes: p.vendor_accept_timeout_min,
       riderAssignTimeoutMinutes: p.rider_assign_timeout_min,
+      // Task hoarding guard: reach the store within this time of accepting, or lose the delivery
+      riderPickupTimeoutMinutes: p.rider_pickup_timeout_min,
+      // At the store: collect within this time of arriving, or lose the delivery
+      riderStoreWaitMaxMinutes: p.rider_store_wait_max_min,
+      // Cancelling after the store accepted costs this share of the items (pending orders cancel free)
+      cancelPenaltyPct: p.cancel_penalty_pct,
+      // Stores are told to restock at this many free shelf units
+      lowStockUnits: p.low_stock_units,
       payments: {
         ...publicGatewayConfig(), // provider: vendrapay | stripe, publishableKey, gatewayUrl (Vendra Pay only)
         // Where withdrawals go: card (Vendra Pay), payoneer, or stripe_account (Stripe Connect)
@@ -338,7 +352,7 @@ const checkout = asyncHandler(async (req, res) => {
 
 const ORDER_SELECT = `
   SELECT o.*, v.store_name, v.store_address, v.latitude AS vendor_lat, v.longitude AS vendor_lng,
-         r.full_name AS rider_name, r.phone AS rider_phone,
+         r.full_name AS rider_name, r.phone AS rider_phone, r.avatar_url AS rider_photo_url,
          (SELECT json_build_object('id', d.id, 'status', d.status, 'resolution', d.resolution, 'issueType', d.issue_type)
             FROM disputes d WHERE d.order_id = o.id ORDER BY d.created_at DESC LIMIT 1) AS latest_dispute,
          COALESCE((SELECT json_agg(json_build_object(
@@ -347,7 +361,13 @@ const ORDER_SELECT = `
               'myRating', pr.rating, 'myComment', pr.comment) ORDER BY oi.id)
             FROM order_items oi JOIN products p ON p.id = oi.product_id
             LEFT JOIN product_reviews pr ON pr.order_id = oi.order_id AND pr.product_id = oi.product_id
-            WHERE oi.order_id = o.id), '[]') AS items
+            WHERE oi.order_id = o.id), '[]') AS items,
+         -- Receipt: what came back to the wallet, and the card that paid
+         (SELECT COALESCE(SUM(wl.amount), 0) FROM wallet_ledger wl
+            WHERE wl.order_id = o.id AND wl.user_id = o.customer_id AND wl.transaction_type = 'escrow_refund') AS refunded_amount,
+         (SELECT CONCAT_WS(' ', INITCAP(pm.card_brand), 'ending', pm.card_last4) FROM payments pm
+            WHERE pm.order_id = o.id AND pm.purpose = 'checkout' AND pm.status = 'succeeded' AND pm.card_last4 IS NOT NULL
+            ORDER BY pm.id DESC LIMIT 1) AS card_label
   FROM orders o
   JOIN vendors v ON o.vendor_id = v.id
   LEFT JOIN users r ON r.id = o.rider_user_id`;
@@ -373,6 +393,7 @@ function formatCustomerOrder(o, policies = null) {
     status: o.status,
     deliveryType: o.delivery_type,
     deliveryAddress: o.delivery_address,
+    deliveryNote: o.delivery_note || null,
     customerLat: num(o.customer_lat),
     customerLng: num(o.customer_lng),
     estimatedMinutes: o.estimated_minutes,
@@ -382,7 +403,15 @@ function formatCustomerOrder(o, policies = null) {
     escrowStatus: o.escrow_status,
     escrowReleaseDueAt: o.escrow_release_due_at,
     cancellationReason: o.cancellation_reason,
-    rider: o.rider_user_id ? { id: o.rider_user_id, name: o.rider_name, phone: o.rider_phone } : null,
+    // The rider's short name; their number only while the delivery is under way
+    rider: o.rider_user_id
+      ? {
+        id: o.rider_user_id,
+        name: shortName(o.rider_name),
+        phone: contactWhile(o.status, o.rider_phone),
+        photoUrl: o.rider_photo_url || null,
+      }
+      : null,
     latestDispute: o.latest_dispute,
     createdAt: o.created_at,
     assignedAt: o.assigned_at,
@@ -390,6 +419,8 @@ function formatCustomerOrder(o, policies = null) {
     deliveredAt: o.delivered_at,
     reservationExpiresAt,
     paymentMethod: o.payment_method,
+    cardLabel: o.card_label || null,
+    refundedAmount: Number(o.refunded_amount || 0),
     // Handover code: shown to the customer only, until the order is handed over
     deliveryOtp: isOpen(o.status) ? o.delivery_otp : null,
     otpLockedUntil: otpLocked ? o.otp_locked_until : null,
@@ -433,7 +464,9 @@ const getCustomerOrder = asyncHandler(async (req, res) => {
 });
 
 /**
- * GET /api/customer/orders/:id/tracking — order + live rider position + trip path
+ * GET /api/customer/orders/:id/tracking — order + live rider position + trip path.
+ * The rider's live position is only shared while they are on this delivery;
+ * after handover the customer keeps the trip path but not where the rider is now.
  */
 const getOrderTracking = asyncHandler(async (req, res) => {
   const orderId = intParam(req.params.id);
@@ -444,16 +477,18 @@ const getOrderTracking = asyncHandler(async (req, res) => {
   let riderLocation = null;
   let path = [];
   if (order.rider_user_id) {
-    const loc = await pool.query(
-      'SELECT current_lat, current_lng, last_location_at FROM riders WHERE user_id = $1',
-      [order.rider_user_id]
-    );
-    if (loc.rows[0]?.current_lat != null) {
-      riderLocation = {
-        lat: Number(loc.rows[0].current_lat),
-        lng: Number(loc.rows[0].current_lng),
-        at: loc.rows[0].last_location_at,
-      };
+    if (isOpen(order.status)) {
+      const loc = await pool.query(
+        'SELECT current_lat, current_lng, last_location_at FROM riders WHERE user_id = $1',
+        [order.rider_user_id]
+      );
+      if (loc.rows[0]?.current_lat != null) {
+        riderLocation = {
+          lat: Number(loc.rows[0].current_lat),
+          lng: Number(loc.rows[0].current_lng),
+          at: loc.rows[0].last_location_at,
+        };
+      }
     }
     const pings = await pool.query(
       `SELECT latitude AS lat, longitude AS lng, recorded_at AS at
@@ -467,34 +502,55 @@ const getOrderTracking = asyncHandler(async (req, res) => {
 });
 
 /**
- * POST /api/customer/orders/:id/cancel — pending orders only; stock released, full refund
+ * POST /api/customer/orders/:id/cancel — stock released, money back to the wallet.
+ *   pending    the store hasn't accepted: free, full refund
+ *   confirmed  accepted but not packed: the store keeps cancel_penalty_pct % of the items
+ *              for the work started (policy engine, SRDS §1.3); the rest is refunded
+ * Packed orders can no longer be cancelled; a dispute is the way after that.
  */
 const cancelOrder = asyncHandler(async (req, res) => {
   const orderId = intParam(req.params.id);
-  const refund = await withTransaction(async (client, afterCommit) => {
+  const result = await withTransaction(async (client, afterCommit) => {
     const r = await client.query(
       `SELECT * FROM orders WHERE id = $1 AND customer_id = $2 FOR UPDATE`,
       [orderId, req.user.userId]
     );
     if (r.rows.length === 0) throw httpError(404, 'Order not found.');
-    if (r.rows[0].status !== 'pending') {
-      throw httpError(409, 'Only orders the store has not accepted yet can be cancelled. Raise a dispute instead.');
+    const { status } = r.rows[0];
+    if (!['pending', 'confirmed'].includes(status)) {
+      throw httpError(409, 'This order is already packed, so it can no longer be cancelled. Raise a dispute instead.', {
+        code: 'TOO_LATE_TO_CANCEL',
+      });
     }
+    const feePct = status === 'confirmed' ? (await getPolicies(client)).cancel_penalty_pct || 0 : 0;
 
     await releaseOrderLocks(client, afterCommit, orderId, 'Order cancelled by customer');
     await client.query(
-      `UPDATE orders SET status = 'cancelled', cancellation_reason = 'Customer cancelled', updated_at = NOW() WHERE id = $1`,
-      [orderId]
+      `UPDATE orders SET status = 'cancelled', cancellation_reason = $2, updated_at = NOW() WHERE id = $1`,
+      [orderId, feePct > 0 ? `Customer cancelled after the store accepted (${feePct}% fee)` : 'Customer cancelled']
     );
-    const result = await refundEscrow(client, afterCommit, orderId, { note: `Escrow refund for cancelled Order #${orderId}` });
-    await announceOrder(client, afterCommit, orderId, 'order_cancelled', {
-      vendor: { title: `Order #${orderId} cancelled`, body: 'The customer cancelled. Reserved stock is back on sale.' },
-      customer: { title: `Order #${orderId} cancelled`, body: `Rs. ${result.refund.toFixed(2)} refunded to your wallet.` },
+    const settled = await refundEscrow(client, afterCommit, orderId, {
+      note: `Escrow refund for cancelled Order #${orderId}`, storeFeePct: feePct,
     });
-    return result;
+    const fee = settled.storeFee > 0 ? ` Rs. ${settled.storeFee.toFixed(2)} late cancellation fee paid to the store.` : '';
+    await announceOrder(client, afterCommit, orderId, 'order_cancelled', {
+      vendor: {
+        title: `Order #${orderId} cancelled`,
+        body: `The customer cancelled. Reserved stock is back on sale.${settled.storeFee > 0 ? ` Rs. ${settled.storeFee.toFixed(2)} fee added to your wallet.` : ''}`,
+      },
+      customer: { title: `Order #${orderId} cancelled`, body: `Rs. ${settled.refund.toFixed(2)} refunded to your wallet.${fee}` },
+    });
+    const wallet = await client.query('SELECT wallet_balance FROM users WHERE id = $1', [req.user.userId]);
+    return { ...settled, walletBalance: Number(wallet.rows[0].wallet_balance) };
   });
 
-  res.json({ success: true, message: 'Order cancelled. Amount refunded to wallet.', data: { refund: refund.refund } });
+  res.json({
+    success: true,
+    message: result.storeFee > 0
+      ? `Order cancelled. Rs. ${result.refund.toFixed(2)} refunded; Rs. ${result.storeFee.toFixed(2)} went to the store as the late cancellation fee.`
+      : 'Order cancelled. Amount refunded to wallet.',
+    data: { refund: result.refund, storeFee: result.storeFee, walletBalance: result.walletBalance },
+  });
 });
 
 /**

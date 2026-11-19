@@ -35,14 +35,16 @@ Future<void> main() async {
   // app starts on production-safe defaults and retries when a value is needed
   await AppConfig.load(role: 'vendor');
   AppConfig.startLiveUpdates(); // admin policy changes reach the app straight away
-  runApp(const VendraVendorApp());
+  runApp(VendraVendorApp(themeMode: await ThemeCubit.loadSaved()));
 }
 
 /// Root navigator, so app-wide events (an expired session) can change screens
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 class VendraVendorApp extends StatefulWidget {
-  const VendraVendorApp({super.key});
+  /// The saved light / dark / system choice
+  final ThemeMode themeMode;
+  const VendraVendorApp({super.key, this.themeMode = ThemeMode.system});
 
   @override
   State<VendraVendorApp> createState() => _VendraVendorAppState();
@@ -50,6 +52,7 @@ class VendraVendorApp extends StatefulWidget {
 
 class _VendraVendorAppState extends State<VendraVendorApp> {
   final AuthBloc _authBloc = AuthBloc();
+  late final _themeCubit = ThemeCubit(widget.themeMode);
   StreamSubscription<AuthState>? _authSub;
 
   /// Several requests can fail with 401 at once — sign out only once
@@ -70,6 +73,7 @@ class _VendraVendorAppState extends State<VendraVendorApp> {
     ApiService.onSessionExpired = null;
     _authSub?.cancel();
     _authBloc.close();
+    _themeCubit.close();
     super.dispose();
   }
 
@@ -102,60 +106,49 @@ class _VendraVendorAppState extends State<VendraVendorApp> {
     return MultiBlocProvider(
       providers: [
         BlocProvider<AuthBloc>.value(value: _authBloc),
+        BlocProvider<ThemeCubit>.value(value: _themeCubit),
         BlocProvider<VendorProductBloc>(create: (_) => VendorProductBloc()),
         BlocProvider<VendorOrderBloc>(create: (_) => VendorOrderBloc()),
-        BlocProvider<PosBloc>(create: (_) => PosBloc()),
+        BlocProvider<PosBloc>(create: (ctx) => PosBloc(productLookup: ctx.read<VendorProductBloc>().productById)),
         BlocProvider<StoreLocationBloc>(create: (_) => StoreLocationBloc()),
       ],
-      child: MaterialApp(
-        title: 'Vendra Vendor',
-        debugShowCheckedModeBanner: false,
-        // FR09: NotificationCenter shows a banner for every new notification
-        scaffoldMessengerKey: NotificationCenter.messengerKey,
-        navigatorKey: appNavigatorKey,
-        theme: _vendorTheme(),
-        // "DEVELOPMENT" badge on every screen while the backend runs in development mode
-        builder: (context, child) => DevBanner(child: child ?? const SizedBox.shrink()),
+      child: BlocBuilder<ThemeCubit, ThemeMode>(
+        builder: (context, themeMode) => MaterialApp(
+          title: 'Vendra Vendor',
+          debugShowCheckedModeBanner: false,
+          // FR09: NotificationCenter shows a banner for every new notification
+          scaffoldMessengerKey: NotificationCenter.messengerKey,
+          navigatorKey: appNavigatorKey,
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: themeMode,
+          // "DEVELOPMENT" badge on every screen while the backend runs in development mode
+          builder: (context, child) => ThemeScope(child: DevBanner(child: ConnectionBanner(child: child ?? const SizedBox.shrink()))),
 
-        initialRoute: AppRoutes.splash,
+          initialRoute: AppRoutes.splash,
 
-        routes: {
-          AppRoutes.splash: (context) => const SplashScreen(),
-          AppRoutes.login: (context) => const LoginScreen(),
-          AppRoutes.vendorDashboard: (context) => const VendorDashboardScreen(),
-          AppRoutes.addProduct: (context) => const AddEditProductScreen(),
-        },
+          routes: {
+            AppRoutes.splash: (context) => const SplashScreen(),
+            AppRoutes.login: (context) => const LoginScreen(),
+            AppRoutes.vendorDashboard: (context) => const VendorDashboardScreen(),
+            AppRoutes.addProduct: (context) => const AddEditProductScreen(),
+          },
 
-        onGenerateRoute: (settings) {
-          if (settings.name == AppRoutes.editProduct) {
-            final product = settings.arguments as ProductModel;
-            return MaterialPageRoute(builder: (context) => AddEditProductScreen(product: product));
-          }
+          onGenerateRoute: (settings) {
+            if (settings.name == AppRoutes.editProduct) {
+              final product = settings.arguments as ProductModel;
+              return MaterialPageRoute(builder: (context) => AddEditProductScreen(product: product));
+            }
 
-          if (settings.name == AppRoutes.vendorPendingApproval) {
-            final user = settings.arguments as UserModel;
-            return MaterialPageRoute(builder: (context) => PendingApprovalScreen(user: user));
-          }
+            if (settings.name == AppRoutes.vendorPendingApproval) {
+              final user = settings.arguments as UserModel;
+              return MaterialPageRoute(builder: (context) => PendingApprovalScreen(user: user));
+            }
 
-          return null;
-        },
+            return null;
+          },
+        ),
       ),
     );
   }
-}
-
-/// The shared theme plus a few vendor-app touches: un-styled text (headings,
-/// card titles) uses the dark text colour instead of the muted grey, and
-/// drawers / sheets / dialogs stay white instead of the orange-tinted surface
-ThemeData _vendorTheme() {
-  final base = AppTheme.lightTheme;
-  return base.copyWith(
-    textTheme: base.textTheme.copyWith(
-      bodyMedium: base.textTheme.bodyMedium?.copyWith(color: AppColors.textPrimary),
-    ),
-    drawerTheme: const DrawerThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
-    bottomSheetTheme: const BottomSheetThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
-    dialogTheme: const DialogThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
-    dividerTheme: DividerThemeData(color: Colors.grey.shade200, thickness: 1),
-  );
 }

@@ -1,0 +1,5 @@
+{
+  "watch": ["src", "migrations"],
+  "ext": "js,json,sql",
+  "exec": "node src/migrate.js && node src/server.js"
+}

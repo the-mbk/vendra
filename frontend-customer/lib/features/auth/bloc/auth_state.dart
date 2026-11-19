@@ -23,7 +23,7 @@ class Authenticated extends AuthState {
   final String token;
   const Authenticated({required this.user, required this.token});
   @override
-  List<Object?> get props => [user.id, user.walletBalance, user.platformEscrowBalance, token];
+  List<Object?> get props => [user.id, user.walletBalance, user.platformEscrowBalance, user.fullName, user.phone, user.avatarUrl, token];
 }
 
 /// User is not authenticated

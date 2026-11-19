@@ -49,7 +49,8 @@ class _ReportIssueViewState extends State<_ReportIssueView> {
 
   /// Customers can't raise "problem with the customer"
   static final Map<String, String> _issueTypes = Map.fromEntries(
-    DisputeModel.issueTypes.entries.where((e) => e.key != 'customer_issue'),
+    // Rider / store-side types aren't the customer's to raise
+    DisputeModel.issueTypes.entries.where((e) => e.key != 'customer_issue' && e.key != 'customer_unavailable'),
   );
 
   static const Map<String, IconData> _issueIcons = {
@@ -252,7 +253,7 @@ class _ReportIssueViewState extends State<_ReportIssueView> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFEBF0FA),
+        color: AppColors.tint(AppColors.secondary),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.secondary.withValues(alpha: 0.15)),
       ),
@@ -291,17 +292,17 @@ class _ReportIssueViewState extends State<_ReportIssueView> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: AppColors.hairline),
       ),
       child: Row(
         children: [
           Container(
             width: 56,
             height: 56,
-            decoration: BoxDecoration(color: const Color(0xFFF5F0E8), borderRadius: BorderRadius.circular(10)),
-            child: Icon(Icons.shopping_bag_outlined, color: Colors.grey.shade500),
+            decoration: BoxDecoration(color: AppColors.surfaceMuted, borderRadius: BorderRadius.circular(10)),
+            child: Icon(Icons.shopping_bag_outlined, color: AppColors.textLight),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -351,7 +352,7 @@ class _ReportIssueViewState extends State<_ReportIssueView> {
             value: (_step + 1) / 2,
             minHeight: 6,
             backgroundColor: AppColors.secondary.withValues(alpha: 0.1),
-            valueColor: const AlwaysStoppedAnimation(AppColors.secondary),
+            valueColor: AlwaysStoppedAnimation(AppColors.secondary),
           ),
         ),
       ],
@@ -388,7 +389,7 @@ class _ReportIssueViewState extends State<_ReportIssueView> {
                   color: selected ? AppColors.secondary.withValues(alpha: 0.08) : Colors.white,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: selected ? AppColors.secondary : Colors.grey.shade300,
+                    color: selected ? AppColors.secondary : AppColors.hairline,
                     width: selected ? 2 : 1,
                   ),
                 ),
@@ -450,7 +451,7 @@ class _ReportIssueViewState extends State<_ReportIssueView> {
           decoration: InputDecoration(
             hintText: 'E.g. I ordered the 128 GB model but received the 64 GB one…',
             filled: true,
-            fillColor: Colors.white,
+            fillColor: AppColors.surface,
             helperText: length < _minDescription ? 'At least $_minDescription characters ($length so far)' : null,
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
           ),
@@ -482,14 +483,14 @@ class _ReportIssueViewState extends State<_ReportIssueView> {
         width: 80,
         height: 80,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.shade400),
+          border: Border.all(color: AppColors.hairline),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.add_a_photo_outlined, color: AppColors.textSecondary),
+            Icon(Icons.add_a_photo_outlined, color: AppColors.textSecondary),
             const SizedBox(height: 4),
             Text('Add photo', style: GoogleFonts.poppins(fontSize: 10, color: AppColors.textSecondary)),
           ],

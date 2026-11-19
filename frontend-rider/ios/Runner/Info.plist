@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Vendra uses the camera to photograph the door or gate when a customer is unavailable at handover.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Vendra lets you attach a photo as evidence when a customer is unavailable at handover.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Vendra Rider uses your location to show nearby delivery requests, share your position with the customer during a delivery, and confirm you are at the drop-off point.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

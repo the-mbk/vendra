@@ -77,12 +77,12 @@ class StoreCover extends StatelessWidget {
 
   const StoreCover({super.key, this.coverUrl, this.shade = false});
 
-  static const _fallback = DecoratedBox(
+  static final _fallback = DecoratedBox(
     decoration: BoxDecoration(
       gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [AppColors.secondary, Color(0xFF0D2847)],
+        colors: [AppColors.secondary, const Color(0xFF0D2847)],
       ),
     ),
   );

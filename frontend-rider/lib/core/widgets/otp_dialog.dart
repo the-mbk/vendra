@@ -96,7 +96,7 @@ class _OtpDialogState extends State<OtpDialog> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Row(
         children: [
-          const Icon(Icons.verified_user_outlined, color: AppColors.secondary),
+          Icon(Icons.verified_user_outlined, color: AppColors.secondary),
           const SizedBox(width: 8),
           Expanded(child: Text('Confirm payment', style: GoogleFonts.poppins(fontWeight: FontWeight.w600))),
         ],
@@ -116,7 +116,7 @@ class _OtpDialogState extends State<OtpDialog> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFFF8E1),
+                  color: AppColors.warningSurface,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.amber.shade200),
                 ),
@@ -148,7 +148,7 @@ class _OtpDialogState extends State<OtpDialog> {
                 errorText: _error,
                 errorMaxLines: 3,
                 filled: true,
-                fillColor: Colors.grey.shade50,
+                fillColor: AppColors.surfaceMuted,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),

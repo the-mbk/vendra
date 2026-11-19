@@ -243,7 +243,7 @@ class _PayoutAccountSheetState extends State<PayoutAccountSheet> with WidgetsBin
               child: Container(
                 width: 40,
                 height: 4,
-                decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                decoration: BoxDecoration(color: AppColors.hairline, borderRadius: BorderRadius.circular(2)),
               ),
             ),
             const SizedBox(height: 16),
@@ -371,7 +371,7 @@ class _PayoutAccountSheetState extends State<PayoutAccountSheet> with WidgetsBin
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF8E1),
+        color: AppColors.warningSurface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.amber.shade200),
       ),

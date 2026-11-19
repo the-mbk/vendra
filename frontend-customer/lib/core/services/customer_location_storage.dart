@@ -10,9 +10,9 @@ class CustomerLocationStorage {
   static const _kName = 'customer_default_location_name';
   static const _kAddressLine = 'customer_delivery_address_line';
 
-  static const double defaultLat = 33.6844;
-  static const double defaultLng = 73.0479;
-  static const String defaultName = 'Islamabad, Pakistan';
+  static const double defaultLat = 24.8620; // Saddar, Karachi (~1.1 km from Karachi Electronics Hub)
+  static const double defaultLng = 67.0300;
+  static const String defaultName = 'Saddar, Karachi (Near Store)';
 
   static Future<void> save({
     required double latitude,

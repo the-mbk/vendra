@@ -73,7 +73,7 @@ class _VendorDisputesScreenState extends State<VendorDisputesScreen> {
                       ? ListView(
                           children: [
                             const SizedBox(height: 120),
-                            Icon(Icons.gavel_outlined, size: 64, color: Colors.grey.shade300),
+                            Icon(Icons.gavel_outlined, size: 64, color: AppColors.textLight),
                             const SizedBox(height: 16),
                             Center(
                               child: Text('No disputes on your orders',
@@ -101,7 +101,7 @@ class _VendorDisputesScreenState extends State<VendorDisputesScreen> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: highlighted ? AppColors.primary : color.withValues(alpha: 0.3), width: highlighted ? 2 : 1),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
@@ -153,8 +153,8 @@ class _VendorDisputesScreenState extends State<VendorDisputesScreen> {
                         errorBuilder: (_, __, ___) => Container(
                           width: 72,
                           height: 72,
-                          color: Colors.grey.shade200,
-                          child: const Icon(Icons.broken_image_outlined, color: AppColors.textLight),
+                          color: AppColors.surfaceMuted,
+                          child: Icon(Icons.broken_image_outlined, color: AppColors.textLight),
                         ),
                       ),
                     ),

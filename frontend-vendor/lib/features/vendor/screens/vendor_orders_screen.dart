@@ -23,6 +23,7 @@ import '../bloc/vendor_order_bloc.dart';
 import '../models/packing.dart';
 import '../widgets/handover_code_dialog.dart';
 import '../widgets/packing_checklist.dart';
+import '../widgets/rider_at_store_card.dart';
 import '../../auth/bloc/auth_bloc.dart';
 import '../../auth/bloc/auth_event.dart';
 import '../../auth/bloc/auth_state.dart';
@@ -34,19 +35,7 @@ final NumberFormat _money = NumberFormat('#,##0');
 class VendorOrdersScreen extends StatelessWidget {
   const VendorOrdersScreen({super.key});
 
-  Color _statusColor(String status) {
-    switch (status) {
-      case 'pending': return Colors.orange;
-      case 'confirmed': return AppColors.stockGreen;
-      case 'packed': return Colors.indigo;
-      case 'ready_for_pickup': return Colors.teal;
-      case 'picked': return Colors.deepPurple;
-      case 'on_the_way': return AppColors.primary;
-      case 'delivered': return Colors.green.shade700;
-      case 'cancelled': return AppColors.stockRed;
-      default: return Colors.grey;
-    }
-  }
+  Color _statusColor(String status) => AppColors.orderStatus(status);
 
   @override
   Widget build(BuildContext context) {
@@ -92,7 +81,7 @@ class VendorOrdersScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Container(
-                  color: Colors.white,
+                  color: AppColors.surface,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -107,7 +96,7 @@ class VendorOrdersScreen extends StatelessWidget {
                                 color: AppColors.secondary.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(10),
                               ),
-                              child: const Icon(Icons.receipt_long, color: AppColors.secondary),
+                              child: Icon(Icons.receipt_long, color: AppColors.secondary),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
@@ -130,7 +119,7 @@ class VendorOrdersScreen extends StatelessWidget {
                         indicatorColor: AppColors.secondary,
                         indicatorWeight: 3,
                         indicatorSize: TabBarIndicatorSize.tab,
-                        dividerColor: Colors.grey.shade200,
+                        dividerColor: AppColors.surfaceMuted,
                         unselectedLabelColor: AppColors.textSecondary,
                         labelStyle: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
                         unselectedLabelStyle: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500),
@@ -303,10 +292,10 @@ class VendorOrdersScreen extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: isPending
-            ? Border.all(color: Colors.orange.shade300, width: 1.5)
+            ? Border.all(color: AppColors.warning.withValues(alpha: 0.7), width: 1.5)
             : (order.hasOpenDispute ? Border.all(color: AppColors.stockRed.withValues(alpha: 0.5), width: 1.5) : null),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
       ),
@@ -361,7 +350,7 @@ class VendorOrdersScreen extends StatelessWidget {
           // Customer name + phone (tap to call)
           Row(
             children: [
-              const Icon(Icons.person_outline, size: 16, color: AppColors.textSecondary),
+              Icon(Icons.person_outline, size: 16, color: AppColors.textSecondary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -417,7 +406,7 @@ class VendorOrdersScreen extends StatelessWidget {
               padding: const EdgeInsets.only(top: 4),
               child: Row(
                 children: [
-                  const Icon(Icons.inventory_2_outlined, size: 14, color: AppColors.textLight),
+                  Icon(Icons.inventory_2_outlined, size: 14, color: AppColors.textLight),
                   const SizedBox(width: 4),
                   Expanded(
                     child: Text('Packed by ${order.packedByName}',
@@ -474,7 +463,7 @@ class VendorOrdersScreen extends StatelessWidget {
     IconData icon;
     switch (order.escrowStatus) {
       case 'held':
-        color = Colors.green.shade700;
+        color = AppColors.success;
         icon = Icons.lock_outline;
         break;
       case 'disputed':
@@ -486,11 +475,11 @@ class VendorOrdersScreen extends StatelessWidget {
         icon = Icons.account_balance_wallet_outlined;
         break;
       case 'refunded':
-        color = Colors.grey.shade700;
+        color = AppColors.textSecondary;
         icon = Icons.undo;
         break;
       default:
-        color = Colors.grey;
+        color = AppColors.textLight;
         icon = Icons.hourglass_empty;
     }
     var text = order.escrowStatusText;
@@ -506,7 +495,11 @@ class VendorOrdersScreen extends StatelessWidget {
     final open = d.status == 'open';
     final text = open
         ? 'Dispute open'
-        : (d.resolution == 'refund' ? 'Dispute resolved · refunded' : 'Dispute resolved · released');
+        : switch (d.resolution) {
+            'refund' => 'Dispute resolved · refunded',
+            'split' => 'Dispute resolved · split',
+            _ => 'Dispute resolved · released',
+          };
     return InkWell(
       borderRadius: BorderRadius.circular(6),
       onTap: () => Navigator.push(
@@ -540,44 +533,21 @@ class VendorOrdersScreen extends StatelessWidget {
 
   // ── Rider assignment (delivery orders) ──
   Widget _riderInfo(OrderModel order) {
-    final rider = order.rider;
-    if (rider != null) {
-      return Container(
-        margin: const EdgeInsets.only(top: 8),
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(color: Colors.deepPurple.shade50, borderRadius: BorderRadius.circular(10)),
-        child: Row(
-          children: [
-            Icon(Icons.two_wheeler, size: 18, color: Colors.deepPurple.shade400),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Rider: ${rider.name ?? 'Assigned'}',
-                      style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.deepPurple.shade700)),
-                ],
-              ),
-            ),
-            // Tap to call the rider
-            PhoneAction(phone: rider.phone),
-          ],
-        ),
-      );
-    }
+    // Who is collecting, and once they check in, how long they have been waiting
+    if (order.rider != null) return RiderAtStoreCard(order: order);
     if (order.status == 'ready_for_pickup') {
       return Container(
         margin: const EdgeInsets.only(top: 8),
         padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(10)),
+        decoration: BoxDecoration(color: AppColors.tint(AppColors.info), borderRadius: BorderRadius.circular(10)),
         child: Row(
           children: [
-            Icon(Icons.wifi_tethering, size: 18, color: Colors.teal.shade600),
+            Icon(Icons.wifi_tethering, size: 18, color: AppColors.ink(AppColors.info)),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 'Nearby riders have been notified — waiting for one to accept.',
-                style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal.shade700),
+                style: GoogleFonts.poppins(fontSize: 12, color: AppColors.ink(AppColors.info)),
               ),
             ),
           ],
@@ -630,7 +600,7 @@ class VendorOrdersScreen extends StatelessWidget {
         _fullWidthButton(
           label: 'Mark as Packed',
           icon: Icons.inventory_outlined,
-          color: Colors.indigo,
+          color: AppColors.secondary,
           // The server refuses too (409 PACKING_INCOMPLETE) if a line is missing
           onPressed: ready ? () => bloc.add(MarkOrderPreparing(orderId: order.id)) : null,
         ),
@@ -660,12 +630,26 @@ class VendorOrdersScreen extends StatelessWidget {
         _fullWidthButton(
           label: 'Hand over to customer',
           icon: Icons.done_all,
-          color: Colors.teal.shade700,
+          color: AppColors.success,
           onPressed: () => _handOver(context, order),
         ),
         _hint(order.otpRequired
             ? "Needs the customer's 4-digit handover code. Payment is released to your wallet after the dispute window."
             : 'Completes the order. Payment is released to your wallet after the dispute window.'),
+      ];
+    }
+
+    // Delivery: the rider checked in at the counter — the store confirms it handed the parcel over
+    if (order.isDelivery && order.status == 'ready_for_pickup' && order.rider != null && order.riderArrivedAt != null) {
+      return [
+        const SizedBox(height: 12),
+        _fullWidthButton(
+          label: 'Handed over to ${order.rider!.name ?? 'the rider'}',
+          icon: Icons.handshake_outlined,
+          color: AppColors.primary,
+          onPressed: () => bloc.add(HandOverToRider(order.id)),
+        ),
+        _hint('Tap once the rider has the parcel. This stops their waiting clock.'),
       ];
     }
 
@@ -728,7 +712,7 @@ class VendorOrdersScreen extends StatelessWidget {
     final (IconData icon, Color color, String title) = switch (error.code) {
       'WRONG_ITEM' => (Icons.do_not_disturb_on_outlined, AppColors.stockRed, 'Not in this order'),
       'ALREADY_PACKED' => (Icons.check_circle_outline, AppColors.reservedAmber, 'Already packed'),
-      _ => (Icons.checklist, Colors.indigo, 'Packing not finished'),
+      _ => (Icons.checklist, AppColors.secondary, 'Packing not finished'),
     };
     showDialog(
       context: context,
@@ -799,7 +783,7 @@ class _OrderSteps extends StatelessWidget {
       // A step is done once the order has moved past it; the last step is done when reached
       final done = i < current || (i == current && i == labels.length - 1);
       final active = i == current && !done;
-      final color = done ? AppColors.stockGreen : (active ? AppColors.primary : Colors.grey.shade400);
+      final color = done ? AppColors.stockGreen : (active ? AppColors.primary : AppColors.textLight);
       children.add(Expanded(
         child: Column(
           children: [
@@ -808,7 +792,7 @@ class _OrderSteps extends StatelessWidget {
                 Expanded(
                   child: i == 0
                       ? const SizedBox.shrink()
-                      : Container(height: 2, color: i <= current ? AppColors.stockGreen : Colors.grey.shade300),
+                      : Container(height: 2, color: i <= current ? AppColors.stockGreen : AppColors.hairline),
                 ),
                 Container(
                   width: 26,
@@ -823,7 +807,7 @@ class _OrderSteps extends StatelessWidget {
                 Expanded(
                   child: i == labels.length - 1
                       ? const SizedBox.shrink()
-                      : Container(height: 2, color: i < current ? AppColors.stockGreen : Colors.grey.shade300),
+                      : Container(height: 2, color: i < current ? AppColors.stockGreen : AppColors.hairline),
                 ),
               ],
             ),

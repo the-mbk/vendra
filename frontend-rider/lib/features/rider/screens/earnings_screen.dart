@@ -92,7 +92,7 @@ class _Summary extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(colors: [AppColors.secondary, Color(0xFF0B6BB5)]),
+            gradient: AppColors.brandGradient,
             borderRadius: BorderRadius.circular(18),
           ),
           child: Column(
@@ -129,7 +129,7 @@ class _Summary extends StatelessWidget {
           child: ListTile(
             leading: CircleAvatar(
               backgroundColor: AppColors.secondary.withValues(alpha: 0.1),
-              child: const Icon(Icons.route, color: AppColors.secondary, size: 20),
+              child: Icon(Icons.route, color: AppColors.secondary, size: 20),
             ),
             title: Text('Total distance',
                 style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
@@ -296,7 +296,7 @@ class _History extends StatelessWidget {
                         Text(rs(o.payout),
                             style: GoogleFonts.poppins(
                                 fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.success)),
-                        const Icon(Icons.chevron_right, size: 18, color: AppColors.textLight),
+                        Icon(Icons.chevron_right, size: 18, color: AppColors.textLight),
                       ],
                     ),
                   ],
@@ -365,7 +365,7 @@ class _Wallet extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
             child: Row(
               children: [
-                const Icon(Icons.account_balance_wallet, color: AppColors.secondary),
+                Icon(Icons.account_balance_wallet, color: AppColors.secondary),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(

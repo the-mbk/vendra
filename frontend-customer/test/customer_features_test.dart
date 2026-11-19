@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vendra_customer/features/customer/bloc/product_detail_bloc.dart';
+import 'package:vendra_customer/features/customer/widgets/dispute_window_badge.dart';
 import 'package:vendra_customer/features/customer/widgets/handover_code_card.dart';
 import 'package:vendra_customer/features/customer/widgets/order_review.dart';
 import 'package:vendra_customer/features/customer/widgets/rating_summary.dart';
@@ -57,7 +58,7 @@ void main() {
         ),
       ));
       expect(find.textContaining('00:03'), findsOneWidget);
-      expect(find.textContaining('while the store confirms'), findsOneWidget);
+      expect(find.textContaining('to accept and pack this order'), findsOneWidget);
 
       now = now.add(const Duration(seconds: 1));
       await tester.pump(const Duration(seconds: 1));
@@ -93,7 +94,7 @@ void main() {
     });
 
     test('instruction depends on delivery type', () {
-      expect(handoverInstruction(_order({})), contains('rider only when you have your items'));
+      expect(handoverInstruction(_order({})), contains('only when the parcel is in your hands'));
       expect(handoverInstruction(_order({'deliveryType': 'self_pickup'})), contains('at the counter'));
     });
 
@@ -123,11 +124,25 @@ void main() {
 
   group('escrow and stock wording', () {
     test('headline follows the escrow status', () {
-      expect(escrowTrustHeadline(_order({'escrowStatus': 'held'})), 'Funds held safely by Vendra Escrow until delivery');
-      expect(escrowTrustHeadline(_order({'escrowStatus': 'held', 'status': 'delivered'})), contains('dispute window'));
-      expect(escrowTrustHeadline(_order({'escrowStatus': 'disputed'})), contains('frozen'));
+      expect(escrowTrustHeadline(_order({'escrowStatus': 'held'})), 'Payment held safely in Vendra Escrow');
+      expect(escrowTrustHeadline(_order({'escrowStatus': 'disputed'})), contains('escrow frozen'));
       expect(escrowTrustHeadline(_order({'escrowStatus': 'released'})), contains('released'));
       expect(escrowTrustHeadline(_order({'escrowStatus': 'refunded'})), contains('refunded'));
+    });
+
+    test('post-delivery inspection window counts down only while escrow is held', () {
+      final now = DateTime(2026, 11, 18, 12);
+      final due = now.add(const Duration(hours: 23, minutes: 40));
+      final delivered = _order({'status': 'delivered', 'escrowStatus': 'held', 'escrowReleaseDueAt': due.toIso8601String()});
+      expect(disputeWindowEnd(delivered, now), due);
+      expect(disputeWindowEnd(delivered, due.add(const Duration(seconds: 1))), isNull, reason: 'window closed');
+      expect(disputeWindowEnd(_order({'status': 'delivered', 'escrowStatus': 'released', 'escrowReleaseDueAt': due.toIso8601String()}), now),
+          isNull);
+      expect(disputeWindowEnd(_order({'escrowReleaseDueAt': due.toIso8601String()}), now), isNull, reason: 'not delivered');
+      expect(formatWindowLeft(const Duration(hours: 23, minutes: 40)), '23 hrs 40 mins');
+      expect(formatWindowLeft(const Duration(hours: 1)), '1 hr');
+      expect(formatWindowLeft(const Duration(minutes: 1, seconds: 30)), '1 min');
+      expect(formatWindowLeft(const Duration(seconds: 20)), 'under a minute');
     });
 
     test('dispute window wording', () {

@@ -21,7 +21,7 @@ class VendraLogo extends StatelessWidget {
   Widget build(BuildContext context) {
     return VendraBrandHeader(
       subtitle: subtitle,
-      icon: Icons.delivery_dining_rounded,
+      variant: BrandVariant.rider,
       iconStyle: HeaderIconStyle.inline,
       isDark: isDark,
       titleSize: titleSize,

@@ -4,6 +4,7 @@
 // numeric keyboard, then Confirm. A wrong code shows the attempts left;
 // after five the handover is locked and the dialog says until when.
 // The DeliveryBloc decides when it opens and closes (awaitingCode).
+// Customer unavailable leaves the code entry for the photo report.
 // ══════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -20,7 +21,9 @@ import '../models/handover_code.dart';
 
 /// Shows the dialog bound to [bloc]. The screen closes it (Navigator.pop)
 /// once the bloc stops awaiting the code; Cancel and Back only tell the bloc.
-Future<void> showHandoverCodeDialog(BuildContext context, DeliveryBloc bloc) {
+/// [onUnavailable] runs when the rider reports the customer unavailable (the
+/// code entry is cancelled first).
+Future<void> showHandoverCodeDialog(BuildContext context, DeliveryBloc bloc, {required VoidCallback onUnavailable}) {
   return showDialog<void>(
     context: context,
     barrierDismissible: false,
@@ -37,6 +40,10 @@ Future<void> showHandoverCodeDialog(BuildContext context, DeliveryBloc bloc) {
             feedback: state.codeFeedback,
             onSubmit: (code) => bloc.add(DeliveryCodeSubmitted(code)),
             onCancel: () => bloc.add(DeliveryCodeCancelled()),
+            onUnavailable: () {
+              onUnavailable();
+              bloc.add(DeliveryCodeCancelled());
+            },
           ),
         ),
       ),
@@ -51,12 +58,14 @@ class HandoverCodeForm extends StatefulWidget {
   final HandoverCodeFeedback? feedback;
   final ValueChanged<String> onSubmit;
   final VoidCallback onCancel;
+  final VoidCallback onUnavailable;
 
   const HandoverCodeForm({
     super.key,
     required this.busy,
     required this.onSubmit,
     required this.onCancel,
+    required this.onUnavailable,
     this.feedback,
   });
 
@@ -130,7 +139,7 @@ class _HandoverCodeFormState extends State<HandoverCodeForm> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Row(
         children: [
-          const Icon(Icons.pin_outlined, color: AppColors.secondary),
+          Icon(Icons.pin_outlined, color: AppColors.secondary),
           const SizedBox(width: 8),
           Expanded(child: Text('Delivery code', style: GoogleFonts.poppins(fontWeight: FontWeight.w600))),
         ],
@@ -169,6 +178,18 @@ class _HandoverCodeFormState extends State<HandoverCodeForm> {
                     : feedback.message,
               ),
             ],
+            const SizedBox(height: 16),
+            const Divider(height: 1),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: widget.busy ? null : widget.onUnavailable,
+                style: TextButton.styleFrom(foregroundColor: AppColors.error, padding: EdgeInsets.zero),
+                icon: const Icon(Icons.no_accounts_outlined, size: 18),
+                label: const Text('Customer unavailable / issue at handover'),
+              ),
+            ),
           ],
         ),
       ),
@@ -232,12 +253,12 @@ class _CodeBoxes extends StatelessWidget {
                   margin: const EdgeInsets.symmetric(horizontal: 5),
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: enabled ? Colors.grey.shade50 : Colors.grey.shade200,
+                    color: enabled ? AppColors.surfaceMuted : AppColors.surfaceMuted,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: enabled && i == text.length.clamp(0, handoverCodeLength - 1)
                           ? AppColors.primary
-                          : Colors.grey.shade300,
+                          : AppColors.hairline,
                       width: enabled && i == text.length.clamp(0, handoverCodeLength - 1) ? 2 : 1,
                     ),
                   ),

@@ -112,7 +112,7 @@ class _ProductDetailView extends StatelessWidget {
 
                 // Product Info
                 Container(
-                  color: Colors.white,
+                  color: AppColors.surface,
                   padding: const EdgeInsets.all(20),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -190,7 +190,7 @@ class _ProductDetailView extends StatelessWidget {
           bottomNavigationBar: Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surface,
               boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 10, offset: const Offset(0, -4))],
             ),
             child: SafeArea(
@@ -216,7 +216,7 @@ class _ProductDetailView extends StatelessWidget {
                       label: const Text('Add to Cart', maxLines: 1),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.secondary,
-                        side: const BorderSide(color: AppColors.secondary, width: 1.5),
+                        side: BorderSide(color: AppColors.secondary, width: 1.5),
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
@@ -258,7 +258,7 @@ class _ProductDetailView extends StatelessWidget {
     final count = details?.totalRatings ?? product.ratingCount;
     return Container(
       width: double.infinity,
-      color: Colors.white,
+      color: AppColors.surface,
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -380,7 +380,7 @@ class _ProductStoreCardState extends State<_ProductStoreCard> {
       if (address.isNotEmpty) address,
     ].join(' · ');
     return Material(
-      color: Colors.white,
+      color: AppColors.surface,
       child: InkWell(
         onTap: _visitStore,
         child: Padding(
@@ -401,7 +401,7 @@ class _ProductStoreCardState extends State<_ProductStoreCard> {
                     if (where.isNotEmpty)
                       Row(
                         children: [
-                          const Icon(Icons.location_on_outlined, size: 13, color: AppColors.textSecondary),
+                          Icon(Icons.location_on_outlined, size: 13, color: AppColors.textSecondary),
                           const SizedBox(width: 2),
                           Expanded(
                             child: Text(where,
@@ -419,7 +419,7 @@ class _ProductStoreCardState extends State<_ProductStoreCard> {
                 onPressed: _visitStore,
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.secondary,
-                  side: const BorderSide(color: AppColors.secondary),
+                  side: BorderSide(color: AppColors.secondary),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   minimumSize: const Size(0, 36),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,

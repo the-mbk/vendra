@@ -16,6 +16,7 @@ const { httpError, asyncHandler, withTransaction, intParam, paging, pageOf } = r
 const { FEATURES } = require('../config/mode');
 const { haversineKm, isValidCoordinate } = require('../utils/geo');
 const { toPaisa, paisaToNumber } = require('../utils/money');
+const { shortName, contactWhile } = require('../utils/privacy');
 
 const ACTIVE_STATUSES = ['ready_for_pickup', 'picked', 'on_the_way'];
 const num = (v) => (v == null ? null : Number(v));
@@ -61,11 +62,21 @@ async function activeOrderId(db, riderUserId) {
 const RIDER_ORDER_SELECT = `
   SELECT o.*, v.store_name, v.store_address, v.latitude AS store_lat, v.longitude AS store_lng,
          vu.phone AS store_phone, cu.full_name AS customer_name, cu.phone AS customer_phone,
-         (SELECT COALESCE(SUM(quantity), 0) FROM order_items WHERE order_id = o.id) AS item_count
+         (SELECT COALESCE(SUM(quantity), 0) FROM order_items WHERE order_id = o.id) AS item_count,
+         pw.weight_grams AS parcel_weight_grams, pw.unweighed_lines
   FROM orders o
+  CROSS JOIN LATERAL (
+    SELECT COALESCE(SUM(oi.quantity * p.weight_grams), 0) AS weight_grams,
+           COUNT(*) FILTER (WHERE p.weight_grams IS NULL) AS unweighed_lines
+    FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE oi.order_id = o.id
+  ) pw
   JOIN vendors v ON v.id = o.vendor_id
   JOIN users vu ON vu.id = v.user_id
   JOIN users cu ON cu.id = o.customer_id`;
+
+/** The rider ($1) lost this order once for not reaching the store (task hoarding guard) */
+const LAPSED_BY_RIDER = `EXISTS (SELECT 1 FROM trust_events te
+  WHERE te.order_id = o.id AND te.user_id = $1 AND te.kind = 'rider_task_timeout')`;
 
 function formatRiderOrder(o) {
   return {
@@ -76,12 +87,17 @@ function formatRiderOrder(o) {
     storePhone: o.store_phone,
     storeLat: num(o.store_lat),
     storeLng: num(o.store_lng),
-    customerName: o.customer_name,
-    customerPhone: o.customer_phone,
+    // The rider gets a short name, and the number only while delivering
+    customerName: shortName(o.customer_name),
+    customerPhone: contactWhile(o.status, o.customer_phone),
     deliveryAddress: o.delivery_address,
+    deliveryNote: o.delivery_note || null,
     customerLat: num(o.customer_lat),
     customerLng: num(o.customer_lng),
     itemCount: Number(o.item_count),
+    // Parcel weight from the products' listed weights; incomplete when some product has none
+    parcelWeightGrams: Number(o.parcel_weight_grams),
+    parcelWeightComplete: Number(o.unweighed_lines) === 0,
     totalAmount: Number(o.total_amount),
     assignedAt: o.assigned_at,
     arrivedAt: o.rider_arrived_at,
@@ -239,7 +255,9 @@ const getTasks = asyncHandler(async (req, res) => {
   const r = await pool.query(
     `${RIDER_ORDER_SELECT}
      WHERE o.status = 'ready_for_pickup' AND o.delivery_type = 'delivery' AND o.rider_user_id IS NULL
-     ORDER BY o.ready_at NULLS LAST, o.created_at`
+       AND NOT ${LAPSED_BY_RIDER}
+     ORDER BY o.ready_at NULLS LAST, o.created_at`,
+    [req.user.userId]
   );
 
   const tasks = r.rows
@@ -252,6 +270,10 @@ const getTasks = asyncHandler(async (req, res) => {
         : null;
       return {
         ...formatRiderOrder(o),
+        // Open tasks go to every nearby rider: no customer identity until one accepts
+        customerName: null,
+        customerPhone: null,
+        deliveryNote: null, // may hold a gate code: only for the rider who accepts
         readyAt: o.ready_at,
         distanceToStoreKm: toStoreKm == null ? null : Math.round(toStoreKm * 100) / 100,
         tripDistanceKm: tripKm == null ? null : Math.round(tripKm * 100) / 100,
@@ -265,6 +287,50 @@ const getTasks = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { tasks, activeOrderId: null, radiusKm: policies.task_radius_km } });
 });
 
+/** Busy-ness of one store for idle riders: orders placed in the last hour and deliveries waiting for a rider */
+function demandLevel(lastHour, waiting) {
+  if (waiting >= 2 || lastHour >= 6) return 'high';
+  if (waiting >= 1 || lastHour >= 2) return 'medium';
+  return 'low';
+}
+
+/**
+ * GET /api/rider/demand — where the work is (idle riders, "demand map").
+ * Stores within DEMAND_RADIUS_KM of the rider with delivery orders today: orders in the
+ * last hour, orders waiting for a rider now, and a level (high / medium / low).
+ * Counts only; no customer data.
+ */
+const DEMAND_RADIUS_KM = 25;
+const getDemand = asyncHandler(async (req, res) => {
+  const rider = await riderRow(pool, req.user.userId);
+  const r = await pool.query(
+    `SELECT v.id, v.store_name, v.latitude, v.longitude,
+            COUNT(o.id) FILTER (WHERE o.created_at >= NOW() - INTERVAL '1 hour')::int AS last_hour,
+            COUNT(o.id)::int AS today,
+            COUNT(o.id) FILTER (WHERE o.status = 'ready_for_pickup' AND o.rider_user_id IS NULL)::int AS waiting
+     FROM vendors v
+     JOIN orders o ON o.vendor_id = v.id AND o.delivery_type = 'delivery' AND o.status <> 'cancelled'
+                  AND o.created_at >= date_trunc('day', NOW())
+     WHERE v.is_approved AND v.latitude IS NOT NULL
+     GROUP BY v.id`
+  );
+  const near = (s) => rider.current_lat == null
+    || haversineKm(rider.current_lat, rider.current_lng, s.latitude, s.longitude) <= DEMAND_RADIUS_KM;
+  const zones = r.rows.filter(near).map((s) => ({
+    vendorId: s.id,
+    storeName: s.store_name,
+    lat: Number(s.latitude),
+    lng: Number(s.longitude),
+    ordersLastHour: s.last_hour,
+    ordersToday: s.today,
+    waitingForRider: s.waiting,
+    level: demandLevel(s.last_hour, s.waiting),
+  }));
+  const rank = { high: 0, medium: 1, low: 2 };
+  zones.sort((a, b) => rank[a.level] - rank[b.level] || b.ordersLastHour - a.ordersLastHour);
+  res.json({ success: true, data: { zones, radiusKm: DEMAND_RADIUS_KM } });
+});
+
 /** POST /api/rider/tasks/:id/accept — first rider wins (single conditional UPDATE) */
 const acceptTask = asyncHandler(async (req, res) => {
   const orderId = intParam(req.params.id);
@@ -276,6 +342,10 @@ const acceptTask = asyncHandler(async (req, res) => {
     assertApproved(rider);
     if (!rider.is_online) throw httpError(409, 'Go online to accept deliveries.');
     if (await activeOrderId(client, riderUserId)) throw httpError(409, 'Finish your current delivery first.');
+    const lapsed = await client.query(`SELECT 1 FROM orders o WHERE o.id = $2 AND ${LAPSED_BY_RIDER}`, [riderUserId, orderId]);
+    if (lapsed.rows.length) {
+      throw httpError(409, 'You let this delivery lapse before, so it is offered to other riders.', { code: 'TASK_LAPSED' });
+    }
 
     const r = await client.query(
       `UPDATE orders SET rider_user_id = $1, assigned_at = NOW(), updated_at = NOW()
@@ -286,7 +356,7 @@ const acceptTask = asyncHandler(async (req, res) => {
     if (r.rows.length === 0) throw httpError(409, 'Another rider has already taken this delivery.', { code: 'TASK_TAKEN' });
 
     await client.query('UPDATE riders SET is_available = false WHERE user_id = $1', [riderUserId]);
-    const riderName = (await client.query('SELECT full_name FROM users WHERE id = $1', [riderUserId])).rows[0].full_name;
+    const riderName = shortName((await client.query('SELECT full_name FROM users WHERE id = $1', [riderUserId])).rows[0].full_name);
     await announceOrder(client, afterCommit, orderId, 'rider_assigned', {
       customer: { title: `Rider assigned to Order #${orderId}`, body: `${riderName} is heading to the store.` },
       vendor: { title: `Rider on the way for #${orderId}`, body: `${riderName} will collect this order.` },
@@ -344,7 +414,7 @@ const markPicked = asyncHandler(async (req, res) => {
     const o = await lockOwnOrder(client, orderId, req.user.userId, ['ready_for_pickup']);
     await assertAtStore(client, o, point);
     await client.query(
-      `UPDATE orders SET status = 'picked', picked_at = NOW(),
+      `UPDATE orders SET status = 'picked', picked_at = NOW(), pickup_confirmed_by = 'rider',
               rider_arrived_at = COALESCE(rider_arrived_at, NOW()), updated_at = NOW()
        WHERE id = $1`,
       [orderId]
@@ -498,6 +568,7 @@ module.exports = {
   updateDocuments,
   setStatus,
   postLocation,
+  getDemand,
   getTasks,
   acceptTask,
   arrivedAtStore,

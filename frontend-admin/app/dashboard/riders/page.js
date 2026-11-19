@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { getRiders, approveRider, rejectRider, isAuthError } from "../../lib/api";
+import { getRiders, approveRider, rejectRider, getFleet, isAuthError } from "../../lib/api";
 import {
   PageLoader, ErrorBox, Th, TabButton, SearchBox, NoSearchResults, Spinner, notifyCountsChanged,
-  formatRs, formatNumber, formatDate, formatOrderId, humanize, matchesSearch,
+  formatRs, formatNumber, formatDate, formatTime, formatMinutes, formatOrderId, humanize, matchesSearch,
 } from "../../lib/ui";
 
 const vehicleIcons = {
@@ -80,7 +80,7 @@ function RiderReviewModal({ rider, onClose, onDone }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="rider-review-title"
-        className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+        className="bg-surface-container-lowest rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-3 px-6 py-5 border-b border-outline-variant/20">
@@ -147,21 +147,21 @@ function RiderReviewModal({ rider, onClose, onDone }) {
                 maxLength={REJECT_REASON_MAX}
                 autoFocus
                 placeholder="e.g. The licence number doesn't match the CNIC holder's name."
-                className="w-full px-4 py-3 bg-white border border-outline-variant/50 rounded-xl text-sm text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all disabled:opacity-60"
+                className="w-full px-4 py-3 bg-surface-container-lowest border border-outline-variant/50 rounded-xl text-sm text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all disabled:opacity-60"
               />
               <p className="text-[11px] text-outline mt-1 mb-3 text-right">{reason.length}/{REJECT_REASON_MAX}</p>
               <div className="flex gap-2">
                 <button
                   onClick={() => { setRejecting(false); setError(null); }}
                   disabled={busy}
-                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-on-surface-variant bg-white border border-outline-variant/50 hover:bg-surface-container-low transition-colors disabled:opacity-50"
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-on-surface-variant bg-surface-container-lowest border border-outline-variant/50 hover:bg-surface-container-low transition-colors disabled:opacity-50"
                 >
                   Back
                 </button>
                 <button
                   onClick={() => run("reject")}
                   disabled={busy || !reason.trim()}
-                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 dark:hover:bg-red-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {submitting === "reject" && <Spinner className="w-4 h-4" color="text-white" />}
                   {submitting === "reject" ? "Sending..." : "Send back"}
@@ -183,7 +183,7 @@ function RiderReviewModal({ rider, onClose, onDone }) {
                 <button
                   onClick={() => run("approve")}
                   disabled={busy || !rider.cnic}
-                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {submitting === "approve" ? <Spinner className="w-4 h-4" color="text-white" /> : <span className="material-symbols-outlined text-[18px]">check</span>}
                   {submitting === "approve" ? "Approving..." : "Approve rider"}
@@ -193,8 +193,6 @@ function RiderReviewModal({ rider, onClose, onDone }) {
           )}
         </div>
       </div>
-
-      {reviewing && <RiderReviewModal rider={reviewing} onClose={() => setReviewing(null)} onDone={onReviewed} />}
     </div>
   );
 }
@@ -209,6 +207,264 @@ function OnlineBadge({ online }) {
       <span className={`w-1.5 h-1.5 rounded-full ${online ? "bg-emerald-500 animate-pulse" : "bg-slate-400"}`} />
       {online ? "Online" : "Offline"}
     </span>
+  );
+}
+
+// ── Live fleet & dispatch monitor (GET /api/admin/fleet) ──
+
+const FLEET_POLL_MS = 15000;
+
+const lifecycle = [
+  { stage: "ready_for_pickup", label: "Ready for pickup", icon: "inventory_2", time: "readyAt", timeLabel: "Ready" },
+  { stage: "assigned", label: "Rider assigned", icon: "assignment_ind", time: "assignedAt", timeLabel: "Assigned" },
+  { stage: "picked", label: "Picked up", icon: "shopping_bag", time: "pickedAt", timeLabel: "Picked" },
+  { stage: "on_the_way", label: "On the way", icon: "two_wheeler", time: "pickedAt", timeLabel: "Left store" },
+  { stage: "delivered", label: "Delivered today", icon: "task_alt", time: "deliveredAt", timeLabel: "Delivered" },
+];
+
+function FleetTile({ label, value, sub, icon, tone = "text-primary" }) {
+  return (
+    <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/20">
+      <div className="flex items-center gap-2 mb-2">
+        <span className={`material-symbols-outlined text-[20px] ${tone}`}>{icon}</span>
+        <span className="text-xs font-semibold text-on-surface-variant uppercase">{label}</span>
+      </div>
+      <p className="text-2xl font-bold text-on-surface tabular-nums">{formatNumber(value)}</p>
+      {sub && <p className="text-xs text-outline mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+function DeliveryCard({ delivery, column, freeWaitMinutes }) {
+  const d = delivery;
+  const flagged = d.waitExceeded;
+  return (
+    <div
+      className={`rounded-lg border p-3 bg-surface-container-lowest ${
+        flagged ? "border-amber-300 bg-amber-50/50" : "border-outline-variant/30"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-bold text-primary">{formatOrderId(d.id)}</span>
+        <span className="text-[11px] text-outline whitespace-nowrap">
+          {column.timeLabel} {formatTime(d[column.time])}
+        </span>
+      </div>
+      <p className="text-sm text-on-surface truncate mt-1" title={d.storeName}>{d.storeName}</p>
+      <p className="text-xs text-outline truncate" title={d.customerName}>To {d.customerName || "—"}</p>
+      <p className="text-xs text-on-surface-variant mt-1.5 flex items-center gap-1 min-w-0">
+        <span className="material-symbols-outlined text-[14px] text-outline">two_wheeler</span>
+        <span className="truncate">{d.riderName || <span className="text-outline">No rider yet</span>}</span>
+      </p>
+      {d.waitMinutes != null && (
+        <p className={`text-xs mt-1 flex items-center gap-1 ${flagged ? "text-amber-800 font-semibold" : "text-on-surface-variant"}`}>
+          <span className="material-symbols-outlined text-[14px]">{d.waitingNow ? "hourglass_top" : "timer"}</span>
+          {d.waitingNow ? "Waiting at store" : "Store wait"} {formatMinutes(d.waitMinutes)}
+        </p>
+      )}
+      {flagged && (
+        <p className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">
+          <span className="material-symbols-outlined text-[13px]">warning</span>
+          Store wait &gt; {freeWaitMinutes} min
+        </p>
+      )}
+    </div>
+  );
+}
+
+function FleetMonitor() {
+  const router = useRouter();
+  const [fleet, setFleet] = useState(null);
+  const [error, setError] = useState(null);
+  const [updatedAt, setUpdatedAt] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await getFleet();
+      setFleet(res.data);
+      setError(null);
+      setUpdatedAt(new Date());
+    } catch (err) {
+      if (isAuthError(err)) router.push("/");
+      setError(err.message);
+    }
+  }, [router]);
+
+  // Poll while the tab is visible; catch up as soon as it becomes visible again
+  useEffect(() => {
+    let cancelled = false;
+    const tick = () => { if (!cancelled && !document.hidden) load(); };
+    tick();
+    const timer = setInterval(tick, FLEET_POLL_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [load]);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  const counts = fleet?.counts || {};
+  const deliveries = fleet?.deliveries || [];
+  const slowStores = fleet?.slowStores || [];
+  const freeWait = fleet?.freeWaitMinutes ?? 0;
+  const waitingTooLong = deliveries.filter((d) => d.waitingNow && d.waitExceeded).length;
+
+  return (
+    <section className="mb-8">
+      <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
+        <div>
+          <h2 className="text-lg font-bold text-on-surface flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary text-[22px]">monitoring</span>
+            Live fleet &amp; dispatch
+          </h2>
+          <p className="text-xs text-outline mt-0.5">
+            {updatedAt ? `Updated ${updatedAt.toLocaleTimeString("en-PK")}` : "Loading..."} · refreshes every{" "}
+            {FLEET_POLL_MS / 1000} s
+          </p>
+        </div>
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing || !fleet}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-on-surface-variant bg-surface-container-low hover:bg-surface-container transition-colors disabled:opacity-50"
+        >
+          <span className={`material-symbols-outlined text-[18px] ${refreshing ? "animate-spin" : ""}`}>refresh</span>
+          Refresh
+        </button>
+      </div>
+
+      {!fleet ? (
+        error ? <ErrorBox title="Couldn't load the fleet" message={error} /> : (
+          <div className="flex items-center justify-center gap-3 py-10 text-sm text-outline">
+            <Spinner className="w-6 h-6" /> Loading the fleet...
+          </div>
+        )
+      ) : (
+        <>
+          {error && <p className="text-xs text-error mb-3">Last refresh failed ({error}); showing the previous data.</p>}
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+            <FleetTile label="Online" value={counts.online} sub={`${formatNumber(counts.offline)} offline`} icon="wifi_tethering" tone="text-emerald-700" />
+            <FleetTile label="Engaged in delivery" value={counts.engaged} sub="Carrying an active order" icon="local_shipping" tone="text-orange-700" />
+            <FleetTile
+              label="Idle within task radius"
+              value={counts.idleWithinRadius}
+              sub={`of ${formatNumber(counts.idle)} idle · within ${fleet.taskRadiusKm} km of a store`}
+              icon="my_location"
+              tone="text-blue-700"
+            />
+            <FleetTile
+              label="Waiting at store"
+              value={waitingTooLong}
+              sub={`Riders kept over ${freeWait} min right now`}
+              icon="hourglass_top"
+              tone={waitingTooLong > 0 ? "text-amber-700" : "text-outline"}
+            />
+          </div>
+
+          {/* Delivery lifecycle board */}
+          <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden mb-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3.5 bg-surface-container-low/50 border-b border-outline-variant/20">
+              <h3 className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Delivery lifecycle</h3>
+              <p className="text-[11px] text-outline">
+                Cards turn amber when the rider waited more than {freeWait} min at the store (free allowance)
+              </p>
+            </div>
+            <div className="grid grid-flow-col auto-cols-[minmax(200px,1fr)] gap-3 p-4 overflow-x-auto">
+              {lifecycle.map((column) => {
+                const items = deliveries.filter((d) => d.stage === column.stage);
+                return (
+                  <div key={column.stage} className="min-w-0 flex flex-col rounded-xl bg-surface-container-low/50 border border-outline-variant/20">
+                    <div className="flex items-center gap-1.5 px-3 py-2.5 border-b border-outline-variant/20">
+                      <span className="material-symbols-outlined text-[18px] text-on-surface-variant">{column.icon}</span>
+                      <span className="text-xs font-semibold text-on-surface flex-1 truncate">{column.label}</span>
+                      <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-surface-container text-on-surface-variant tabular-nums">
+                        {items.length}
+                      </span>
+                    </div>
+                    <div className="p-2 space-y-2 max-h-[420px] overflow-y-auto">
+                      {items.map((d) => (
+                        <DeliveryCard key={d.id} delivery={d} column={column} freeWaitMinutes={freeWait} />
+                      ))}
+                      {items.length === 0 && <p className="text-xs text-outline text-center py-6">None</p>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Slow stores */}
+          <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3.5 bg-surface-container-low/50 border-b border-outline-variant/20">
+              <h3 className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Slow stores (30 days)</h3>
+              <p className="text-[11px] text-outline">Average rider wait above the {freeWait} min free allowance</p>
+            </div>
+            {slowStores.length === 0 ? (
+              <p className="px-5 py-6 text-sm text-on-surface-variant flex items-center gap-2">
+                <span className="material-symbols-outlined text-emerald-700 text-[20px]">check_circle</span>
+                No store kept riders waiting longer than {freeWait} min on average.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-outline-variant/20">
+                      <Th>Store</Th>
+                      <Th align="right">Average wait</Th>
+                      <Th align="right">Over allowance</Th>
+                      <Th align="right">Deliveries</Th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-outline-variant/10">
+                    {slowStores.map((s) => (
+                      <tr key={s.vendorId}>
+                        <td className="px-4 py-3 text-sm font-medium text-on-surface">{s.storeName}</td>
+                        <td className="px-4 py-3 text-sm font-semibold text-amber-800 text-right tabular-nums whitespace-nowrap">
+                          {formatMinutes(s.averageWaitMinutes)}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-on-surface text-right tabular-nums whitespace-nowrap">
+                          {formatNumber(s.slowDeliveries)}
+                          <span className="text-xs text-outline">
+                            {" "}({s.deliveries > 0 ? Math.round((s.slowDeliveries / s.deliveries) * 100) : 0}%)
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-on-surface-variant text-right tabular-nums">{formatNumber(s.deliveries)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+/** Anti-abuse signals (last 30 days): accepted tasks let lapse, handovers locked by wrong codes */
+function RiderFlags({ trust }) {
+  const flags = [
+    trust?.taskTimeouts > 0 && `${trust.taskTimeouts} lapsed task${trust.taskTimeouts === 1 ? "" : "s"}`,
+    trust?.handoverLockouts > 0 && `${trust.handoverLockouts} code lockout${trust.handoverLockouts === 1 ? "" : "s"}`,
+  ].filter(Boolean);
+  if (flags.length === 0) return null;
+  return (
+    <p
+      className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 whitespace-nowrap"
+      title="Last 30 days: deliveries accepted but never collected, and handovers locked after wrong codes"
+    >
+      <span className="material-symbols-outlined text-[14px]">flag</span>
+      {flags.join(" · ")}
+    </p>
   );
 }
 
@@ -296,10 +552,17 @@ export default function RidersPage() {
         </div>
       )}
 
+      <FleetMonitor />
+
+      <h2 className="text-lg font-bold text-on-surface mb-4 flex items-center gap-2">
+        <span className="material-symbols-outlined text-primary text-[22px]">badge</span>
+        Rider accounts
+      </h2>
+
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {summary.map((s) => (
-          <div key={s.label} className="bg-white rounded-xl p-4 border border-outline-variant/20">
+          <div key={s.label} className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/20">
             <div className="flex items-center gap-2 mb-2">
               <span className={`material-symbols-outlined text-[20px] ${s.color}`}>{s.icon}</span>
               <span className="text-xs font-semibold text-on-surface-variant uppercase">{s.label}</span>
@@ -328,7 +591,7 @@ export default function RidersPage() {
       </div>
 
       {/* Riders Table */}
-      <div className="bg-white rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
+      <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -387,7 +650,10 @@ export default function RidersPage() {
                       </p>
                     )}
                   </td>
-                  <td className="px-4 py-3.5 text-sm text-on-surface font-medium text-right tabular-nums">{rider.deliveries || 0}</td>
+                  <td className="px-4 py-3.5 text-sm text-on-surface font-medium text-right tabular-nums">
+                    {rider.deliveries || 0}
+                    <RiderFlags trust={rider.trust} />
+                  </td>
                   <td className="px-4 py-3.5 text-sm font-semibold text-on-surface text-right whitespace-nowrap tabular-nums">{formatRs(rider.earnings)}</td>
                   <td className="px-4 py-3.5 text-sm text-on-surface text-right whitespace-nowrap tabular-nums">{formatRs(rider.walletBalance)}</td>
                   <td className="px-4 py-3.5">
@@ -424,6 +690,8 @@ export default function RidersPage() {
           </table>
         </div>
       </div>
+
+      {reviewing && <RiderReviewModal rider={reviewing} onClose={() => setReviewing(null)} onDone={onReviewed} />}
     </div>
   );
 }

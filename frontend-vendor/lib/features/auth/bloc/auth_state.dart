@@ -28,6 +28,9 @@ class Authenticated extends AuthState {
         user.walletBalance,
         user.platformEscrowBalance,
         user.mustChangePassword,
+        user.fullName,
+        user.phone,
+        user.avatarUrl,
         // A new logo / cover photo must rebuild every screen that shows it
         user.storeName,
         user.storeLogoUrl,

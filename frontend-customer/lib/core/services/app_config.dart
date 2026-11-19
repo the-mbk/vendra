@@ -55,6 +55,22 @@ class AppConfig {
   final int vendorAcceptTimeoutMinutes;
   final int riderAssignTimeoutMinutes;
 
+  /// A rider must reach the store this long after accepting, or the delivery goes back to other riders
+  final int riderPickupTimeoutMinutes;
+
+  /// At the store: collect the order within this long of checking in, or the delivery goes back to other riders
+  final int riderStoreWaitMaxMinutes;
+
+  /// Rider waiting pay (FR04): minutes at the store that are free, then Rs per minute
+  final double riderFreeWaitMinutes;
+  final double riderPerWaitMin;
+
+  /// Share of the items a customer forfeits to the store when cancelling after the store accepted
+  final double cancelPenaltyPct;
+
+  /// Stores are told to restock a product at this many free shelf units or fewer
+  final int lowStockUnits;
+
   /// False while running on the built-in defaults (backend unreachable)
   final bool fromServer;
 
@@ -72,6 +88,12 @@ class AppConfig {
     this.defaultBuffer = 5,
     this.vendorAcceptTimeoutMinutes = 0,
     this.riderAssignTimeoutMinutes = 0,
+    this.riderPickupTimeoutMinutes = 0,
+    this.riderStoreWaitMaxMinutes = 0,
+    this.riderFreeWaitMinutes = 0,
+    this.riderPerWaitMin = 0,
+    this.cancelPenaltyPct = 0,
+    this.lowStockUnits = 5,
     this.fromServer = false,
   });
 
@@ -95,6 +117,12 @@ class AppConfig {
         defaultBuffer: toInt(json['defaultBuffer'], 5),
         vendorAcceptTimeoutMinutes: toInt(json['vendorAcceptTimeoutMinutes']),
         riderAssignTimeoutMinutes: toInt(json['riderAssignTimeoutMinutes']),
+        riderPickupTimeoutMinutes: toInt(json['riderPickupTimeoutMinutes']),
+        riderStoreWaitMaxMinutes: toInt(json['riderStoreWaitMaxMinutes']),
+        riderFreeWaitMinutes: toDouble(json['riderFreeWaitMinutes']),
+        riderPerWaitMin: toDouble(json['riderPerWaitMin']),
+        cancelPenaltyPct: toDouble(json['cancelPenaltyPct']),
+        lowStockUnits: toInt(json['lowStockUnits'], 5),
         fromServer: true,
       );
 

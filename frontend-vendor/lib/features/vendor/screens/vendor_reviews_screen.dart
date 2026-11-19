@@ -134,7 +134,7 @@ class _VendorReviewsScreenState extends State<VendorReviewsScreen> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
       ),
@@ -166,7 +166,7 @@ class _VendorReviewsScreenState extends State<VendorReviewsScreen> {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
       ),
@@ -219,7 +219,7 @@ class _VendorReviewsScreenState extends State<VendorReviewsScreen> {
         padding: const EdgeInsets.only(top: 40),
         child: Column(
           children: [
-            Icon(Icons.reviews_outlined, size: 52, color: Colors.grey.shade300),
+            Icon(Icons.reviews_outlined, size: 52, color: AppColors.textLight),
             const SizedBox(height: 8),
             Text('Customers can rate products after a delivered order.',
                 textAlign: TextAlign.center, style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),

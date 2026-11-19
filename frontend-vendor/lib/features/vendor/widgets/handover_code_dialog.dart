@@ -86,7 +86,7 @@ class _HandoverCodeDialogState extends State<HandoverCodeDialog> {
     final order = widget.order;
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      icon: Icon(_needsCode ? Icons.pin_outlined : Icons.done_all, color: Colors.teal.shade700, size: 32),
+      icon: Icon(_needsCode ? Icons.pin_outlined : Icons.done_all, color: AppColors.success, size: 32),
       title: Text('Hand over #ORD-${order.id.toString().padLeft(3, '0')}',
           textAlign: TextAlign.center, style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 18)),
       content: SingleChildScrollView(
@@ -133,7 +133,7 @@ class _HandoverCodeDialogState extends State<HandoverCodeDialog> {
         if (!_locked)
           ElevatedButton(
             onPressed: _busy ? null : _confirm,
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal.shade700, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.success, foregroundColor: Colors.white),
             child: _busy
                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Text('Hand over'),

@@ -13,29 +13,11 @@ import 'trust_badges.dart';
 
 final _when = DateFormat('d MMM, h:mm a');
 
-/// Colour for an order status chip
-Color orderStatusColor(OrderModel order) {
-  switch (order.status) {
-    case 'pending':
-      return Colors.orange;
-    case 'confirmed':
-      return AppColors.secondary;
-    case 'packed':
-      return Colors.indigo;
-    case 'ready_for_pickup':
-      return order.isDelivery && order.rider == null ? Colors.amber.shade800 : Colors.teal;
-    case 'picked':
-      return Colors.deepPurple;
-    case 'on_the_way':
-      return AppColors.primary;
-    case 'delivered':
-      return AppColors.stockGreen;
-    case 'cancelled':
-      return AppColors.stockRed;
-    default:
-      return Colors.grey;
-  }
-}
+/// Colour for an order status chip (shared mapping; a delivery still looking for a rider shows as waiting)
+Color orderStatusColor(OrderModel order) =>
+    order.status == 'ready_for_pickup' && order.isDelivery && order.rider == null
+        ? AppColors.warning
+        : AppColors.orderStatus(order.status);
 
 /// Customer-facing explanation of where the money is right now
 String escrowDetailText(OrderModel order) {
@@ -51,11 +33,11 @@ String escrowDetailText(OrderModel order) {
       if (order.status == 'delivered') {
         return 'Held until the dispute window closes.';
       }
-      return 'Held safely until your order is delivered.';
+      return 'The store is paid only after verified doorstep delivery.';
     case 'disputed':
-      return 'Frozen while an admin reviews your dispute.';
+      return 'Escrow stays frozen until the dispute is resolved.';
     case 'released':
-      return 'Released to the store — this order is settled.';
+      return 'This order is settled.';
     case 'refunded':
       return 'Refunded to your Vendra wallet.';
     default:
@@ -81,7 +63,7 @@ Color escrowColor(String? escrowStatus) {
     case 'disputed':
       return AppColors.reservedAmber;
     case 'released':
-      return Colors.teal.shade600;
+      return AppColors.success;
     case 'refunded':
       return AppColors.secondary;
     default:
@@ -97,6 +79,7 @@ String disputeIssueLabel(String? issueType) =>
 String disputeOutcomeText(DisputeSummary d) {
   if (d.status == 'open') return 'Under review — payment is on hold';
   if (d.resolution == 'refund') return 'Resolved — refunded to your wallet';
+  if (d.resolution == 'split') return 'Resolved — partly refunded to your wallet';
   return 'Resolved — payment released to the store';
 }
 
@@ -142,12 +125,7 @@ class EscrowStatusCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(12)),
-            child: Icon(escrowIcon(order.escrowStatus), color: Colors.white, size: 22),
-          ),
+          EscrowEmblem(color: color, size: 44, lock: escrowIcon(order.escrowStatus)),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -212,11 +190,7 @@ class RiderInfoCard extends StatelessWidget {
       decoration: cardDecoration(),
       child: Row(
         children: [
-          CircleAvatar(
-            radius: 24,
-            backgroundColor: AppColors.secondary.withValues(alpha: 0.12),
-            child: const Icon(Icons.delivery_dining, color: AppColors.secondary),
-          ),
+          UserAvatar(name: rider.name, photoUrl: rider.photoUrl, size: 48, badge: AppIcons.rider),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -224,7 +198,8 @@ class RiderInfoCard extends StatelessWidget {
               children: [
                 Text(rider.name ?? 'Your rider', style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600)),
                 Text(
-                  phone != null && phone.isNotEmpty ? phone : 'Vendra rider',
+                  // The number only while the delivery is under way; afterwards just who it was
+                  phone != null ? 'Your rider · ${maskPhone(phone)}' : 'Delivered by this rider',
                   style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
                 ),
                 if (lastSeen != null)
@@ -269,7 +244,7 @@ class OrderDisputeSection extends StatelessWidget {
     final d = order.latestDispute;
     if (d != null) {
       final open = d.status == 'open';
-      final color = open ? AppColors.reservedAmber : (d.resolution == 'refund' ? AppColors.secondary : Colors.teal.shade700);
+      final color = open ? AppColors.reservedAmber : (d.resolution == 'refund' ? AppColors.secondary : AppColors.success);
       return InkWell(
         onTap: onViewDisputes,
         borderRadius: BorderRadius.circular(12),
@@ -322,7 +297,8 @@ class OrderDisputeSection extends StatelessWidget {
 }
 
 BoxDecoration cardDecoration() => BoxDecoration(
-      color: Colors.white,
+      color: AppColors.surface,
       borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: AppColors.hairline),
       boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(0, 2))],
     );

@@ -66,7 +66,7 @@ class _LocationSettingsSheetState extends State<LocationSettingsSheet> {
                 child: Container(
                   width: 40,
                   height: 4,
-                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(color: AppColors.hairline, borderRadius: BorderRadius.circular(2)),
                 ),
               ),
               const SizedBox(height: 16),
@@ -85,7 +85,7 @@ class _LocationSettingsSheetState extends State<LocationSettingsSheet> {
                   decoration: BoxDecoration(
                     color: sim ? AppColors.reservedAmber.withValues(alpha: 0.12) : AppColors.background,
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: sim ? AppColors.reservedAmber : Colors.grey.shade300),
+                    border: Border.all(color: sim ? AppColors.reservedAmber : AppColors.hairline),
                   ),
                   child: SwitchListTile(
                     value: sim,

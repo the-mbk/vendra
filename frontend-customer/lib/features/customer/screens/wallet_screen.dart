@@ -91,7 +91,7 @@ class WalletScreen extends StatelessWidget {
                     )
                   else
                     Container(
-                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+                      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14)),
                       child: Column(
                         children: [
                           for (var i = 0; i < summary.transactions.length; i++) ...[
@@ -128,17 +128,13 @@ class WalletScreen extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF2E7D32), Color(0xFF1B5E20)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        gradient: AppColors.brandGradient,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Available balance', style: GoogleFonts.poppins(color: Colors.green.shade100, fontSize: 14)),
+          Text('Available balance', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 14)),
           const SizedBox(height: 6),
           Text(
             formatRupees(balance),
@@ -156,7 +152,7 @@ class WalletScreen extends StatelessWidget {
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.white,
-                    foregroundColor: Colors.green.shade800,
+                    foregroundColor: AppColors.navy,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: buttonShape,
                   ),
@@ -240,7 +236,7 @@ class _TransactionTile extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 4),
-                    const Icon(Icons.copy, size: 11, color: AppColors.textLight),
+                    Icon(Icons.copy, size: 11, color: AppColors.textLight),
                   ],
                 ),
               ),

@@ -29,7 +29,7 @@ class PayoutSlip extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        color: const Color(0xFFFCFCF7),
+        color: AppColors.surfaceMuted,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.hairline),
       ),
@@ -119,24 +119,31 @@ class _SlipRow extends StatelessWidget {
   }
 }
 
+/// Painted, not laid out from the parent's width: a LayoutBuilder here can't
+/// report an intrinsic size, which blanks any dialog that measures its content.
 class _DashedRule extends StatelessWidget {
   const _DashedRule();
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final count = (constraints.maxWidth / 7).floor();
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: List.generate(
-            count,
-            (_) => const SizedBox(width: 4, height: 1, child: ColoredBox(color: AppColors.textLight)),
-          ),
-        );
-      },
-    );
+    return SizedBox(height: 1, width: double.infinity, child: CustomPaint(painter: _DashPainter(AppColors.textLight)));
   }
+}
+
+class _DashPainter extends CustomPainter {
+  final Color color;
+  _DashPainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = color;
+    for (var x = 0.0; x < size.width; x += 7) {
+      canvas.drawRect(Rect.fromLTWH(x, 0, 4, size.height), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashPainter old) => old.color != color;
 }
 
 /// "See estimated slip" toggle under a task card's payout
@@ -165,7 +172,7 @@ class _EstimatedSlipToggleState extends State<EstimatedSlipToggle> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.receipt_long_outlined, size: 16, color: AppColors.secondary),
+                Icon(Icons.receipt_long_outlined, size: 16, color: AppColors.secondary),
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(_open ? 'Hide estimated slip' : 'See estimated slip',

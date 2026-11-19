@@ -46,7 +46,13 @@ void main() {
     Future<void> pump(WidgetTester tester, {HandoverCodeFeedback? feedback, ValueChanged<String>? onSubmit}) =>
         tester.pumpWidget(MaterialApp(
           home: Scaffold(
-            body: HandoverCodeForm(busy: false, feedback: feedback, onSubmit: onSubmit ?? (_) {}, onCancel: () {}),
+            body: HandoverCodeForm(
+              busy: false,
+              feedback: feedback,
+              onSubmit: onSubmit ?? (_) {},
+              onCancel: () {},
+              onUnavailable: () {},
+            ),
           ),
         ));
 

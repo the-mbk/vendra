@@ -38,7 +38,7 @@ class RatingSummary extends StatelessWidget {
           const Icon(Icons.star_outline_rounded, color: starColor, size: 28),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(emptyText, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+            child: Text(emptyText, style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
           ),
         ],
       );
@@ -53,10 +53,10 @@ class RatingSummary extends StatelessWidget {
           child: Column(
             children: [
               Text(average!.toStringAsFixed(1),
-                  style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                  style: TextStyle(fontSize: 34, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
               FittedBox(child: RatingStars(rating: average!, size: 16)),
               const SizedBox(height: 2),
-              Text(ratingCountLabel(count), style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+              Text(ratingCountLabel(count), style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
             ],
           ),
         ),
@@ -72,7 +72,7 @@ class RatingSummary extends StatelessWidget {
                       children: [
                         SizedBox(
                           width: 12,
-                          child: Text('$star', style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                          child: Text('$star', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
                         ),
                         const Icon(Icons.star_rounded, size: 12, color: starColor),
                         const SizedBox(width: 6),
@@ -92,7 +92,7 @@ class RatingSummary extends StatelessWidget {
                           child: Text(
                             '${distribution[star] ?? 0}',
                             textAlign: TextAlign.right,
-                            style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                            style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
                           ),
                         ),
                       ],
@@ -130,13 +130,13 @@ class ReviewTile extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.shopping_bag_outlined, size: 12, color: AppColors.secondary),
+          Icon(Icons.shopping_bag_outlined, size: 12, color: AppColors.secondary),
           const SizedBox(width: 4),
           Flexible(
             child: Text(name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: AppColors.secondary)),
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: AppColors.secondary)),
           ),
         ],
       ),
@@ -157,7 +157,7 @@ class ReviewTile extends StatelessWidget {
             radius: 16,
             backgroundColor: AppColors.secondary.withValues(alpha: 0.1),
             child: Text(name[0].toUpperCase(),
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.secondary)),
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.secondary)),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -170,11 +170,11 @@ class ReviewTile extends StatelessWidget {
                       child: Text(name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                     ),
                     if (review.createdAt != null)
                       Text(_date.format(review.createdAt!),
-                          style: const TextStyle(fontSize: 11, color: AppColors.textLight)),
+                          style: TextStyle(fontSize: 11, color: AppColors.textLight)),
                   ],
                 ),
                 const SizedBox(height: 2),
@@ -186,7 +186,7 @@ class ReviewTile extends StatelessWidget {
                 if ((review.comment ?? '').trim().isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(review.comment!.trim(),
-                      style: const TextStyle(fontSize: 13, height: 1.4, color: AppColors.textSecondary)),
+                      style: TextStyle(fontSize: 13, height: 1.4, color: AppColors.textSecondary)),
                 ],
               ],
             ),

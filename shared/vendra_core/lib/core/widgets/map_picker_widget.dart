@@ -92,9 +92,9 @@ class _MapPickerWidgetState extends State<MapPickerWidget> {
                       : null,
                 ),
                 children: [
-                  // OpenStreetMap tile layer
+                  // Modern CartoDB Voyager map tile layer with registered API key
                   TileLayer(
-                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    urlTemplate: 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png?key=cb1_5bea_1_834da8b386e3c4f989f8feca',
                     userAgentPackageName: 'com.vendra.app',
                   ),
 

@@ -4,7 +4,7 @@
 // development  turns on the demo helpers:
 //   manualLocation  riders may set their position by hand / simulate a drive
 //   testCards       payment screens list the Vendra Pay test cards
-//   fastTimers      dispute window and auto-cancel timeouts are capped at a few minutes
+//   fastTimers      dispute window, auto-cancel, rider pickup and store wait limits are capped at a few minutes
 //   demoLogin       login screens list the seeded demo accounts; seeding is allowed
 // production   turns them all off, and refuses to start with development secrets.
 //
@@ -35,6 +35,8 @@ const FAST_TIMER_CAPS = Object.freeze({
   dispute_window_min: 2,
   vendor_accept_timeout_min: 5,
   rider_assign_timeout_min: 10,
+  rider_pickup_timeout_min: 10,
+  rider_store_wait_max_min: 10,
 });
 
 const DEV_JWT_SECRETS = new Set(['', 'dev-secret', 'test-secret', 'demo-secret', 'vendra_super_secret_key_change_in_production']);

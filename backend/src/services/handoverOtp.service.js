@@ -3,8 +3,8 @@
 // Every order gets a 4-digit code at checkout that only the customer sees.
 // The rider (or the store, for self pickup) must enter it to hand the order
 // over, so a faked GPS position alone can't complete a delivery and release
-// escrow. Five wrong codes lock the order's handover for 10 minutes and
-// tell the customer.
+// escrow. Five wrong codes lock the order's handover for 10 minutes, tell
+// the customer, and count against whoever entered them (trust_events).
 //
 // The check runs inside the handover transaction, which rolls back on a
 // wrong code — so the failure is counted afterwards by withHandoverOtp().
@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const pool = require('../db');
 const { httpError, withTransaction } = require('../utils/http');
 const { notify } = require('./notification.service');
+const { recordTrustEvent } = require('./trust.service');
 
 const MAX_ATTEMPTS = 5;
 const LOCK_MINUTES = 10;
@@ -60,6 +61,13 @@ async function recordFailure(err) {
     );
     const row = r.rows[0];
     if (row.otp_locked_until) {
+      // The rider at the door, or (self pickup) the store's counter
+      await recordTrustEvent(client, {
+        kind: 'handover_lockout',
+        orderId: order.id,
+        vendorId: order.vendor_id,
+        userId: order.delivery_type === 'delivery' ? order.rider_user_id : null,
+      });
       await notify(client, afterCommit, order.customer_id, {
         type: 'otp_locked',
         orderId: order.id,

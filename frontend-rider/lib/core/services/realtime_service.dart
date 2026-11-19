@@ -13,6 +13,7 @@
 //   task:new         → newTasks            ready orders (riders)
 //   task:taken       → takenTasks          another rider accepted
 //   catalog:update   → catalogUpdates      products approved/hidden
+//   chat:message     → chatMessages        customer ↔ rider chat on an order
 //
 // Live tracking is one order at a time: trackOrder(id) asks the server for
 // that order's rider pings (and stops the previous one); untrackOrder(id)
@@ -25,6 +26,7 @@ import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as sio;
 
 import '../../config/api_config.dart';
+import '../models/chat_message.dart';
 import '../models/json_utils.dart';
 import '../models/notification_model.dart';
 import 'storage_service.dart';
@@ -81,7 +83,12 @@ class RealtimeService {
   final _takenTasks = StreamController<int>.broadcast();
   final _catalogUpdates = StreamController<void>.broadcast();
   final _configUpdates = StreamController<void>.broadcast();
+  final _chatMessages = StreamController<ChatMessage>.broadcast();
   final _connected = ValueNotifier<bool>(false);
+  final _reconnecting = ValueNotifier<bool>(false);
+
+  /// Has this socket been connected at least once (so a drop means "lost", not "not yet")
+  bool _wasConnected = false;
 
   Stream<NotificationModel> get notifications => _notifications.stream;
   Stream<OrderUpdateEvent> get orderUpdates => _orderUpdates.stream;
@@ -95,6 +102,13 @@ class RealtimeService {
   /// An admin changed a policy: re-read GET /api/public-config (AppConfig does this)
   Stream<void> get configUpdates => _configUpdates.stream;
   ValueListenable<bool> get connected => _connected;
+
+  /// The live connection dropped and the socket is trying to get it back
+  /// (false before the first connect and after logout)
+  ValueListenable<bool> get reconnecting => _reconnecting;
+
+  /// A message in an order chat this user is part of
+  Stream<ChatMessage> get chatMessages => _chatMessages.stream;
 
   /// Connects (or reconnects) using the stored JWT. Safe to call repeatedly.
   Future<void> connect({bool anonymous = false}) async {
@@ -117,10 +131,15 @@ class RealtimeService {
 
     socket.onConnect((_) {
       _connected.value = true;
+      _wasConnected = true;
+      _reconnecting.value = false;
       final tracked = _trackedOrderId;
       if (tracked != null) socket.emit('track:order', {'orderId': tracked});
     });
-    socket.onDisconnect((_) => _connected.value = false);
+    socket.onDisconnect((_) {
+      _connected.value = false;
+      if (_wasConnected && _socket == socket) _reconnecting.value = true;
+    });
     socket.onConnectError((e) => debugPrint('Realtime connect error: $e'));
 
     socket.on('notification', (d) => _notifications.add(NotificationModel.fromJson(_map(d))));
@@ -145,6 +164,7 @@ class RealtimeService {
     socket.on('task:taken', (d) => _takenTasks.add(toInt(_map(d)['orderId'])));
     socket.on('catalog:update', (_) => _catalogUpdates.add(null));
     socket.on('config:update', (_) => _configUpdates.add(null));
+    socket.on('chat:message', (d) => _chatMessages.add(ChatMessage.fromJson(_map(d))));
 
     socket.connect();
   }
@@ -169,6 +189,8 @@ class RealtimeService {
     _socket = null;
     _token = null;
     _connected.value = false;
+    _wasConnected = false;
+    _reconnecting.value = false;
   }
 
   static Map<String, dynamic> _map(dynamic d) =>

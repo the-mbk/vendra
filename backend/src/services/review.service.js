@@ -7,16 +7,10 @@
 // ══════════════════════════════════════════════════════════════
 
 const { httpError } = require('../utils/http');
+const { shortName } = require('../utils/privacy');
 const { notify } = require('./notification.service');
 
 const MAX_COMMENT = 500;
-
-/** "Ahmed Raza" → "Ahmed R." — reviews show who wrote them without the full name */
-function shortName(fullName) {
-  const parts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return 'Customer';
-  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0]}.` : parts[0];
-}
 
 function readRating(value, what) {
   const n = Number(value);
@@ -32,7 +26,8 @@ function formatReview(r) {
     productName: r.product_name,
     rating: r.rating,
     comment: r.comment,
-    customerName: shortName(r.customer_name),
+    // Reviews show who wrote them without the full name
+    customerName: shortName(r.customer_name, 'Customer'),
     createdAt: r.created_at,
   };
 }
@@ -101,4 +96,4 @@ async function submitOrderReview(client, afterCommit, customerId, orderId, body)
   return { orderId, reviewed: reviews.length, riderRating };
 }
 
-module.exports = { submitOrderReview, formatReview, shortName };
+module.exports = { submitOrderReview, formatReview };

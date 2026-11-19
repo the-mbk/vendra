@@ -61,7 +61,7 @@ class VendraButton extends StatelessWidget {
           onPressed: isLoading ? null : onPressed,
           style: OutlinedButton.styleFrom(
             foregroundColor: AppColors.secondary,
-            side: const BorderSide(color: AppColors.secondary, width: 1.5),
+            side: BorderSide(color: AppColors.secondary, width: 1.5),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),

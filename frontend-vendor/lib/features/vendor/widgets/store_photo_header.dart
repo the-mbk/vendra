@@ -194,7 +194,7 @@ class _StorePhotoHeaderState extends State<StorePhotoHeader> {
       width: double.infinity,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10)],
       ),
@@ -271,7 +271,7 @@ class _StorePhotoHeaderState extends State<StorePhotoHeader> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.place_outlined, size: 16, color: AppColors.textSecondary),
+                        Icon(Icons.place_outlined, size: 16, color: AppColors.textSecondary),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(user.storeAddress!,

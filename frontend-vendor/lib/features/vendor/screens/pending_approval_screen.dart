@@ -67,7 +67,7 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen>
                         color: AppColors.secondary.withValues(alpha: 0.1),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.hourglass_top_rounded,
                         size: 56,
                         color: AppColors.secondary,
@@ -110,7 +110,7 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen>
                 width: double.infinity,
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppColors.surface,
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(

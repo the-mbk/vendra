@@ -7,6 +7,8 @@
 // ══════════════════════════════════════════════════════════════
 
 const { emitStock } = require('../realtime');
+const { getPolicy } = require('./policy.service');
+const { notify } = require('./notification.service');
 
 function computePublicStock({ private_stock, buffer, reserved_quantity }) {
   return Math.max(0, private_stock - buffer - reserved_quantity);
@@ -68,8 +70,32 @@ async function applyStockChange(client, afterCommit, product, {
     );
   }
 
+  await alertIfRunningLow(client, afterCommit, product, updated);
   afterCommit.push(() => emitStock(updated));
   return updated;
+}
+
+/** Units the store can still sell: on the shelf and not held by online orders */
+const freeUnits = (p) => p.private_stock - p.reserved_quantity;
+
+/**
+ * Restock alert (FR09): tells the store once, as a product's free units fall to the
+ * low_stock_units policy or below. Rising again re-arms it.
+ */
+async function alertIfRunningLow(client, afterCommit, before, after) {
+  const was = freeUnits(before);
+  const now = freeUnits(after);
+  if (now >= was || !after.is_active) return;
+  const threshold = await getPolicy(client, 'low_stock_units');
+  if (!(was > threshold && now <= threshold)) return;
+  const owner = (await client.query('SELECT user_id FROM vendors WHERE id = $1', [after.vendor_id])).rows[0];
+  await notify(client, afterCommit, owner?.user_id, {
+    type: 'low_stock',
+    title: now > 0 ? `Running low: ${after.name}` : `Out of stock: ${after.name}`,
+    body: now > 0
+      ? `Only ${now} left to sell (${after.public_stock} online). Scan it in when new stock arrives.`
+      : 'Nothing left to sell. Scan it in when new stock arrives.',
+  });
 }
 
 async function activeLocksForOrder(client, orderId) {

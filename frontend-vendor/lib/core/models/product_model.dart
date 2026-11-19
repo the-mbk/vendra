@@ -25,6 +25,8 @@ class ProductModel {
   final int reservedQuantity;
   final int publicStock;
   final String? barcode;
+  /// Listed weight of one unit in grams (optional); riders see the parcel weight class
+  final int? weightGrams;
   final String? imageUrl;
   final bool isActive;
   final bool isApproved;
@@ -53,6 +55,7 @@ class ProductModel {
     this.reservedQuantity = 0,
     required this.publicStock,
     this.barcode,
+    this.weightGrams,
     this.imageUrl,
     this.isActive = true,
     this.isApproved = true,
@@ -81,6 +84,7 @@ class ProductModel {
       reservedQuantity: toInt(pick(json, 'reservedQuantity', 'reserved_quantity')),
       publicStock: toInt(pick(json, 'publicStock', 'public_stock')),
       barcode: json['barcode'],
+      weightGrams: toIntOrNull(pick(json, 'weightGrams', 'weight_grams')),
       imageUrl: pick(json, 'imageUrl', 'image_url'),
       isActive: pick(json, 'isActive', 'is_active') ?? true,
       isApproved: pick(json, 'isApproved', 'is_approved') ?? true,
@@ -98,6 +102,7 @@ class ProductModel {
     'private_stock': privateStock,
     'buffer': buffer,
     'barcode': barcode,
+    'weight_grams': weightGrams,
     'category_id': categoryId,
   };
 
@@ -121,6 +126,7 @@ class ProductModel {
       reservedQuantity: reservedQuantity ?? this.reservedQuantity,
       publicStock: publicStock ?? this.publicStock,
       barcode: barcode,
+      weightGrams: weightGrams,
       imageUrl: imageUrl,
       isActive: isActive,
       isApproved: isApproved,

@@ -6,7 +6,7 @@ import {
   getVendors, approveVendor, disapproveVendor, approveVendorLocation, rejectVendorLocation, isAuthError,
 } from "../../lib/api";
 import {
-  notifyCountsChanged, matchesSearch, SearchBox, NoSearchResults, TabButton, Spinner, formatDate, formatRs, Th,
+  notifyCountsChanged, matchesSearch, SearchBox, NoSearchResults, TabButton, Spinner, ConfirmButton, formatDate, formatRs, Th,
 } from "../../lib/ui";
 
 const tabs = [
@@ -128,7 +128,7 @@ function LocationReviewModal({ vendor, onClose, onDone }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="location-review-title"
-        className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        className="bg-surface-container-lowest rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -209,7 +209,7 @@ function LocationReviewModal({ vendor, onClose, onDone }) {
                 maxLength={REJECT_REASON_MAX}
                 autoFocus
                 placeholder="e.g. The pin is in the middle of the road. Please drop it on your shop's entrance."
-                className="w-full px-4 py-3 bg-white border border-outline-variant/50 rounded-xl text-sm text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all disabled:opacity-60"
+                className="w-full px-4 py-3 bg-surface-container-lowest border border-outline-variant/50 rounded-xl text-sm text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all disabled:opacity-60"
               />
               <p className="text-[11px] text-outline mt-1 mb-3 text-right">
                 {reason.length}/{REJECT_REASON_MAX}
@@ -218,14 +218,14 @@ function LocationReviewModal({ vendor, onClose, onDone }) {
                 <button
                   onClick={() => { setRejecting(false); setError(null); }}
                   disabled={busy}
-                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-on-surface-variant bg-white border border-outline-variant/50 hover:bg-surface-container-low transition-colors disabled:opacity-50"
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-on-surface-variant bg-surface-container-lowest border border-outline-variant/50 hover:bg-surface-container-low transition-colors disabled:opacity-50"
                 >
                   Back
                 </button>
                 <button
                   onClick={() => run("reject")}
                   disabled={busy || !reasonText}
-                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 dark:hover:bg-red-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {submitting === "reject" && <Spinner className="w-4 h-4" color="text-white" />}
                   {submitting === "reject" ? "Rejecting..." : "Reject request"}
@@ -245,7 +245,7 @@ function LocationReviewModal({ vendor, onClose, onDone }) {
               <button
                 onClick={() => run("approve")}
                 disabled={busy || !hasCoords(pending.latitude, pending.longitude)}
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {submitting === "approve" ? (
                   <Spinner className="w-4 h-4" color="text-white" />
@@ -279,6 +279,192 @@ function StatusBadge({ approved }) {
   );
 }
 
+/** Penalty audit: online orders cancelled for walk-in sales, and wrong pickup codes at the counter */
+function TrustSignals({ trust }) {
+  const overrides = trust?.walkInOverrides ?? 0;
+  const lockouts = trust?.counterLockouts ?? 0;
+  const flagged = overrides > 0 || lockouts > 0;
+  const rows = [
+    { label: "Online orders cancelled for walk-in sales", value: overrides },
+    { label: "Counter pickups locked by wrong codes", value: lockouts },
+  ];
+  return (
+    <div className={`rounded-xl border p-4 ${flagged ? "border-amber-300 bg-amber-50/60" : "border-outline-variant/30"}`}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className={`material-symbols-outlined text-[18px] ${flagged ? "text-amber-700" : "text-outline"}`}>shield</span>
+        <h4 className="text-xs font-bold uppercase tracking-wider text-outline">Trust signals · last 30 days</h4>
+      </div>
+      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+        {rows.map((r) => (
+          <div key={r.label} className="flex items-center justify-between gap-3">
+            <dt className="text-on-surface-variant">{r.label}</dt>
+            <dd className={`font-semibold tabular-nums ${r.value > 0 ? "text-amber-700" : "text-on-surface"}`}>{r.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+const DISAPPROVE_CONSEQUENCE = "The store and its products disappear from the marketplace until approved again.";
+
+function VendorDetailModal({ vendor, onClose, onApprove, onDisapprove, actionLoading }) {
+  const router = useRouter();
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-6"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="bg-surface-container-lowest rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between px-6 py-5 border-b border-outline-variant/20">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center shrink-0">
+              <span className="material-symbols-outlined text-primary text-[28px]">storefront</span>
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-bold text-on-surface">{vendor.storeName}</h3>
+                <StatusBadge approved={vendor.isApproved} />
+              </div>
+              <p className="text-xs text-outline">Registered {formatDate(vendor.createdAt, true)}</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="material-symbols-outlined text-[22px] p-1 rounded-lg text-outline hover:text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            close
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="px-6 py-5 space-y-5">
+          {/* Key Metrics */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="p-3.5 rounded-xl bg-surface-container-low/60 border border-outline-variant/30">
+              <p className="text-xs text-outline font-medium">Active Products</p>
+              <p className="text-lg font-bold text-on-surface mt-0.5">{vendor.productCount}</p>
+            </div>
+            <div className="p-3.5 rounded-xl bg-surface-container-low/60 border border-outline-variant/30">
+              <p className="text-xs text-outline font-medium">Lifetime Sales</p>
+              <p className="text-lg font-bold text-primary mt-0.5">{formatRs(vendor.totalRevenue)}</p>
+            </div>
+            <div className="p-3.5 rounded-xl bg-surface-container-low/60 border border-outline-variant/30 col-span-2 sm:col-span-1">
+              <p className="text-xs text-outline font-medium">Location Status</p>
+              <p className={`text-sm font-semibold mt-1 flex items-center gap-1 ${hasCoords(vendor.latitude, vendor.longitude) ? "text-emerald-700" : "text-amber-700"}`}>
+                <span className="material-symbols-outlined text-[16px]">pin_drop</span>
+                {hasCoords(vendor.latitude, vendor.longitude) ? "GPS Pinned" : "Pending GPS"}
+              </p>
+            </div>
+          </div>
+
+          {/* Anti-abuse signals (last 30 days) */}
+          <TrustSignals trust={vendor.trust} />
+
+          {/* Owner & Business Info */}
+          <div className="rounded-xl border border-outline-variant/30 p-4 space-y-3">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-outline">Owner & Verification Details</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              <div>
+                <p className="text-xs text-outline">Owner Name</p>
+                <p className="font-semibold text-on-surface">{vendor.ownerName}</p>
+              </div>
+              <div>
+                <p className="text-xs text-outline">CNIC Number</p>
+                <code className="text-xs bg-surface-container-low px-2 py-0.5 rounded text-on-surface font-mono">
+                  {vendor.cnic || "Not provided"}
+                </code>
+              </div>
+              <div>
+                <p className="text-xs text-outline">Email Address</p>
+                <p className="font-medium text-on-surface">{vendor.email}</p>
+              </div>
+              <div>
+                <p className="text-xs text-outline">Phone Number</p>
+                <p className="font-medium text-on-surface">{vendor.phone || "—"}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Store Location */}
+          <div className="rounded-xl border border-outline-variant/30 p-4 space-y-2">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-outline">Store Physical Address</h4>
+            <p className="text-sm text-on-surface font-medium">{vendor.storeAddress || "No physical address specified"}</p>
+            {hasCoords(vendor.latitude, vendor.longitude) && (
+              <div className="flex items-center justify-between pt-1 text-xs">
+                <span className="font-mono text-outline">{formatCoords(vendor.latitude, vendor.longitude)}</span>
+                <a
+                  href={mapUrl(vendor.latitude, vendor.longitude)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-primary hover:underline inline-flex items-center gap-1"
+                >
+                  <span className="material-symbols-outlined text-[16px]">map</span>
+                  Open on OpenStreetMap
+                  <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                </a>
+              </div>
+            )}
+          </div>
+
+          {/* Quick Actions */}
+          <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-outline-variant/20">
+            <button
+              onClick={() => {
+                onClose();
+                router.push(`/dashboard/products?store=${encodeURIComponent(vendor.storeName)}`);
+              }}
+              className="px-4 py-2 rounded-xl text-sm font-semibold border border-outline-variant/50 hover:bg-surface-container-low text-on-surface transition-colors inline-flex items-center gap-1.5"
+            >
+              <span className="material-symbols-outlined text-[18px]">inventory_2</span>
+              View Store Products ({vendor.productCount})
+            </button>
+            {vendor.isApproved ? (
+              <ConfirmButton
+                size="md"
+                label="Disapprove Store"
+                confirmLabel="Yes, disapprove"
+                consequence={DISAPPROVE_CONSEQUENCE}
+                disabled={actionLoading === vendor.id}
+                onConfirm={() => {
+                  onClose();
+                  onDisapprove(vendor.id);
+                }}
+              />
+            ) : (
+              <button
+                onClick={() => {
+                  onClose();
+                  onApprove(vendor.id);
+                }}
+                disabled={actionLoading === vendor.id}
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+              >
+                Approve Store
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function VendorsPage() {
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -287,6 +473,7 @@ export default function VendorsPage() {
   const [search, setSearch] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [reviewVendor, setReviewVendor] = useState(null);
+  const [selectedVendor, setSelectedVendor] = useState(null);
   const [message, setMessage] = useState(null); // { type: "success" | "error", text }
   const router = useRouter();
 
@@ -338,7 +525,6 @@ export default function VendorsPage() {
   }
 
   async function handleDisapprove(vendorId) {
-    if (!confirm("Are you sure you want to disapprove this vendor? Their products will be hidden from customers.")) return;
     setActionLoading(vendorId);
     try {
       await disapproveVendor(vendorId);
@@ -474,7 +660,7 @@ export default function VendorsPage() {
       )}
 
       {/* Vendors Table */}
-      <div className="bg-white rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
+      <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full sticky-actions">
             <thead>
@@ -492,15 +678,18 @@ export default function VendorsPage() {
               {filteredVendors.map((vendor) => (
                 <tr key={vendor.id} className="hover:bg-surface-container-low/30 transition-colors">
                   <td className="px-4 py-3.5 max-w-[300px]">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center shrink-0">
+                    <button
+                      onClick={() => setSelectedVendor(vendor)}
+                      className="flex items-center gap-3 min-w-0 text-left group w-full"
+                    >
+                      <div className="w-10 h-10 bg-primary/10 group-hover:bg-primary/20 rounded-xl flex items-center justify-center shrink-0 transition-colors">
                         <span className="material-symbols-outlined text-primary text-[20px]">storefront</span>
                       </div>
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-on-surface truncate" title={vendor.storeName}>{vendor.storeName}</p>
+                        <p className="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors truncate" title={vendor.storeName}>{vendor.storeName}</p>
                         <p className="text-xs text-outline truncate" title={vendor.email}>{vendor.email}</p>
                       </div>
-                    </div>
+                    </button>
                   </td>
                   <td className="px-4 py-3.5 whitespace-nowrap">
                     <p className="text-sm text-on-surface">{vendor.ownerName}</p>
@@ -523,6 +712,13 @@ export default function VendorsPage() {
                   </td>
                   <td className="px-4 py-3.5 text-right whitespace-nowrap">
                     <div className="flex flex-col items-end gap-1.5">
+                    <button
+                      onClick={() => setSelectedVendor(vendor)}
+                      className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-outline-variant/40 hover:bg-surface-container-low text-on-surface-variant transition-colors inline-flex items-center gap-1"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">info</span>
+                      Details
+                    </button>
                     {vendor.pendingLocation && actionLoading !== vendor.id && (
                       <button
                         onClick={() => { setMessage(null); setReviewVendor(vendor); }}
@@ -538,18 +734,17 @@ export default function VendorsPage() {
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                       </svg>
                     ) : vendor.isApproved ? (
-                      <button
-                        onClick={() => handleDisapprove(vendor.id)}
-                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 transition-colors"
-                      >
-                        Disapprove
-                      </button>
+                      <ConfirmButton
+                        label="Disapprove"
+                        consequence={DISAPPROVE_CONSEQUENCE}
+                        onConfirm={() => handleDisapprove(vendor.id)}
+                      />
                     ) : (
                       <button
                         onClick={() => handleApprove(vendor.id)}
                         className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
                       >
-                        ✓ Approve
+                        Approve
                       </button>
                     )}
                     </div>
@@ -583,6 +778,16 @@ export default function VendorsPage() {
           vendor={reviewVendor}
           onClose={() => setReviewVendor(null)}
           onDone={handleLocationReviewed}
+        />
+      )}
+
+      {selectedVendor && (
+        <VendorDetailModal
+          vendor={selectedVendor}
+          onClose={() => setSelectedVendor(null)}
+          onApprove={handleApprove}
+          onDisapprove={handleDisapprove}
+          actionLoading={actionLoading}
         />
       )}
     </div>

@@ -94,6 +94,14 @@ class MarkOrderPreparing extends VendorOrderEvent {
   List<Object?> get props => [orderId];
 }
 
+/// The store gave the parcel to the rider waiting at the counter (ready_for_pickup → picked)
+class HandOverToRider extends VendorOrderEvent {
+  final int orderId;
+  const HandOverToRider(this.orderId);
+  @override
+  List<Object?> get props => [orderId];
+}
+
 class MarkOrderReadyForPickup extends VendorOrderEvent {
   final int orderId;
   /// Delivery orders are broadcast to nearby riders; self-pickup waits for the customer
@@ -206,6 +214,7 @@ class VendorOrderBloc extends Bloc<VendorOrderEvent, VendorOrderState> {
     on<RejectVendorOrder>(_onReject);
     on<MarkOrderPreparing>(_onPrepare);
     on<MarkOrderReadyForPickup>(_onReadyPickup);
+    on<HandOverToRider>(_onHandOverToRider);
     on<ClearVendorOrders>(_onClear);
     on<PackOrderItem>(_onPackItem);
     on<ScanPackOrder>(_onScanPack);
@@ -412,7 +421,7 @@ class VendorOrderBloc extends Bloc<VendorOrderEvent, VendorOrderState> {
         emit,
         orderId: event.orderId,
         request: () => _api.put(ApiConfig.approveOrder(event.orderId)),
-        successMessage: 'Order approved! ✅',
+        successMessage: 'Order approved',
         failureMessage: 'Failed to approve',
       );
 
@@ -440,5 +449,13 @@ class VendorOrderBloc extends Bloc<VendorOrderEvent, VendorOrderState> {
             ? 'Ready for pickup — nearby riders have been notified.'
             : 'Ready for pickup — the customer has been notified to collect it.',
         failureMessage: 'Failed to update order',
+      );
+
+  Future<void> _onHandOverToRider(HandOverToRider event, Emitter<VendorOrderState> emit) => _runAction(
+        emit,
+        orderId: event.orderId,
+        request: () => _api.put(ApiConfig.handOverToRider(event.orderId)),
+        successMessage: 'Handed over. The rider is on the way to the customer.',
+        failureMessage: 'Could not confirm the handover',
       );
 }

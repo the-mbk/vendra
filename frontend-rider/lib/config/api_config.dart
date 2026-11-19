@@ -127,6 +127,8 @@ class ApiConfig {
   static const String riderStatus = '/api/rider/status';
   static const String riderLocation = '/api/rider/location';
   static const String riderTasks = '/api/rider/tasks';
+  /// Busy stores near the rider (orders in the last hour, waiting for a rider)
+  static const String riderDemand = '/api/rider/demand';
   static String acceptTask(int id) => '/api/rider/tasks/$id/accept';
   static const String riderOrders = '/api/rider/orders'; // ?scope=active|history (history paged)
   static String riderArrived(int id) => '/api/rider/orders/$id/arrived';

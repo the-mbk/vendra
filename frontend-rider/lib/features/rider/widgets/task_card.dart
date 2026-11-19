@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Rider App - Incoming task card (Stitch rider home mockup)
-// Pickup → drop-off route, distances, estimated payout (with an
+// Pickup → drop-off route, distances, parcel weight class, estimated payout (with an
 // expandable estimated slip), Accept/Decline.
 // ══════════════════════════════════════════════════════════════
 
@@ -9,6 +9,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:vendra_rider/vendra_core.dart';
 
 import '../models/rider_models.dart';
+import 'parcel_profile_chip.dart';
 import 'payout_slip.dart';
 
 class TaskCard extends StatelessWidget {
@@ -32,7 +33,7 @@ class TaskCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: AppColors.primary.withValues(alpha: 0.35), width: 1.5),
         boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: 0.10), blurRadius: 16, offset: const Offset(0, 6))],
@@ -80,6 +81,8 @@ class TaskCard extends StatelessWidget {
               title: task.deliveryAddress ?? 'Customer location',
               distance: '${km(task.tripDistanceKm)} trip',
             ),
+            const SizedBox(height: 4),
+            ParcelProfileChip(task: task),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
@@ -108,7 +111,7 @@ class TaskCard extends StatelessWidget {
                       Text('Payment', style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
                       Row(
                         children: [
-                          const Icon(Icons.account_balance_wallet_outlined, size: 16, color: AppColors.secondary),
+                          Icon(Icons.account_balance_wallet_outlined, size: 16, color: AppColors.secondary),
                           const SizedBox(width: 4),
                           Text('To wallet',
                               style: GoogleFonts.poppins(
@@ -137,7 +140,7 @@ class TaskCard extends StatelessWidget {
                       style: OutlinedButton.styleFrom(
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         foregroundColor: AppColors.textPrimary,
-                        side: BorderSide(color: Colors.grey.shade400, width: 1.5),
+                        side: BorderSide(color: AppColors.hairline, width: 1.5),
                       ),
                       child: Text('Decline', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)),
                     ),
@@ -195,7 +198,7 @@ class _RouteStop extends StatelessWidget {
                   height: 12,
                   decoration: BoxDecoration(color: color, shape: BoxShape.circle),
                 ),
-                if (showLine) Expanded(child: Container(width: 2, color: Colors.grey.shade300)),
+                if (showLine) Expanded(child: Container(width: 2, color: AppColors.hairline)),
               ],
             ),
           ),

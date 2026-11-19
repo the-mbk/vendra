@@ -23,7 +23,7 @@ void main() {
     expect(isWalletNotification('order_status'), isFalse);
   });
 
-  testWidgets('an escrow release row shows a readable title and a credit', (tester) async {
+  testWidgets('an escrow release row reads as an order payout and a credit', (tester) async {
     final tx = WalletTransaction.fromJson(const {
       'id': 1,
       'order_id': 12,
@@ -34,7 +34,7 @@ void main() {
     });
     await tester.pumpWidget(_wrap(WalletTransactionTile(tx: tx)));
 
-    expect(find.text('Payment received · Order #12'), findsOneWidget);
+    expect(find.text('Order #12 paid out'), findsOneWidget);
     expect(find.text('+ Rs. 4,275'), findsOneWidget);
     expect(find.textContaining('Ref.'), findsNothing);
   });
@@ -57,8 +57,12 @@ void main() {
     });
     await tester.pumpWidget(_wrap(WalletTransactionTile(tx: tx)));
 
-    expect(find.text('Withdrawal'), findsOneWidget);
+    expect(find.text('Sent to your card'), findsOneWidget);
     expect(find.text('− Rs. 1,500'), findsOneWidget);
+    // The reference sits in the details, one tap away
+    expect(find.text('Ref. po_test123'), findsNothing);
+    await tester.tap(find.text('Sent to your card'));
+    await tester.pump();
     expect(find.text('Ref. po_test123'), findsOneWidget);
 
     await tester.tap(find.text('Ref. po_test123'));

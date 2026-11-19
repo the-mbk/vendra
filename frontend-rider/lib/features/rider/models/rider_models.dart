@@ -24,9 +24,17 @@ class RiderOrder {
   final String? customerName;
   final String? customerPhone;
   final String? deliveryAddress;
+
+  /// The customer's note for the rider ("gate code 402"); only on accepted deliveries
+  final String? deliveryNote;
   final double? customerLat;
   final double? customerLng;
   final int itemCount;
+
+  /// Sum of the products' listed weights; [parcelWeightComplete] is false when
+  /// some product has no weight listed (the class is then a lower bound)
+  final int parcelWeightGrams;
+  final bool parcelWeightComplete;
   final double totalAmount;
   final DateTime? readyAt;
   final DateTime? assignedAt;
@@ -62,9 +70,12 @@ class RiderOrder {
     this.customerName,
     this.customerPhone,
     this.deliveryAddress,
+    this.deliveryNote,
     this.customerLat,
     this.customerLng,
     this.itemCount = 0,
+    this.parcelWeightGrams = 0,
+    this.parcelWeightComplete = false,
     this.totalAmount = 0,
     this.readyAt,
     this.assignedAt,
@@ -94,9 +105,12 @@ class RiderOrder {
         customerName: json['customerName'],
         customerPhone: json['customerPhone'],
         deliveryAddress: json['deliveryAddress'],
+        deliveryNote: json['deliveryNote'],
         customerLat: toDoubleOrNull(json['customerLat']),
         customerLng: toDoubleOrNull(json['customerLng']),
         itemCount: toInt(json['itemCount']),
+        parcelWeightGrams: toInt(json['parcelWeightGrams']),
+        parcelWeightComplete: json['parcelWeightComplete'] == true,
         totalAmount: toDouble(json['totalAmount']),
         readyAt: toDate(json['readyAt']),
         assignedAt: toDate(json['assignedAt']),
@@ -118,6 +132,14 @@ class RiderOrder {
   LatLng? get storePoint => storeLat != null && storeLng != null ? LatLng(storeLat!, storeLng!) : null;
   LatLng? get customerPoint =>
       customerLat != null && customerLng != null ? LatLng(customerLat!, customerLng!) : null;
+
+  ParcelClass get parcelClass {
+    if (parcelWeightGrams <= 0) return ParcelClass.unknown;
+    if (parcelWeightGrams > 8000) return ParcelClass.heavy;
+    if (parcelWeightGrams >= 3000) return ParcelClass.medium;
+    // Under 3 kg of listed weight but some items unlisted: can't call it standard
+    return parcelWeightComplete ? ParcelClass.standard : ParcelClass.unknown;
+  }
 
   bool get isDelivered => status == 'delivered';
   bool get isCancelled => status == 'cancelled';
@@ -157,6 +179,18 @@ class RiderOrder {
 }
 
 enum DeliveryStep { headingToStore, atStore, pickedUp, onTheWay, delivered, closed }
+
+/// Parcel profile shown before a rider accepts (SRDS §2.4.3, PR 03)
+enum ParcelClass {
+  standard('Standard parcel', '< 3 kg'),
+  medium('Medium / multi-bag', '3 – 8 kg'),
+  heavy('Heavy / bulky', '> 8 kg'),
+  unknown('Weight not listed', '');
+
+  final String label;
+  final String range;
+  const ParcelClass(this.label, this.range);
+}
 
 /// GET /api/rider/tasks
 class RiderTasksResult {

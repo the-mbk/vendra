@@ -66,7 +66,13 @@ class DemoLoginPanel extends StatelessWidget {
                   style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
                 ),
                 const SizedBox(width: 6),
-                Text('· development only', style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textLight)),
+                Flexible(
+                  child: Text(
+                    '· development only',
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textLight),
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -106,7 +112,7 @@ class DemoLoginPanel extends StatelessWidget {
                               ],
                             ),
                           ),
-                          const Icon(Icons.login, size: 18, color: AppColors.secondary),
+                          Icon(Icons.login, size: 18, color: AppColors.secondary),
                         ],
                       ),
                     ),

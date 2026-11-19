@@ -18,7 +18,7 @@ class TabHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.white,
+      color: AppColors.surface,
       padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
       child: Row(
         children: [

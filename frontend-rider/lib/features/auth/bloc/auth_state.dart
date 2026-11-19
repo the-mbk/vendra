@@ -23,7 +23,7 @@ class Authenticated extends AuthState {
   final String token;
   const Authenticated({required this.user, required this.token});
   @override
-  List<Object?> get props => [user.id, user.walletBalance, token];
+  List<Object?> get props => [user.id, user.walletBalance, user.fullName, user.phone, user.avatarUrl, user.riderApprovalStatus, token];
 }
 
 /// Not authenticated. [message] explains a sign-out the rider didn't ask for

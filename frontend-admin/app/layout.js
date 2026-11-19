@@ -1,4 +1,5 @@
 import "./globals.css";
+import { themeInitScript } from "./lib/theme";
 
 export const metadata = {
   title: "Vendra Admin",
@@ -7,8 +8,10 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    // The init script sets the .dark class before hydration, so <html> legitimately differs from the server render
+    <html lang="en" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         <link
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
           rel="stylesheet"

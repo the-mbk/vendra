@@ -20,7 +20,6 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -37,6 +36,8 @@ import '../bloc/order_bloc.dart';
 import '../../auth/bloc/auth_bloc.dart';
 import '../../auth/bloc/auth_event.dart';
 import '../../auth/bloc/auth_state.dart';
+import '../widgets/rider_note_field.dart';
+import '../widgets/store_widgets.dart' show haversineKm;
 import '../widgets/trust_badges.dart';
 import '../widgets/wallet_actions.dart';
 
@@ -70,6 +71,7 @@ class _CartScreenState extends State<CartScreen> {
   String _deliveryType = 'delivery';
   final _addressController = TextEditingController();
   final _labelController = TextEditingController();
+  final _noteController = TextEditingController();
 
   double _customerLat = CustomerLocationStorage.defaultLat;
   double _customerLng = CustomerLocationStorage.defaultLng;
@@ -178,17 +180,9 @@ class _CartScreenState extends State<CartScreen> {
     _quoteDebounce?.cancel();
     _addressController.dispose();
     _labelController.dispose();
+    _noteController.dispose();
     _checkoutBloc.close();
     super.dispose();
-  }
-
-  double _haversineKm(double lat1, double lon1, double lat2, double lon2) {
-    const r = 6371.0;
-    final dLat = (lat2 - lat1) * pi / 180;
-    final dLon = (lon2 - lon1) * pi / 180;
-    final a = sin(dLat / 2) * sin(dLat / 2) +
-        cos(lat1 * pi / 180) * cos(lat2 * pi / 180) * sin(dLon / 2) * sin(dLon / 2);
-    return r * 2 * atan2(sqrt(a), sqrt(1 - a));
   }
 
   String? _deliveryDistanceSubtitle(List<CartItemModel>? items) {
@@ -196,7 +190,7 @@ class _CartScreenState extends State<CartScreen> {
     final vLat = items.first.product.vendorLat;
     final vLng = items.first.product.vendorLng;
     if (vLat == null || vLng == null) return null;
-    final km = _haversineKm(_customerLat, _customerLng, vLat, vLng);
+    final km = haversineKm(_customerLat, _customerLng, vLat, vLng);
     if (km < 1) return '~${(km * 1000).round()} m from the store';
     return '~${km.toStringAsFixed(1)} km from the store';
   }
@@ -208,7 +202,7 @@ class _CartScreenState extends State<CartScreen> {
     if (!_hasPin || cart.items.isEmpty) return null;
     final p = cart.items.first.product;
     if (p.vendorLat == null || p.vendorLng == null) return null;
-    return _haversineKm(_customerLat, _customerLng, p.vendorLat!, p.vendorLng!);
+    return haversineKm(_customerLat, _customerLng, p.vendorLat!, p.vendorLng!);
   }
 
   /// The store is beyond the max delivery distance from the pin
@@ -231,6 +225,35 @@ class _CartScreenState extends State<CartScreen> {
         if (mounted) setState(() => _deliveryType = 'self_pickup');
       });
     }
+  }
+
+  /// Development only: moves the delivery pin about 1 km north of the store, so a
+  /// demo customer far from every store can still try home delivery
+  Future<void> _snapPinNearStore(CartState cart) async {
+    if (cart.items.isEmpty) return;
+    final p = cart.items.first.product;
+    if (p.vendorLat == null || p.vendorLng == null) return;
+    final newLat = p.vendorLat! + 0.009;
+    final newLng = p.vendorLng!;
+    final km = haversineKm(p.vendorLat!, p.vendorLng!, newLat, newLng);
+    final storeName = p.storeName ?? 'the store';
+    final label = 'Near $storeName';
+    await CustomerLocationStorage.save(
+      latitude: newLat,
+      longitude: newLng,
+      locationName: label,
+      addressLine: 'Near $storeName',
+    );
+    if (!mounted) return;
+    setState(() {
+      _customerLat = newLat;
+      _customerLng = newLng;
+      _hasPin = true;
+      _deliveryType = 'delivery';
+      _addressController.text = 'Near $storeName';
+      _labelController.text = label;
+    });
+    _snack('Drop-off pin moved ${km.toStringAsFixed(1)} km from $storeName. Home delivery is available.');
   }
 
   void _snack(String message, {bool error = false, SnackBarAction? action}) {
@@ -282,7 +305,7 @@ class _CartScreenState extends State<CartScreen> {
                       decoration: InputDecoration(
                         labelText: 'Label e.g. Home, Office',
                         filled: true,
-                        fillColor: Colors.grey.shade50,
+                        fillColor: AppColors.surfaceMuted,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                       style: GoogleFonts.poppins(fontSize: 13),
@@ -293,7 +316,7 @@ class _CartScreenState extends State<CartScreen> {
                       decoration: InputDecoration(
                         labelText: 'Street / building details',
                         filled: true,
-                        fillColor: Colors.grey.shade50,
+                        fillColor: AppColors.surfaceMuted,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                       style: GoogleFonts.poppins(fontSize: 13),
@@ -384,6 +407,7 @@ class _CartScreenState extends State<CartScreen> {
       items: cartState.items,
       deliveryType: _deliveryType,
       deliveryAddress: addr,
+      deliveryNote: _isDelivery ? _noteController.text : null,
       customerLat: _isDelivery ? _customerLat : null,
       customerLng: _isDelivery ? _customerLng : null,
     );
@@ -542,7 +566,7 @@ class _CartScreenState extends State<CartScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.shopping_cart_outlined, size: 80, color: Colors.grey.shade300),
+                      Icon(Icons.shopping_cart_outlined, size: 80, color: AppColors.textLight),
                       const SizedBox(height: 16),
                       Text('This cart is empty', style: GoogleFonts.poppins(fontSize: 18, color: AppColors.textSecondary)),
                       const SizedBox(height: 8),
@@ -565,6 +589,10 @@ class _CartScreenState extends State<CartScreen> {
                               const SizedBox(height: 8),
                               _deliveryMethodCard(cartState),
                               const SizedBox(height: 8),
+                              if (_isDelivery) ...[
+                                RiderNoteField(controller: _noteController),
+                                const SizedBox(height: 8),
+                              ],
                               _paymentMethodCard(),
                               const SizedBox(height: 8),
                               _escrowNotice(),
@@ -612,7 +640,7 @@ class _CartScreenState extends State<CartScreen> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: problem ? Border.all(color: AppColors.stockRed.withValues(alpha: 0.5)) : null,
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
@@ -714,7 +742,7 @@ class _CartScreenState extends State<CartScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
       ),
@@ -753,20 +781,40 @@ class _CartScreenState extends State<CartScreen> {
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(10)),
+              decoration: BoxDecoration(color: AppColors.warningSurface, borderRadius: BorderRadius.circular(10)),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline, size: 18, color: Colors.orange.shade800),
+                  Icon(Icons.info_outline, size: 18, color: AppColors.warningInk),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       '${_rangeText(cartState)}. Choose self pickup, or move your pin closer.',
-                      style: GoogleFonts.poppins(fontSize: 12, color: Colors.orange.shade900),
+                      style: GoogleFonts.poppins(fontSize: 12, color: AppColors.warningInk),
                     ),
                   ),
                 ],
               ),
             ),
+            if (AppConfig.current.isDevelopment && cartState.items.isNotEmpty && cartState.items.first.product.vendorLat != null) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.near_me_rounded, size: 16),
+                  label: Text(
+                    'Demo: set drop-off pin about 1 km from this store',
+                    style: GoogleFonts.poppins(fontSize: 12.5, fontWeight: FontWeight.w600),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    side: const BorderSide(color: AppColors.primary, width: 1.5),
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () => _snapPinNearStore(cartState),
+                ),
+              ),
+            ],
           ],
           const SizedBox(height: 16),
           if (_isDelivery) ...[
@@ -794,12 +842,12 @@ class _CartScreenState extends State<CartScreen> {
                 onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
                   hintText: 'Street / flat / landmarks',
-                  prefixIcon: const Icon(Icons.home_work_outlined, color: AppColors.secondary, size: 20),
+                  prefixIcon: Icon(Icons.home_work_outlined, color: AppColors.secondary, size: 20),
                   filled: true,
-                  fillColor: Colors.grey.shade50,
+                  fillColor: AppColors.surfaceMuted,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: Colors.grey.shade200),
+                    borderSide: BorderSide(color: AppColors.hairline),
                   ),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
@@ -839,18 +887,18 @@ class _CartScreenState extends State<CartScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.teal.shade50,
+                color: AppColors.tint(AppColors.info),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.teal.shade100),
+                border: Border.all(color: AppColors.info.withValues(alpha: 0.30)),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.storefront_outlined, color: Colors.teal.shade800),
+                  Icon(Icons.storefront_outlined, color: AppColors.ink(AppColors.info)),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       'Collect your order at the store and confirm you received it in the app.',
-                      style: GoogleFonts.poppins(fontSize: 11, color: Colors.teal.shade900),
+                      style: GoogleFonts.poppins(fontSize: 12, color: AppColors.ink(AppColors.info)),
                     ),
                   ),
                 ],
@@ -866,7 +914,7 @@ class _CartScreenState extends State<CartScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
       ),
@@ -949,13 +997,13 @@ class _CartScreenState extends State<CartScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF8E1),
+        color: AppColors.warningSurface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.amber.shade200),
+        border: Border.all(color: AppColors.warning.withValues(alpha: 0.35)),
       ),
       child: Row(
         children: [
-          Icon(Icons.account_balance, size: 22, color: Colors.amber.shade700),
+          Icon(Icons.account_balance, size: 22, color: AppColors.warningInk),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -963,13 +1011,13 @@ class _CartScreenState extends State<CartScreen> {
               children: [
                 Text(
                   'Escrow Payment',
-                  style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF8A5A00)),
+                  style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.warningInk),
                 ),
                 Text(
                   '${_payByCard ? 'Your card is charged the total now and it is held in escrow.' : 'The total moves from your wallet into escrow now.'} '
                   'The store is paid only after '
                   '${_isDelivery ? 'the rider delivers' : 'you confirm pickup'} and the dispute window closes.',
-                  style: GoogleFonts.poppins(fontSize: 11, height: 1.4, color: const Color(0xFF6D4C00)),
+                  style: GoogleFonts.poppins(fontSize: 11, height: 1.4, color: AppColors.warningInk),
                 ),
               ],
             ),
@@ -993,7 +1041,7 @@ class _CartScreenState extends State<CartScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 10, offset: const Offset(0, -4))],
       ),
@@ -1011,7 +1059,7 @@ class _CartScreenState extends State<CartScreen> {
                       : !_hasPin
                           ? 'Set your pin'
                           : (_quoteLoading ? '…' : 'Added at checkout'),
-              valueColor: _isDelivery ? AppColors.textPrimary : Colors.green,
+              valueColor: _isDelivery ? AppColors.textPrimary : AppColors.success,
             ),
             if (_isDelivery && _quoteError != null)
               Padding(
@@ -1034,7 +1082,7 @@ class _CartScreenState extends State<CartScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Row(
                   children: [
-                    const Icon(Icons.credit_card, size: 16, color: AppColors.textSecondary),
+                    Icon(Icons.credit_card, size: 16, color: AppColors.textSecondary),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
@@ -1101,12 +1149,12 @@ class _CartScreenState extends State<CartScreen> {
     );
   }
 
-  Widget _totalRow(String label, String value, {Color valueColor = AppColors.textPrimary}) {
+  Widget _totalRow(String label, String value, {Color? valueColor}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(label, style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textSecondary)),
-        Text(value, style: GoogleFonts.poppins(fontSize: 14, color: valueColor)),
+        Text(value, style: GoogleFonts.poppins(fontSize: 14, color: valueColor ?? AppColors.textPrimary)),
       ],
     );
   }
@@ -1143,10 +1191,10 @@ class _CartScreenState extends State<CartScreen> {
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: isSelected ? AppColors.primary.withValues(alpha: 0.08) : Colors.grey.shade50,
+            color: isSelected ? AppColors.primary.withValues(alpha: 0.08) : AppColors.surfaceMuted,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isSelected ? AppColors.primary : Colors.grey.shade200,
+              color: isSelected ? AppColors.primary : AppColors.hairline,
               width: isSelected ? 2 : 1,
             ),
           ),
@@ -1184,7 +1232,7 @@ class _CartScreenState extends State<CartScreen> {
         height: 30,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(color: enabled ? Colors.grey.shade300 : Colors.grey.shade200),
+          border: Border.all(color: enabled ? AppColors.hairline : AppColors.hairline),
         ),
         child: Icon(icon, size: 16, color: enabled ? AppColors.textPrimary : AppColors.textLight),
       ),

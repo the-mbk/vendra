@@ -48,7 +48,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   Widget build(BuildContext context) {
     final receipt = _receipt;
     return Scaffold(
-      backgroundColor: const Color(0xFFE9EBEE),
+      backgroundColor: AppColors.surfaceMuted,
       appBar: AppBar(
         title: Text(receipt?.receiptNumber ?? 'Receipt', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
       ),

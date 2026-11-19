@@ -13,6 +13,7 @@ const {
   getVendorProducts,
   getProductByBarcode,
   updateProduct,
+  stockIn,
   deleteProduct,
   uploadProductImage,
   uploadStorePhoto,
@@ -20,9 +21,11 @@ const {
   deleteProductImage,
   addGalleryImage,
   deleteGalleryImage,
+  getProductReservations,
   createPosSale,
   getPosSales,
   getPosSale,
+  getRevenueSplit,
   getReceiptSettings,
   updateReceiptSettings,
   getVendorOrders,
@@ -38,6 +41,7 @@ const {
   markOrderPreparing,
   markOrderReadyForPickup,
   markVendorOrderDelivered,
+  handOverToRider,
 } = require('../controllers/vendor.controller');
 const { listStaff, getRoster, createStaff, updateStaff, removeStaff, switchStaff } = require('../controllers/staff.controller');
 
@@ -50,7 +54,9 @@ router.use(authenticateAllowStaff, requireVendor);
 router.post('/products', can('products.manage'), createProduct);
 router.get('/products', can('products.view'), getVendorProducts);
 router.get('/products/barcode/:code', can('products.view'), getProductByBarcode);
+router.get('/products/:id/reservations', can('pos'), getProductReservations);
 router.put('/products/:id', can('products.manage'), updateProduct);
+router.post('/products/:id/stock-in', can('products.manage'), stockIn);
 router.delete('/products/:id', can('products.manage'), deleteProduct);
 router.post('/products/:id/image', can('products.manage'), productImageUpload.single('image'), uploadProductImage);
 router.delete('/products/:id/image', can('products.manage'), deleteProductImage);
@@ -67,6 +73,7 @@ router.delete('/store/photos/:kind', requireOwner, deleteStorePhoto);
 router.post('/pos/sales', can('pos'), createPosSale);
 router.get('/pos/sales', can('pos'), getPosSales);
 router.get('/pos/sales/:id', can('pos'), getPosSale);
+router.get('/revenue', requireOwner, getRevenueSplit);
 router.get('/receipt-settings', can('pos'), getReceiptSettings);
 router.put('/receipt-settings', requireOwner, updateReceiptSettings);
 
@@ -80,6 +87,7 @@ router.post('/orders/:id/scan', can('orders.fulfil'), scanPackItem);
 router.put('/orders/:id/prepare', can('orders.fulfil'), markOrderPreparing);
 router.put('/orders/:id/ready-for-pickup', can('orders.fulfil'), markOrderReadyForPickup);
 router.put('/orders/:id/deliver', can('orders.fulfil'), markVendorOrderDelivered);
+router.put('/orders/:id/hand-over', can('orders.fulfil'), handOverToRider);
 
 // Location
 router.put('/location', requireOwner, updateVendorLocation);

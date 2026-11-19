@@ -28,6 +28,21 @@ const CATEGORY_IDS = {
   'sports-accessories': 8,
 };
 
+/**
+ * Typical weight of one unit per DummyJSON category, in grams (the source has
+ * none we can use). Riders see the parcel weight class before accepting.
+ */
+const UNIT_WEIGHT_G = {
+  smartphones: 200, laptops: 2200, tablets: 500,
+  'mobile-accessories': 150,
+  'mens-shirts': 250, 'mens-shoes': 900, 'mens-watches': 150, 'womens-bags': 700, 'womens-dresses': 350,
+  'womens-jewellery': 50, 'womens-shoes': 700, 'womens-watches': 100, tops: 200, sunglasses: 80,
+  groceries: 1000,
+  furniture: 18000, 'home-decoration': 1500, 'kitchen-accessories': 600,
+  beauty: 150, fragrances: 300, 'skin-care': 200,
+  'sports-accessories': 1200,
+};
+
 /** Rupee price rounded the way shops price things */
 function toRupees(usd) {
   const rs = usd * PKR_PER_USD;
@@ -50,7 +65,7 @@ async function download(url, file) {
 }
 
 /**
- * @returns {Promise<Array<{ key, title, description, brand, group, categoryId, priceRs, imageFile|null, extraImageFiles }>>}
+ * @returns {Promise<Array<{ key, title, description, brand, group, categoryId, priceRs, weightGrams, imageFile|null, extraImageFiles }>>}
  */
 async function loadCatalog({ log = console.log } = {}) {
   fs.mkdirSync(IMAGES_DIR, { recursive: true });
@@ -74,6 +89,7 @@ async function loadCatalog({ log = console.log } = {}) {
       group: p.category,
       categoryId: CATEGORY_IDS[p.category],
       priceRs: toRupees(p.price),
+      weightGrams: UNIT_WEIGHT_G[p.category] ?? null,
       imageUrl: p.images?.[0] || p.thumbnail,
       imageFile: null,
       extraImageUrls: (p.images || []).slice(1, 1 + MAX_EXTRA_PHOTOS),

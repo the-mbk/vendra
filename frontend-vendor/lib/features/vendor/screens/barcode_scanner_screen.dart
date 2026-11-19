@@ -13,6 +13,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:vendra_vendor/vendra_core.dart';
 
+import '../services/scan_beep.dart';
+
 /// Whether mobile_scanner has a camera implementation on this platform
 bool get cameraScanSupported {
   if (kIsWeb) return true;
@@ -150,6 +152,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
       final value = b.rawValue?.trim();
       if (value != null && value.isNotEmpty) {
         _done = true;
+        scanBeep();
         Navigator.pop(context, value);
         return;
       }

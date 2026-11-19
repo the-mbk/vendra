@@ -77,7 +77,7 @@ export default function PaymentsPage() {
       ) : list.error ? (
         <ErrorBox title="Error loading payments" message={list.error} />
       ) : (
-        <div className="bg-white rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
+        <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>

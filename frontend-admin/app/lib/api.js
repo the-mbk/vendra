@@ -157,6 +157,10 @@ export async function getOrders() {
   return apiFetch("/admin/orders");
 }
 
+export async function getOrderDetails(orderId) {
+  return apiFetch(`/admin/orders/${orderId}`);
+}
+
 export async function getUsers() {
   return apiFetch("/admin/users");
 }
@@ -196,15 +200,26 @@ export async function getDisputes(status) {
   return apiFetch(`/admin/disputes${status ? `?status=${encodeURIComponent(status)}` : ""}`);
 }
 
-// Always fetched fresh: evidence URLs are signed links that expire after about an hour
-export async function getDispute(disputeId) {
-  return apiFetch(`/disputes/${disputeId}`, { cache: "no-store" });
+/**
+ * Claim, store packing record and rider delivery audit side by side.
+ * Always fetched fresh: evidence URLs are signed links that expire after about an hour.
+ */
+export async function getDisputeDossier(disputeId) {
+  return apiFetch(`/admin/disputes/${disputeId}/dossier`, { cache: "no-store" });
 }
 
-export async function resolveDispute(disputeId, resolution, note) {
+/**
+ * resolution: "refund" | "release" | "split". A split (delivered orders only) refunds
+ * `refundPct` (1–99) % of the item subtotal to the customer and releases the rest to the store.
+ */
+export async function resolveDispute(disputeId, resolution, note, refundPct) {
   return apiFetch(`/admin/disputes/${disputeId}/resolve`, {
     method: "PUT",
-    body: JSON.stringify({ resolution, ...(note ? { note } : {}) }),
+    body: JSON.stringify({
+      resolution,
+      ...(note ? { note } : {}),
+      ...(resolution === "split" ? { refundPct } : {}),
+    }),
   });
 }
 
@@ -226,8 +241,30 @@ export async function rejectRider(userId, reason) {
   });
 }
 
+/** Live fleet: rider states, the delivery lifecycle board and slow stores. Always fresh (polled). */
+export async function getFleet() {
+  return apiFetch("/admin/fleet", { cache: "no-store" });
+}
+
 export async function getFinance() {
   return apiFetch("/admin/finance");
+}
+
+/** What the escrow sweep pays out now / in the next 24 h, and when it runs next. Always fresh. */
+export async function getSettlement() {
+  return apiFetch("/admin/settlement", { cache: "no-store" });
+}
+
+/** Releases every escrow that is due now, without waiting for the sweep */
+export async function runSettlement() {
+  return apiFetch("/admin/settlement/run", { method: "POST" });
+}
+
+/** Admin audit trail, newest first; `action` filters to one kind */
+export async function getAuditLog({ action, limit = 30, offset = 0 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (action) params.set("action", action);
+  return apiFetch(`/admin/audit-log?${params}`, { cache: "no-store" });
 }
 
 // ── Card payments, withdrawals & gateway reconciliation ──

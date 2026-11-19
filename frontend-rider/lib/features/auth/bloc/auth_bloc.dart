@@ -25,6 +25,20 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<LogoutRequested>(_onLogout);
     on<SessionExpired>(_onSessionExpired);
     on<AuthWalletBalanceUpdated>(_onWalletBalanceUpdated);
+    on<AuthUserRefreshRequested>(_onUserRefresh);
+  }
+
+  Future<void> _onUserRefresh(AuthUserRefreshRequested event, Emitter<AuthState> emit) async {
+    final current = state;
+    if (current is! Authenticated) return;
+    try {
+      final response = await _api.get(ApiConfig.me);
+      if (response.data['success'] == true && state is Authenticated) {
+        emit(Authenticated(user: UserModel.fromJson(response.data['data']), token: current.token));
+      }
+    } catch (_) {
+      // Offline or a blip: keep showing what we have
+    }
   }
 
   void _onWalletBalanceUpdated(AuthWalletBalanceUpdated event, Emitter<AuthState> emit) {

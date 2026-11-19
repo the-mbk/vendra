@@ -40,6 +40,14 @@ function parseCheckoutItems(items) {
 }
 
 /** Validates a checkout request body (wallet and card checkout share it) */
+/** Optional note for the rider ("gate code 402"): trimmed, at most 200 characters */
+function readDeliveryNote(value) {
+  if (value === undefined || value === null) return null;
+  const note = String(value).trim();
+  if (note.length > 200) throw httpError(400, 'Keep the note for the rider to 200 characters.');
+  return note || null;
+}
+
 function readCheckoutInput(body) {
   const deliveryType = body.deliveryType || 'delivery';
   const input = {
@@ -48,6 +56,7 @@ function readCheckoutInput(body) {
     customerLat: num(body.customerLat),
     customerLng: num(body.customerLng),
     items: parseCheckoutItems(body.items),
+    deliveryNote: readDeliveryNote(body.deliveryNote),
   };
   if (!['delivery', 'self_pickup'].includes(deliveryType)) {
     throw httpError(400, "deliveryType must be 'delivery' or 'self_pickup'.");
@@ -104,7 +113,7 @@ async function quoteCheckout(db, input) {
  * the card payment into the wallet (payments.service), so escrow has one entry path.
  */
 async function placeOrder(client, afterCommit, customerId, input, { paymentMethod = 'wallet' } = {}) {
-  const { deliveryType, deliveryAddress, customerLat, customerLng, items } = input;
+  const { deliveryType, deliveryAddress, customerLat, customerLng, items, deliveryNote } = input;
   const policies = await getPolicies(client);
 
   // The hot rows (each product, the escrow pool) are locked as late as possible and held
@@ -151,11 +160,12 @@ async function placeOrder(client, afterCommit, customerId, input, { paymentMetho
   const order = (await client.query(
     `INSERT INTO orders (customer_id, vendor_id, status, subtotal, delivery_fee, total_amount,
                          delivery_type, delivery_address, customer_lat, customer_lng, estimated_minutes, escrow_status,
-                         payment_method, delivery_otp)
-     VALUES ($1, $2, 'pending', $3, $4, $5, $6, $7, $8, $9, $10, 'held', $11, $12)
+                         payment_method, delivery_otp, delivery_note)
+     VALUES ($1, $2, 'pending', $3, $4, $5, $6, $7, $8, $9, $10, 'held', $11, $12, $13)
      RETURNING *`,
     [customerId, vendorId, paisaToString(subtotal), paisaToString(deliveryFee), paisaToString(total),
-      deliveryType, deliveryAddress || null, customerLat, customerLng, estimatedMinutes, paymentMethod, generateOtp()]
+      deliveryType, deliveryAddress || null, customerLat, customerLng, estimatedMinutes, paymentMethod, generateOtp(),
+      deliveryType === 'delivery' ? deliveryNote : null]
   )).rows[0];
   for (const line of lines) {
     await client.query(

@@ -41,6 +41,7 @@ class ReceiptSlip extends StatelessWidget {
             children: [
               const _TornEdge(top: true),
               Container(
+                // Paper stays white in dark mode too: the ink below is dark and the torn edges are white
                 color: Colors.white,
                 padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
                 child: Column(

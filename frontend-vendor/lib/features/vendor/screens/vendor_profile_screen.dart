@@ -93,7 +93,7 @@ class VendorProfileScreen extends StatelessWidget {
                     width: double.infinity,
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(14),
                       boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
                     ),
@@ -121,6 +121,11 @@ class VendorProfileScreen extends StatelessWidget {
                         () => backToOwner(context)),
                   _linkTile(context, Icons.star_outline_rounded, 'Customer reviews', 'What customers say about your products',
                       const VendorReviewsScreen()),
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: _tileDecoration(),
+                    child: const ThemeModeTile(),
+                  ),
                   if (isOwner) ...[
                     _linkTile(context, Icons.groups_outlined, 'Shop staff', 'Cashiers, packers and inventory managers',
                         const StaffScreen()),
@@ -169,17 +174,19 @@ class VendorProfileScreen extends StatelessWidget {
     );
   }
 
+  BoxDecoration _tileDecoration() => BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.hairline),
+      );
+
   Widget _linkTile(BuildContext context, IconData icon, String title, String subtitle, Widget screen) =>
       _actionTile(icon, title, subtitle, () => Navigator.push(context, MaterialPageRoute(builder: (_) => screen)));
 
   Widget _actionTile(IconData icon, String title, String subtitle, VoidCallback onTap) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
-      ),
+      decoration: _tileDecoration(),
       child: ListTile(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         leading: Icon(icon, color: AppColors.secondary),

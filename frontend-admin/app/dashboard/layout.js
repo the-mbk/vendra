@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { clearToken, getDashboardStats, SESSION_EXPIRED_EVENT } from "../lib/api";
-import { COUNTS_EVENT } from "../lib/ui";
+import { COUNTS_EVENT, ThemeToggle } from "../lib/ui";
 import { usePublicConfig } from "../lib/hooks";
 
 const navSections = [
@@ -24,6 +24,7 @@ const navSections = [
     title: "Operations",
     items: [
       { label: "Orders", icon: "receipt_long", href: "/dashboard/orders" },
+      { label: "Live Map", icon: "map", href: "/dashboard/fleet-map" },
       { label: "Disputes", icon: "gavel", href: "/dashboard/disputes", badge: "openDisputes", urgent: true },
     ],
   },
@@ -108,7 +109,7 @@ export default function DashboardLayout({ children }) {
   return (
     <div className="flex min-h-screen bg-background">
       {/* Sidebar */}
-      <aside className="w-[260px] bg-white border-r border-outline-variant/30 flex flex-col fixed h-screen">
+      <aside className="w-[260px] bg-surface-container-lowest border-r border-outline-variant/30 flex flex-col fixed h-screen">
         {/* Logo */}
         <div className="px-5 py-4 border-b border-outline-variant/20">
           <div className="flex items-center gap-3">
@@ -200,7 +201,7 @@ export default function DashboardLayout({ children }) {
       {/* min-w-0 lets wide tables scroll inside their card instead of widening the page */}
       <main className="flex-1 min-w-0 ml-[260px]">
         {/* Top header */}
-        <header className="h-16 bg-white/80 backdrop-blur-md border-b border-outline-variant/20 flex items-center justify-between px-8 sticky top-0 z-10">
+        <header className="h-16 bg-surface-container-lowest/80 backdrop-blur-md border-b border-outline-variant/20 flex items-center justify-between px-8 sticky top-0 z-10">
           <div>
             <h2 className="text-lg font-bold text-on-surface">
               {pageTitle(pathname)}
@@ -219,6 +220,7 @@ export default function DashboardLayout({ children }) {
             <button className="w-9 h-9 rounded-xl bg-surface-container-low flex items-center justify-center hover:bg-surface-container transition-colors">
               <span className="material-symbols-outlined text-on-surface-variant text-[20px]">notifications</span>
             </button>
+            <ThemeToggle />
           </div>
         </header>
 

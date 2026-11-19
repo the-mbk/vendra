@@ -18,6 +18,9 @@ class OrderModel {
   final String status;
   final String? deliveryType;
   final String? deliveryAddress;
+
+  /// The customer's note for the rider, written at checkout
+  final String? deliveryNote;
   final double? customerLat;
   final double? customerLng;
   final int? estimatedMinutes;
@@ -32,6 +35,9 @@ class OrderModel {
   final DisputeSummary? latestDispute;
   final String? createdAt;
   final DateTime? assignedAt;
+
+  /// The rider checked in at the store (store view: who is waiting at the counter)
+  final DateTime? riderArrivedAt;
   final DateTime? pickedAt;
   final DateTime? deliveredAt;
   final List<OrderItemModel> items;
@@ -44,6 +50,10 @@ class OrderModel {
   /// Pending orders: when the reserved stock is released if the store hasn't accepted
   final DateTime? reservationExpiresAt;
   final String? paymentMethod; // wallet | card
+  /// Customer: the card that paid, e.g. "Visa ending 4242" (card checkouts only)
+  final String? cardLabel;
+  /// Customer: total returned to the wallet for this order (cancellation / dispute refunds)
+  final double refundedAmount;
   final bool canReview;
   final DateTime? reviewedAt;
   final int? riderRating;
@@ -63,6 +73,7 @@ class OrderModel {
     required this.status,
     this.deliveryType,
     this.deliveryAddress,
+    this.deliveryNote,
     this.customerLat,
     this.customerLng,
     this.estimatedMinutes,
@@ -77,6 +88,7 @@ class OrderModel {
     this.latestDispute,
     this.createdAt,
     this.assignedAt,
+    this.riderArrivedAt,
     this.pickedAt,
     this.deliveredAt,
     this.items = const [],
@@ -85,6 +97,8 @@ class OrderModel {
     this.otpRequired = false,
     this.reservationExpiresAt,
     this.paymentMethod,
+    this.cardLabel,
+    this.refundedAmount = 0,
     this.canReview = false,
     this.reviewedAt,
     this.riderRating,
@@ -110,6 +124,7 @@ class OrderModel {
       status: json['status'] ?? 'pending',
       deliveryType: pick(json, 'deliveryType', 'delivery_type'),
       deliveryAddress: pick(json, 'deliveryAddress', 'delivery_address'),
+      deliveryNote: pick(json, 'deliveryNote', 'delivery_note'),
       customerLat: toDoubleOrNull(pick(json, 'customerLat', 'customer_lat')),
       customerLng: toDoubleOrNull(pick(json, 'customerLng', 'customer_lng')),
       estimatedMinutes: toIntOrNull(pick(json, 'estimatedMinutes', 'estimated_minutes')),
@@ -128,6 +143,7 @@ class OrderModel {
       latestDispute: disputeJson is Map<String, dynamic> ? DisputeSummary.fromJson(disputeJson) : null,
       createdAt: pick(json, 'createdAt', 'created_at'),
       assignedAt: toDate(pick(json, 'assignedAt', 'assigned_at')),
+      riderArrivedAt: toDate(pick(json, 'riderArrivedAt', 'rider_arrived_at')),
       pickedAt: toDate(pick(json, 'pickedAt', 'picked_at')),
       deliveredAt: toDate(pick(json, 'deliveredAt', 'delivered_at')),
       items: (json['items'] as List<dynamic>?)
@@ -139,6 +155,8 @@ class OrderModel {
       otpRequired: pick(json, 'otpRequired', 'otp_required') == true,
       reservationExpiresAt: toDate(pick(json, 'reservationExpiresAt')),
       paymentMethod: pick(json, 'paymentMethod', 'payment_method'),
+      cardLabel: pick(json, 'cardLabel', 'card_label'),
+      refundedAmount: toDouble(pick(json, 'refundedAmount', 'refunded_amount')),
       canReview: json['canReview'] == true,
       reviewedAt: toDate(pick(json, 'reviewedAt', 'reviewed_at')),
       riderRating: toIntOrNull(pick(json, 'riderRating', 'rider_rating')),
@@ -208,11 +226,12 @@ class OrderRider {
   final int id;
   final String? name;
   final String? phone;
+  final String? photoUrl;
 
-  OrderRider({required this.id, this.name, this.phone});
+  OrderRider({required this.id, this.name, this.phone, this.photoUrl});
 
   factory OrderRider.fromJson(Map<String, dynamic> json) =>
-      OrderRider(id: toInt(json['id']), name: json['name'], phone: json['phone']);
+      OrderRider(id: toInt(json['id']), name: json['name'], phone: json['phone'], photoUrl: json['photoUrl']);
 }
 
 class DisputeSummary {

@@ -23,7 +23,10 @@ import 'barcode_scanner_screen.dart';
 class AddEditProductScreen extends StatefulWidget {
   final ProductModel? product; // null = add, non-null = edit
 
-  const AddEditProductScreen({super.key, this.product});
+  /// New product from a scanned barcode that matched nothing (stock-in)
+  final String? initialBarcode;
+
+  const AddEditProductScreen({super.key, this.product, this.initialBarcode});
 
   @override
   State<AddEditProductScreen> createState() => _AddEditProductScreenState();
@@ -37,6 +40,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
   late TextEditingController _stockCtrl;
   late TextEditingController _bufferCtrl;
   late TextEditingController _barcodeCtrl;
+  late TextEditingController _weightCtrl;
 
   List<CategoryModel> _categories = [];
   int? _categoryId;
@@ -62,7 +66,8 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     _priceCtrl = TextEditingController(text: p?.price.toStringAsFixed(0) ?? '');
     _stockCtrl = TextEditingController(text: p?.privateStock.toString() ?? '');
     _bufferCtrl = TextEditingController(text: p?.buffer.toString() ?? '');
-    _barcodeCtrl = TextEditingController(text: p?.barcode ?? '');
+    _barcodeCtrl = TextEditingController(text: p?.barcode ?? widget.initialBarcode ?? '');
+    _weightCtrl = TextEditingController(text: p?.weightGrams?.toString() ?? '');
     _categoryId = p?.categoryId;
     final config = AppConfig.current;
     if (config.fromServer) _defaultBuffer = config.defaultBuffer;
@@ -93,6 +98,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     _stockCtrl.dispose();
     _bufferCtrl.dispose();
     _barcodeCtrl.dispose();
+    _weightCtrl.dispose();
     super.dispose();
   }
 
@@ -162,6 +168,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     // Empty buffer → platform default (server applies it on create; on edit we send the policy value)
     final int? buffer = bufferText.isEmpty ? (isEditing ? _defaultBuffer : null) : int.parse(bufferText);
     final barcode = _barcodeCtrl.text.trim().isEmpty ? null : _barcodeCtrl.text.trim();
+    final weightGrams = int.tryParse(_weightCtrl.text.trim());
 
     if (isEditing) {
       context.read<VendorProductBloc>().add(UpdateVendorProduct(
@@ -173,6 +180,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
             buffer: buffer,
             barcode: barcode,
             categoryId: _categoryId,
+            weightGrams: weightGrams,
             photo: _photo,
             removePhoto: _removePhoto,
           ));
@@ -185,6 +193,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
             buffer: buffer,
             barcode: barcode,
             categoryId: _categoryId,
+            weightGrams: weightGrams,
             photo: _photo,
             galleryPhotos: List.of(_galleryQueue),
           ));
@@ -280,11 +289,6 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                         _approvalBanner(),
                         const SizedBox(height: 16),
                       ],
-                      if (live != null) ...[
-                        _liveStockCard(live),
-                        const SizedBox(height: 16),
-                      ],
-
                       _photoSection(live),
                       const SizedBox(height: 12),
                       _gallerySection(live, bloc),
@@ -372,29 +376,9 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
 
                       const SizedBox(height: 8),
 
-                      // Stock formula + buffer hint
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppColors.secondary.withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Icon(Icons.info_outline, size: 18, color: AppColors.secondary),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Public Stock = Private Stock − Buffer − Reserved.\n'
-                                'The buffer is kept back for walk-in customers. Leave it empty to use the '
-                                'platform default${_defaultBuffer != null ? ' ($_defaultBuffer units)' : ''}.',
-                                style: GoogleFonts.poppins(fontSize: 12, color: AppColors.secondary),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      // Dual-inventory preview (FR01): updates as the numbers are typed;
+                      // reserved units come live from open online orders
+                      _stockPreview(live),
 
                       const SizedBox(height: 16),
 
@@ -407,8 +391,31 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                         prefixIcon: Icons.qr_code_2,
                         suffixIcon: IconButton(
                           tooltip: 'Scan barcode',
-                          icon: const Icon(Icons.qr_code_scanner, color: AppColors.secondary),
+                          icon: Icon(Icons.qr_code_scanner, color: AppColors.secondary),
                           onPressed: _scanBarcode,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      VendraTextField(
+                        label: 'Weight per unit in grams (optional)',
+                        hint: 'e.g., 1000 for a 1 kg bag',
+                        controller: _weightCtrl,
+                        keyboardType: TextInputType.number,
+                        prefixIcon: Icons.scale_outlined,
+                        validator: (v) {
+                          final text = v?.trim() ?? '';
+                          if (text.isEmpty) return null;
+                          final n = int.tryParse(text);
+                          if (n == null || n < 1 || n > 1000000) return 'Whole grams, 1 – 1,000,000';
+                          return null;
+                        },
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6, left: 4),
+                        child: Text(
+                          'Riders see whether a delivery is a standard, multi-bag or heavy parcel before accepting it.',
+                          style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary),
                         ),
                       ),
 
@@ -507,7 +514,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
 
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12)),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -613,7 +620,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.add_photo_alternate_outlined, color: AppColors.secondary),
+                Icon(Icons.add_photo_alternate_outlined, color: AppColors.secondary),
                 Text('Add', style: GoogleFonts.poppins(fontSize: 11, color: AppColors.secondary)),
               ],
             ),
@@ -623,7 +630,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
 
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -707,12 +714,12 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.hourglass_top, color: Color(0xFF8A6D00), size: 20),
+          Icon(Icons.hourglass_top, color: AppColors.warningInk, size: 20),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               'Awaiting admin approval — customers can\'t see this product yet.',
-              style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF8A6D00)),
+              style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.warningInk),
             ),
           ),
         ],
@@ -720,39 +727,31 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     );
   }
 
-  Widget _liveStockCard(ProductModel p) {
-    Widget cell(String label, int value, Color color) => Expanded(
-          child: Column(
-            children: [
-              Text('$value', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700, color: color)),
-              Text(label, style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary)),
-            ],
-          ),
-        );
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              cell('Private', p.privateStock, AppColors.secondary),
-              cell('Buffer', p.buffer, Colors.blueGrey),
-              cell('Reserved', p.reservedQuantity, AppColors.reservedAmber),
-              cell('Public', p.publicStock, AppColors.stockGreen),
-            ],
-          ),
-          if (p.hasReservations)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                '${p.reservedQuantity} unit(s) are reserved for online orders — private stock can\'t go below that.',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(fontSize: 11, color: AppColors.reservedAmber),
+  Widget _stockPreview(ProductModel? live) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([_stockCtrl, _bufferCtrl]),
+      builder: (context, _) {
+        final privateStock = int.tryParse(_stockCtrl.text.trim()) ?? live?.privateStock ?? 0;
+        final buffer = int.tryParse(_bufferCtrl.text.trim()) ?? _defaultBuffer ?? live?.buffer ?? 0;
+        final reserved = live?.reservedQuantity ?? 0;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DualStockMatrix(privateStock: privateStock, buffer: buffer, reserved: reserved),
+            const SizedBox(height: 6),
+            Text(
+              reserved > 0
+                  ? "$reserved unit(s) are reserved for open online orders, so private stock can't go below that."
+                  : 'The buffer is kept back for walk-in customers. Leave it empty to use the platform '
+                      'default${_defaultBuffer != null ? ' ($_defaultBuffer units)' : ''}.',
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                color: reserved > 0 ? AppColors.warningInk : AppColors.textSecondary,
               ),
             ),
-        ],
-      ),
+          ],
+        );
+      },
     );
   }
 }

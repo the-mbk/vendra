@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getDisputes, isAuthError } from "../../lib/api";
 import {
-  PageLoader, ErrorBox, Th, TabButton, EscrowBadge, SearchBox, NoSearchResults, roleColors,
+  PageLoader, ErrorBox, Th, TabButton, EscrowBadge, SearchBox, NoSearchResults, roleColors, resolutionConfig,
   formatRs, formatDate, formatOrderId, humanize, matchesSearch, matchesId,
 } from "../../lib/ui";
 
@@ -19,15 +19,16 @@ function DisputeStatus({ dispute }) {
       </span>
     );
   }
-  const refund = dispute.resolution === "refund";
+  const config = resolutionConfig[dispute.resolution] || resolutionConfig.release;
+  const split = dispute.resolution === "split" && dispute.refundPct != null;
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${
-        refund ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"
-      }`}
+      title={split ? `${dispute.refundPct}% of the items refunded to the customer, the rest released to the store` : undefined}
+      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${config.color}`}
     >
-      <span className={`w-1.5 h-1.5 rounded-full ${refund ? "bg-blue-500" : "bg-emerald-500"}`} />
-      Resolved · {refund ? "Refund" : "Release"}
+      <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
+      Resolved · {config.label}
+      {split && ` ${dispute.refundPct}%`}
     </span>
   );
 }
@@ -99,8 +100,8 @@ export default function DisputesPage() {
             <p className="text-sm font-semibold text-red-800">
               {openCount} dispute{openCount > 1 ? "s" : ""} waiting for a decision
             </p>
-            <p className="text-xs text-red-600">
-              Payment on these orders is frozen until you refund the customer or release it to the store.
+            <p className="text-xs text-red-700">
+              Payment on these orders is frozen until you refund the customer, release it to the store or split it.
             </p>
           </div>
           {filter !== "open" && (
@@ -128,7 +129,7 @@ export default function DisputesPage() {
       </div>
 
       {/* Disputes Table */}
-      <div className="bg-white rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
+      <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full sticky-actions">
             <thead>

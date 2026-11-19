@@ -20,7 +20,7 @@ import '../bloc/store_location_bloc.dart';
 import '../models/store_location_status.dart';
 
 /// Marker colour for a location change waiting for the admin
-const Color _pendingColor = Color(0xFF8E24AA);
+const Color _pendingColor = AppColors.warning;
 
 class VendorLocationScreen extends StatefulWidget {
   final double? currentLat;
@@ -91,7 +91,7 @@ class _VendorLocationScreenState extends State<VendorLocationScreen> {
         if (!mounted) return;
         context.read<StoreLocationBloc>().add(StoreLocationReplaced(status));
         if (applied) {
-          _showSnack('✅ Store location updated successfully!', AppColors.success);
+          _showSnack('Store location updated', AppColors.success);
         } else {
           _showSnack(
             response.data['message'] ??
@@ -156,7 +156,7 @@ class _VendorLocationScreenState extends State<VendorLocationScreen> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.hourglass_top, size: 20, color: Color(0xFF8A6D00)),
+              Icon(Icons.hourglass_top, size: 20, color: AppColors.warningInk),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -164,7 +164,7 @@ class _VendorLocationScreenState extends State<VendorLocationScreen> {
                   children: [
                     Text(
                       'Waiting for admin approval: new location requested $when',
-                      style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF8A6D00)),
+                      style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.warningInk),
                     ),
                     const SizedBox(height: 4),
                     Row(
@@ -266,20 +266,20 @@ class _VendorLocationScreenState extends State<VendorLocationScreen> {
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE3F2FD),
+                    color: AppColors.tint(AppColors.info),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.blue.shade200),
+                    border: Border.all(color: AppColors.info.withValues(alpha: 0.30)),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.info_outline, color: Colors.blue.shade700, size: 22),
+                      Icon(Icons.info_outline, color: AppColors.ink(AppColors.info), size: 22),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           approved
                               ? 'Tap on the map to pin your new shop location. Vendra reviews location changes for approved stores — your current location stays live until an admin approves.'
                               : 'Tap on the map to pin your shop location. Customers will see distance from their location to your shop.',
-                          style: GoogleFonts.poppins(fontSize: 12, color: Colors.blue.shade800),
+                          style: GoogleFonts.poppins(fontSize: 12, color: AppColors.ink(AppColors.info)),
                         ),
                       ),
                     ],
@@ -313,7 +313,7 @@ class _VendorLocationScreenState extends State<VendorLocationScreen> {
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      const Icon(Icons.storefront, size: 16, color: AppColors.secondary),
+                      Icon(Icons.storefront, size: 16, color: AppColors.secondary),
                       const SizedBox(width: 4),
                       Text('Current', style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary)),
                       const SizedBox(width: 14),
@@ -331,7 +331,7 @@ class _VendorLocationScreenState extends State<VendorLocationScreen> {
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(12),
                       boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
                     ),
@@ -353,7 +353,7 @@ class _VendorLocationScreenState extends State<VendorLocationScreen> {
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            const Icon(Icons.location_on, size: 18, color: AppColors.secondary),
+                            Icon(Icons.location_on, size: 18, color: AppColors.secondary),
                             const SizedBox(width: 8),
                             Text(
                               'Lng: ${_selectedLocation!.longitude.toStringAsFixed(6)}',

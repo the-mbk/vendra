@@ -44,6 +44,8 @@ class AddVendorProduct extends VendorProductEvent {
   final int? buffer;
   final String? barcode;
   final int? categoryId;
+  /// Grams per unit; null = not listed
+  final int? weightGrams;
   /// Uploaded after the product is created
   final ProductPhoto? photo;
   /// Extra gallery photos, uploaded after the cover
@@ -56,6 +58,7 @@ class AddVendorProduct extends VendorProductEvent {
     this.buffer,
     this.barcode,
     this.categoryId,
+    this.weightGrams,
     this.photo,
     this.galleryPhotos = const [],
   });
@@ -70,6 +73,8 @@ class UpdateVendorProduct extends VendorProductEvent {
   final int? buffer;
   final String? barcode;
   final int? categoryId;
+  /// Grams per unit; null clears it
+  final int? weightGrams;
   /// New photo to upload after saving (replaces the current one)
   final ProductPhoto? photo;
   /// Delete the current photo after saving (ignored when [photo] is set)
@@ -83,6 +88,7 @@ class UpdateVendorProduct extends VendorProductEvent {
     this.buffer,
     this.barcode,
     this.categoryId,
+    this.weightGrams,
     this.photo,
     this.removePhoto = false,
   });
@@ -284,6 +290,7 @@ class VendorProductBloc extends Bloc<VendorProductEvent, VendorProductState> {
         if (event.buffer != null) 'buffer': event.buffer,
         'barcode': event.barcode,
         'category_id': event.categoryId,
+        'weight_grams': event.weightGrams,
       });
       if (response.data['success'] == true) {
         final productId = toInt((response.data['data'] as Map)['id']);
@@ -322,8 +329,9 @@ class VendorProductBloc extends Bloc<VendorProductEvent, VendorProductState> {
       if (event.privateStock != null) data['private_stock'] = event.privateStock;
       if (event.buffer != null) data['buffer'] = event.buffer;
       if (event.barcode != null) data['barcode'] = event.barcode;
-      // Always sent so the vendor can also clear the category
+      // Always sent so the vendor can also clear the category / weight
       data['category_id'] = event.categoryId;
+      data['weight_grams'] = event.weightGrams;
 
       final response = await _api.put(ApiConfig.vendorProduct(event.id), data: data);
       if (response.data['success'] == true) {

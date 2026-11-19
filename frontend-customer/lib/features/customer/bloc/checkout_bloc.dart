@@ -29,6 +29,9 @@ class CheckoutRequested extends CheckoutEvent {
   final String deliveryType; // delivery | self_pickup
   final String? deliveryAddress;
 
+  /// Optional note for the rider ("gate code 402"), delivery orders only
+  final String? deliveryNote;
+
   /// Required for delivery: the rider's delivery geofence is checked against this pin
   final double? customerLat;
   final double? customerLng;
@@ -37,6 +40,7 @@ class CheckoutRequested extends CheckoutEvent {
     required this.items,
     this.deliveryType = 'delivery',
     this.deliveryAddress,
+    this.deliveryNote,
     this.customerLat,
     this.customerLng,
   });
@@ -46,6 +50,7 @@ class CheckoutRequested extends CheckoutEvent {
         'items': items.map((item) => {'productId': item.product.id, 'quantity': item.quantity}).toList(),
         'deliveryType': deliveryType,
         if (deliveryAddress != null) 'deliveryAddress': deliveryAddress,
+        if (deliveryNote != null && deliveryNote!.trim().isNotEmpty) 'deliveryNote': deliveryNote!.trim(),
         if (customerLat != null && customerLng != null) ...{
           'customerLat': customerLat,
           'customerLng': customerLng,

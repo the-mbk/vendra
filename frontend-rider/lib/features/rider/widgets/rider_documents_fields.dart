@@ -107,7 +107,7 @@ class RiderDocumentsFields extends StatelessWidget {
           const SizedBox(height: 10),
           Row(
             children: [
-              const Icon(Icons.info_outline, size: 16, color: AppColors.textSecondary),
+              Icon(Icons.info_outline, size: 16, color: AppColors.textSecondary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text('No licence or registration needed for a bicycle.',
@@ -188,7 +188,7 @@ class _VehicleOption extends StatelessWidget {
           decoration: BoxDecoration(
             color: selected ? AppColors.secondary.withValues(alpha: 0.08) : Colors.white,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: selected ? AppColors.secondary : Colors.grey.shade300, width: selected ? 1.5 : 1),
+            border: Border.all(color: selected ? AppColors.secondary : AppColors.hairline, width: selected ? 1.5 : 1),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,

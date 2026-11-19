@@ -48,14 +48,11 @@ class ProfileTab extends StatelessWidget {
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
-                  CircleAvatar(
-                    radius: 34,
-                    backgroundColor: AppColors.secondary,
-                    child: Icon(
-                      RiderDocumentsFields.vehicleIcon(home.vehicleType ?? user?.vehicleType),
-                      color: Colors.white,
-                      size: 32,
-                    ),
+                  UserAvatar(
+                    name: user?.fullName,
+                    photoUrl: user?.avatarUrl,
+                    size: 76,
+                    badge: RiderDocumentsFields.vehicleIcon(home.vehicleType ?? user?.vehicleType),
                   ),
                   const SizedBox(height: 12),
                   Text(user?.fullName ?? 'Rider',
@@ -73,6 +70,24 @@ class ProfileTab extends StatelessWidget {
                       if (!home.loading) _pill(_approvalLabel(home.approvalStatus), _approvalColor(home.approvalStatus)),
                     ],
                   ),
+                  if (user != null) ...[
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => EditProfileScreen(
+                            user: user,
+                            // The verified CNIC name stays as approved
+                            nameLocked: home.approvalStatus == 'approved',
+                            onSaved: () => context.read<AuthBloc>().add(AuthUserRefreshRequested()),
+                          ),
+                        ),
+                      ),
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      label: const Text('Edit profile'),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -86,7 +101,7 @@ class ProfileTab extends StatelessWidget {
                 _tile(Icons.phone_outlined, 'Phone', user?.phone ?? '—'),
                 const Divider(height: 1),
                 ListTile(
-                  leading: const Icon(Icons.account_balance_wallet_outlined, color: AppColors.secondary),
+                  leading: Icon(Icons.account_balance_wallet_outlined, color: AppColors.secondary),
                   title: Text('Wallet', style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
                   subtitle: Text(rs(balance),
                       style: GoogleFonts.poppins(
@@ -121,9 +136,11 @@ class ProfileTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
+          const Card(child: ThemeModeTile()),
+          const SizedBox(height: 8),
           Card(
             child: ListTile(
-              leading: const Icon(Icons.lock_reset, color: AppColors.secondary),
+              leading: Icon(Icons.lock_reset, color: AppColors.secondary),
               title: Text('Change password', style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
               trailing: const Icon(Icons.chevron_right),
               onTap: loggingOut
@@ -206,7 +223,7 @@ class _DocumentsCard extends StatelessWidget {
       child: Column(
         children: [
           ListTile(
-            leading: const Icon(Icons.badge_outlined, color: AppColors.secondary),
+            leading: Icon(Icons.badge_outlined, color: AppColors.secondary),
             title: Text('Rider documents', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
             subtitle: Text(
               switch (status) {

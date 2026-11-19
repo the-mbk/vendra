@@ -152,7 +152,7 @@ class _StaffScreenState extends State<StaffScreen> {
                           padding: const EdgeInsets.only(top: 40),
                           child: Column(
                             children: [
-                              Icon(Icons.groups_outlined, size: 56, color: Colors.grey.shade300),
+                              Icon(Icons.groups_outlined, size: 56, color: AppColors.textLight),
                               const SizedBox(height: 8),
                               Text('No staff yet', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
                               Text('Tap Add staff to give someone a PIN.',
@@ -193,7 +193,7 @@ class _StaffScreenState extends State<StaffScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.info_outline, size: 18, color: AppColors.secondary),
+          Icon(Icons.info_outline, size: 18, color: AppColors.secondary),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -218,7 +218,7 @@ class _StaffScreenState extends State<StaffScreen> {
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(14),
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
         ),
@@ -242,7 +242,7 @@ class _StaffScreenState extends State<StaffScreen> {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Text(lastSeen, style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textLight)),
-                  if (!m.isActive) _tag('Removed', Colors.grey.shade700),
+                  if (!m.isActive) _tag('Removed', AppColors.textSecondary),
                   if (m.isActive && m.isLocked) _tag('PIN locked', AppColors.stockRed),
                 ],
               ),
@@ -390,7 +390,7 @@ class _StaffFormSheetState extends State<_StaffFormSheet> {
                   margin: const EdgeInsets.only(bottom: 6),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: _role == r.key ? r.color : Colors.grey.shade300, width: _role == r.key ? 1.5 : 1),
+                    border: Border.all(color: _role == r.key ? r.color : AppColors.hairline, width: _role == r.key ? 1.5 : 1),
                   ),
                   child: ListTile(
                     dense: true,
@@ -401,7 +401,7 @@ class _StaffFormSheetState extends State<_StaffFormSheet> {
                     subtitle: Text(r.summary, style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary)),
                     trailing: Icon(
                       _role == r.key ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                      color: _role == r.key ? r.color : Colors.grey,
+                      color: _role == r.key ? r.color : AppColors.textLight,
                     ),
                   ),
                 ),

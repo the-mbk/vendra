@@ -1,7 +1,9 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Rider App - Location Service (PR03 / FR04 / SSR02)
-// While the rider is online it sends POST /api/rider/location every
-// 10 s. The position comes from the device GPS (geolocator) or — only
+// While the rider is online it sends POST /api/rider/location: every
+// 10 s on a delivery (SRDS PR 03) or a simulated drive, every 30 s while
+// waiting for work (saves battery and data). The server's reply says
+// whether the rider is on a delivery, which picks the interval. The position comes from the device GPS (geolocator) or — only
 // when the server runs in development (`features.manualLocation`) — from
 // "Simulate location": a point the rider taps on a map, optionally moved
 // to the store / customer by a simulated drive. Every position is sent
@@ -58,7 +60,11 @@ class RiderLocationService extends ChangeNotifier {
   @visibleForTesting
   factory RiderLocationService.isolated() => RiderLocationService._internal();
 
+  /// On a delivery (or a simulated drive): PR 03 asks for a fix every 10 s
   static const Duration sendInterval = Duration(seconds: 10);
+
+  /// Online, no delivery: nothing depends on the exact position minute to minute
+  static const Duration idleInterval = Duration(seconds: 30);
   static const LatLng defaultPoint = LatLng(31.5204, 74.3587); // Lahore
 
   static const String manualDisabledMessage = 'Manual location is turned off on this server; using GPS';
@@ -90,6 +96,9 @@ class RiderLocationService extends ChangeNotifier {
   DateTime? _lastSentAt;
   SimulatedDrive? _drive;
 
+  /// The server's last reply: the rider has a delivery in progress
+  bool _onDelivery = false;
+
   /// Manual positions are a development-only feature of the server
   bool get manualAllowed => AppConfig.current.features.manualLocation;
 
@@ -104,6 +113,13 @@ class RiderLocationService extends ChangeNotifier {
   bool get isTracking => _tracking;
   String? get error => _error;
   DateTime? get lastSentAt => _lastSentAt;
+
+  /// How often the position is sent right now
+  Duration get currentInterval => intervalFor(onDelivery: _onDelivery, driving: _drive != null);
+
+  /// 10 s on a delivery or a simulated drive, else 30 s
+  static Duration intervalFor({required bool onDelivery, required bool driving}) =>
+      onDelivery || driving ? sendInterval : idleInterval;
 
   /// The simulated drive in progress, if any
   SimulatedDrive? get drive => _drive;
@@ -223,6 +239,7 @@ class RiderLocationService extends ChangeNotifier {
   /// Stops tracking (offline / logout). Ends any simulated drive.
   void stop() {
     _tracking = false;
+    _onDelivery = false;
     _drive = null;
     _timer?.cancel();
     _timer = null;
@@ -236,8 +253,13 @@ class RiderLocationService extends ChangeNotifier {
     _sending = true;
     try {
       final fix = await currentFix();
-      await _api.post(ApiConfig.riderLocation, data: fix.toJson());
+      final res = await _api.post(ApiConfig.riderLocation, data: fix.toJson());
       _lastSentAt = DateTime.now();
+      final onDelivery = (res.data['data'] as Map?)?['orderId'] != null;
+      if (onDelivery != _onDelivery) {
+        _onDelivery = onDelivery;
+        if (_tracking) _restartTimer(); // switch between the 10 s and 30 s rhythm
+      }
       _error = null;
     } on LocationUnavailable catch (e) {
       _error = e.message;
@@ -297,6 +319,13 @@ class RiderLocationService extends ChangeNotifier {
     );
     if (drive.arrived) return false;
     _drive = drive;
+    // Asynchronously fetch road geometry from OSRM to snap to streets
+    SimulatedDrive.fetchRoadRoute(from, target).then((pts) {
+      if (_drive == drive && pts.length > 2) {
+        drive.setWaypoints(pts);
+        notifyListeners();
+      }
+    });
     // Steps line up with the pings: the first one a full interval from now
     _restartTimer();
     notifyListeners();
@@ -319,7 +348,17 @@ class RiderLocationService extends ChangeNotifier {
 
   void _restartTimer() {
     _timer?.cancel();
-    _timer = Timer.periodic(sendInterval, (_) => _onTick());
+    _timer = Timer.periodic(currentInterval, (_) => _onTick());
+  }
+
+  /// A delivery was just accepted: go to the 10 s rhythm now rather than after the next idle ping
+  void deliveryStarted() {
+    if (_onDelivery) return;
+    _onDelivery = true;
+    if (_tracking) {
+      _restartTimer();
+      unawaited(sendNow());
+    }
   }
 
   void _onTick() {

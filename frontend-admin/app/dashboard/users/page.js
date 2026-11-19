@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { getUsers, resetUserPassword, isAuthError } from "../../lib/api";
-import { Spinner, SearchBox, NoSearchResults, matchesSearch } from "../../lib/ui";
+import { Spinner, SearchBox, NoSearchResults, MaskedPhone, matchesSearch } from "../../lib/ui";
 
 const roleConfig = {
   admin: { label: "Admin", color: "bg-purple-100 text-purple-700", icon: "admin_panel_settings" },
@@ -41,7 +41,7 @@ function TemporaryPasswordPanel({ result, onDismiss }) {
   }
 
   return (
-    <div className="bg-white rounded-2xl border-2 border-primary/30 shadow-md shadow-primary/10 p-5 mb-6">
+    <div className="bg-surface-container-lowest rounded-2xl border-2 border-primary/30 shadow-md shadow-primary/10 p-5 mb-6">
       <div className="flex items-start gap-3">
         <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
           <span className="material-symbols-outlined text-primary text-[22px]">key</span>
@@ -203,7 +203,7 @@ export default function UsersPage() {
           <button
             key={role}
             onClick={() => setRoleFilter(roleFilter === role ? "all" : role)}
-            className={`bg-white rounded-xl p-4 border text-left transition-all ${
+            className={`bg-surface-container-lowest rounded-xl p-4 border text-left transition-all ${
               roleFilter === role
                 ? "border-primary shadow-md shadow-primary/10"
                 : "border-outline-variant/20 hover:border-outline-variant/40"
@@ -232,7 +232,7 @@ export default function UsersPage() {
       </div>
 
       {/* Users Table */}
-      <div className="bg-white rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
+      <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/20 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full sticky-actions">
             <thead>
@@ -268,7 +268,7 @@ export default function UsersPage() {
                         {config.label}
                       </span>
                     </td>
-                    <td className="px-4 py-3.5 text-sm text-on-surface whitespace-nowrap">{user.phone || "—"}</td>
+                    <td className="px-4 py-3.5 whitespace-nowrap"><MaskedPhone phone={user.phone} className="text-sm" /></td>
                     <td className="px-4 py-3.5 text-sm text-on-surface">{user.storeName || <span className="text-outline">—</span>}</td>
                     <td className="px-4 py-3.5 text-xs text-outline whitespace-nowrap">
                       {new Date(user.createdAt).toLocaleDateString("en-PK", {

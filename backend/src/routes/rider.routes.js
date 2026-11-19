@@ -11,6 +11,7 @@ const {
   setStatus,
   postLocation,
   getTasks,
+  getDemand,
   acceptTask,
   arrivedAtStore,
   markPicked,
@@ -30,6 +31,7 @@ router.post('/location', postLocation);
 
 // Task feed
 router.get('/tasks', getTasks);
+router.get('/demand', getDemand);
 router.post('/tasks/:id/accept', acceptTask);
 
 // Delivery state

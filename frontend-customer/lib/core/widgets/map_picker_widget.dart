@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra App - Map Picker Widget
-// Reusable OpenStreetMap-based location picker
+// Reusable location picker on the CARTO basemap (see map_tiles.dart)
 // Used by: vendor location setup, customer delivery address
 // ══════════════════════════════════════════════════════════════
 
@@ -10,6 +10,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../config/app_theme.dart';
 import '../models/map_marker_data.dart';
+import 'map_tiles.dart';
 
 export '../models/map_marker_data.dart';
 
@@ -71,7 +72,7 @@ class _MapPickerWidgetState extends State<MapPickerWidget> {
       height: widget.height.isFinite ? widget.height : null,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: AppColors.hairline),
       ),
       clipBehavior: Clip.antiAlias,
       child: Stack(
@@ -89,11 +90,7 @@ class _MapPickerWidgetState extends State<MapPickerWidget> {
                   : null,
             ),
             children: [
-              // OpenStreetMap tile layer
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.vendra.app',
-              ),
+              MapTiles.layer(),
 
               // Custom markers
               if (widget.markers != null && widget.markers!.isNotEmpty)
@@ -142,7 +139,7 @@ class _MapPickerWidgetState extends State<MapPickerWidget> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.9),
+                color: AppColors.surface.withValues(alpha: 0.92),
                 borderRadius: BorderRadius.circular(8),
                 boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 4)],
               ),
@@ -214,7 +211,7 @@ class _MapPickerWidgetState extends State<MapPickerWidget> {
         width: 32,
         height: 32,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(6),
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 4)],
         ),

@@ -25,4 +25,15 @@ function percentOf(paisa, pct) {
   return Math.round((paisa * Number(pct)) / 100);
 }
 
-module.exports = { toPaisa, paisaToString, paisaToNumber, percentOf };
+/** Integer paisa → "Rs. 6,999" (paisa shown only when there are any), for ledger text */
+function formatRs(paisa) {
+  const rupees = paisa / 100;
+  return `Rs. ${rupees.toLocaleString('en-US', { minimumFractionDigits: paisa % 100 ? 2 : 0, maximumFractionDigits: 2 })}`;
+}
+
+/** "items Rs. 6,999 − 10% commission Rs. 700 = Rs. 6,299": how a store payout was worked out */
+function commissionBreakdown(grossPaisa, pct, commissionPaisa) {
+  return `items ${formatRs(grossPaisa)} − ${Number(pct)}% commission ${formatRs(commissionPaisa)} = ${formatRs(grossPaisa - commissionPaisa)}`;
+}
+
+module.exports = { toPaisa, paisaToString, paisaToNumber, percentOf, formatRs, commissionBreakdown };

@@ -8,6 +8,9 @@ const router = express.Router();
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const {
   resetUserPassword,
+  getAuditLog,
+  getSettlement,
+  runSettlement,
   getDashboardStats,
   getAllVendors,
   approveVendor,
@@ -22,11 +25,13 @@ const {
   getRiders,
   approveRider,
   rejectRider,
+  getFleet,
   getFinance,
   getAllOrders,
+  getOrderDetails,
   getAllUsers,
 } = require('../controllers/admin.controller');
-const { adminListDisputes, adminResolveDispute } = require('../controllers/dispute.controller');
+const { adminListDisputes, adminResolveDispute, adminDisputeDossier } = require('../controllers/dispute.controller');
 const { adminReconciliation, adminListPayments, adminListWithdrawals } = require('../controllers/payment.controller');
 
 // All admin routes require authentication + admin role
@@ -54,12 +59,14 @@ router.put('/policies', updatePolicies);
 
 // Disputes
 router.get('/disputes', adminListDisputes);
+router.get('/disputes/:id/dossier', adminDisputeDossier);
 router.put('/disputes/:id/resolve', adminResolveDispute);
 
 // Riders + finance
 router.get('/riders', getRiders);
 router.put('/riders/:id/approve', approveRider);
 router.put('/riders/:id/reject', rejectRider);
+router.get('/fleet', getFleet);
 router.get('/finance', getFinance);
 router.get('/finance/reconciliation', adminReconciliation);
 router.get('/payments', adminListPayments);
@@ -67,9 +74,15 @@ router.get('/withdrawals', adminListWithdrawals);
 
 // Order monitoring
 router.get('/orders', getAllOrders);
+router.get('/orders/:id', getOrderDetails);
 
 // User management
 router.get('/users', getAllUsers);
 router.put('/users/:id/reset-password', resetUserPassword);
+
+// Audit trail and escrow settlement
+router.get('/audit-log', getAuditLog);
+router.get('/settlement', getSettlement);
+router.post('/settlement/run', runSettlement);
 
 module.exports = router;

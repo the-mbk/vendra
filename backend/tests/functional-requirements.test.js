@@ -422,7 +422,10 @@ describe('FR03 + FR04 + FR07 — rider delivery, geofence, payout, escrow', () =
     const r = await api('GET', `/api/customer/orders/${order.id}/tracking`, undefined, tokens.ahmed);
     assert.equal(r.status, 200);
     assert.ok(r.body.data.path.length >= 5);
-    assert.equal(r.body.data.order.rider.name, 'Bilal Hussain');
+    assert.equal(r.body.data.order.rider.name, 'Bilal H.', 'short name only');
+    // Delivered: the trip stays, but not where the rider is now or their number
+    assert.equal(r.body.data.riderLocation, null);
+    assert.equal(r.body.data.order.rider.phone, null);
   });
 
   test('escrow is released to the vendor after the window, minus commission', async () => {

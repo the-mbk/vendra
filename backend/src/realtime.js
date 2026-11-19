@@ -119,6 +119,9 @@ function emitStock(product) {
   });
 }
 
+/** Sockets connected right now (admin platform health) */
+const connectedClients = () => io?.engine.clientsCount ?? 0;
+
 function closeRealtime() {
   return new Promise((resolve) => (io ? io.close(() => resolve()) : resolve()));
 }
@@ -133,4 +136,5 @@ module.exports = {
   emitToAdmins,
   broadcast,
   emitStock,
+  connectedClients,
 };

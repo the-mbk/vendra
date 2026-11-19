@@ -57,7 +57,7 @@ class StoreBannerCard extends StatelessWidget {
       width: width,
       height: height,
       child: Material(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -65,7 +65,7 @@ class StoreBannerCard extends StatelessWidget {
           child: Ink(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.grey.shade200),
+              border: Border.all(color: AppColors.hairline),
             ),
             child: Stack(
               children: [
@@ -98,7 +98,7 @@ class StoreBannerCard extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.poppins(
-                                fontSize: 11, color: warn ? Colors.orange.shade900 : AppColors.textSecondary)),
+                                fontSize: 11, color: warn ? AppColors.warningInk : AppColors.textSecondary)),
                     ],
                   ),
                 ),

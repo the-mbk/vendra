@@ -11,7 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:vendra_customer/vendra_core.dart';
 
 const _liveGreen = AppColors.stockGreen;
-const _escrowGreen = Color(0xFF2E7D32);
+Color get _escrowGreen => AppColors.successInk;
 
 /// "Only 3 left" / "24 in stock" / "Sold out" — the low-stock signal (FR01)
 String stockLabel(ProductModel p) {
@@ -115,11 +115,11 @@ class LiveStockIndicator extends StatelessWidget {
                   ]),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                  style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
                 ),
               ),
               const SizedBox(width: 3),
-              const Icon(Icons.info_outline, size: 13, color: AppColors.textLight),
+              Icon(Icons.info_outline, size: 13, color: AppColors.textLight),
             ],
           ),
         ),
@@ -150,20 +150,20 @@ class LiveStockIndicator extends StatelessWidget {
                       stockLabel(product),
                       style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: stockColor(product)),
                     ),
-                    const Text(
+                    Text(
                       'Live stock · synced with the store shelf',
                       style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                     ),
                   ],
                 ),
               ),
-              const Padding(
-                padding: EdgeInsets.only(left: 4),
+              Padding(
+                padding: const EdgeInsets.only(left: 4),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text('How?', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.secondary)),
-                    SizedBox(width: 2),
+                    const SizedBox(width: 2),
                     Icon(Icons.info_outline, size: 18, color: AppColors.secondary),
                   ],
                 ),
@@ -185,12 +185,12 @@ class LiveStockNote extends StatelessWidget {
     return InkWell(
       onTap: () => showDualInventoryExplainer(context),
       borderRadius: BorderRadius.circular(8),
-      child: const Padding(
-        padding: EdgeInsets.symmetric(vertical: 4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
           children: [
-            LiveDot(size: 6),
-            SizedBox(width: 4),
+            const LiveDot(size: 6),
+            const SizedBox(width: 4),
             Expanded(
               child: Text(
                 'Live stock · synced with the store shelf',
@@ -247,25 +247,50 @@ Future<void> showDualInventoryExplainer(BuildContext context) {
 // Escrow
 // ══════════════════════════════════════
 
-/// Headline for where the money is, by escrow status (FR03)
+/// Headline for where the money is, by escrow status (FR03): held / frozen / released
 String escrowTrustHeadline(OrderModel order) {
   switch (order.escrowStatus) {
-    case 'held':
-      return order.status == 'delivered'
-          ? 'Funds held by Vendra Escrow until the dispute window closes'
-          : 'Funds held safely by Vendra Escrow until delivery';
     case 'disputed':
-      return 'Funds frozen by Vendra Escrow while your dispute is reviewed';
+      return 'Under admin review — escrow frozen';
     case 'released':
-      return 'Escrow released — the store has been paid';
+      return 'Order completed — payment released to the store';
     case 'refunded':
       return 'Escrow refunded to your Vendra wallet';
     default:
-      return 'Funds held safely by Vendra Escrow until delivery';
+      return 'Payment held safely in Vendra Escrow';
   }
 }
 
-/// "Funds held safely by Vendra Escrow until delivery" with a "How it works" link.
+/// Dual-tone escrow emblem: a tinted shield carrying a solid lock
+class EscrowEmblem extends StatelessWidget {
+  final Color color;
+  final double size;
+  final IconData lock;
+
+  const EscrowEmblem({super.key, required this.color, this.size = 40, this.lock = Icons.lock_rounded});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: AppColors.isDark ? 0.2 : 0.1),
+        borderRadius: BorderRadius.circular(size * 0.3),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Icon(Icons.shield, size: size * 0.78, color: color.withValues(alpha: 0.28)),
+          Icon(lock, size: size * 0.38, color: color),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Payment held safely in Vendra Escrow" with a "How it works" link.
 /// [compact] is a slim single row (e.g. above the pay button).
 class EscrowTrustBadge extends StatelessWidget {
   final bool compact;
@@ -276,7 +301,7 @@ class EscrowTrustBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: const Color(0xFFE8F5E9),
+      color: AppColors.successSurface,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: () => showEscrowExplainer(context),
@@ -285,19 +310,14 @@ class EscrowTrustBadge extends StatelessWidget {
           padding: compact ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8) : const EdgeInsets.all(12),
           child: Row(
             children: [
-              Container(
-                width: compact ? 26 : 38,
-                height: compact ? 26 : 38,
-                decoration: const BoxDecoration(color: _escrowGreen, shape: BoxShape.circle),
-                child: Icon(Icons.lock_rounded, color: Colors.white, size: compact ? 14 : 20),
-              ),
+              EscrowEmblem(color: _escrowGreen, size: compact ? 28 : 40),
               SizedBox(width: compact ? 8 : 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Funds held safely by Vendra Escrow until delivery',
+                      'Payment held safely in Vendra Escrow',
                       style: TextStyle(
                         fontSize: compact ? 12 : 13,
                         fontWeight: FontWeight.w600,
@@ -306,8 +326,8 @@ class EscrowTrustBadge extends StatelessWidget {
                     ),
                     if (!compact)
                       Text(
-                        subtitle ?? 'The store is paid only after delivery and the dispute window. Cancelled? Refunded in full.',
-                        style: const TextStyle(fontSize: 11, height: 1.35, color: AppColors.textSecondary),
+                        subtitle ?? 'The store is paid only after verified doorstep delivery. Cancelled? Refunded in full.',
+                        style: TextStyle(fontSize: 11, height: 1.35, color: AppColors.textSecondary),
                       ),
                   ],
                 ),
@@ -387,7 +407,7 @@ Future<void> _showExplainer(
                   width: 40,
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(color: AppColors.hairline, borderRadius: BorderRadius.circular(2)),
                 ),
               ),
               Row(
@@ -401,7 +421,7 @@ Future<void> _showExplainer(
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(title,
-                        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                   ),
                 ],
               ),
@@ -419,11 +439,11 @@ Future<void> _showExplainer(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(p.title,
-                                style: const TextStyle(
+                                style: TextStyle(
                                     fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                             const SizedBox(height: 2),
                             Text(p.body,
-                                style: const TextStyle(fontSize: 13, height: 1.4, color: AppColors.textSecondary)),
+                                style: TextStyle(fontSize: 13, height: 1.4, color: AppColors.textSecondary)),
                           ],
                         ),
                       ),

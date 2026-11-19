@@ -5,8 +5,11 @@
 //
 // The server is the authority on stock: a cashier may sell the
 // buffer but never units reserved for online orders
-// (sellable = private − reserved). If the sale asks for more, the
-// API answers 409 RESERVED_STOCK and the message is shown as-is.
+// (sellable = private − reserved). Ringing up more than that raises a
+// RESERVATION_CONFLICT notice first (FR02): the cashier either drops
+// the walk-in item or overrides, which cancels and refunds the online
+// order holding those units when the sale completes. If stock changed
+// meanwhile the API still answers 409 RESERVED_STOCK.
 // ══════════════════════════════════════════════════════════════
 
 import 'package:equatable/equatable.dart';
@@ -53,7 +56,22 @@ class PosBarcodeSubmitted extends PosEvent {
   List<Object?> get props => [code];
 }
 
-class PosCompleteSale extends PosEvent {}
+/// Sell [quantity] of [product] even though online orders reserved those units
+class PosOverrideReservation extends PosEvent {
+  final ProductModel product;
+  final int quantity;
+  const PosOverrideReservation(this.product, this.quantity);
+  @override
+  List<Object?> get props => [product.id, quantity];
+}
+
+class PosCompleteSale extends PosEvent {
+  /// Cash handed over by the customer (null = not recorded); the change is shown on the receipt pane
+  final double? cashReceived;
+  const PosCompleteSale({this.cashReceived});
+  @override
+  List<Object?> get props => [cashReceived];
+}
 
 class PosReceiptDismissed extends PosEvent {}
 
@@ -66,6 +84,8 @@ class PosNotice {
   final int? productId;
   final int? sellable;
   final int? reserved;
+  /// RESERVATION_CONFLICT: the quantity the cashier tried to ring up
+  final int? requested;
 
   const PosNotice({
     required this.id,
@@ -75,6 +95,7 @@ class PosNotice {
     this.productId,
     this.sellable,
     this.reserved,
+    this.requested,
   });
 }
 
@@ -87,6 +108,8 @@ class PosState extends Equatable {
   final bool isSubmitting;
   final bool isLookingUp;
   final PosSale? receipt; // last completed sale, shown until dismissed
+  /// Cash tendered for the sale being completed / last completed (for the change line)
+  final double? cashReceived;
   final PosNotice? notice;
 
   const PosState({
@@ -98,6 +121,7 @@ class PosState extends Equatable {
     this.isSubmitting = false,
     this.isLookingUp = false,
     this.receipt,
+    this.cashReceived,
     this.notice,
   });
 
@@ -105,12 +129,14 @@ class PosState extends Equatable {
   int get unitCount => lines.fold(0, (sum, l) => sum + l.quantity);
   bool get isEmpty => lines.isEmpty;
 
-  int quantityOf(int productId) {
+  PosLine? lineFor(int productId) {
     for (final l in lines) {
-      if (l.productId == productId) return l.quantity;
+      if (l.productId == productId) return l;
     }
-    return 0;
+    return null;
   }
+
+  int quantityOf(int productId) => lineFor(productId)?.quantity ?? 0;
 
   PosState copyWith({
     List<PosLine>? lines,
@@ -122,6 +148,8 @@ class PosState extends Equatable {
     bool? isLookingUp,
     PosSale? receipt,
     bool clearReceipt = false,
+    double? cashReceived,
+    bool clearCash = false,
     PosNotice? notice,
   }) {
     return PosState(
@@ -133,13 +161,14 @@ class PosState extends Equatable {
       isSubmitting: isSubmitting ?? this.isSubmitting,
       isLookingUp: isLookingUp ?? this.isLookingUp,
       receipt: clearReceipt ? null : (receipt ?? this.receipt),
+      cashReceived: clearCash ? null : (cashReceived ?? this.cashReceived),
       notice: notice ?? this.notice,
     );
   }
 
   @override
   List<Object?> get props => [
-        lines.map((l) => '${l.productId}x${l.quantity}').join(','),
+        lines.map((l) => '${l.productId}x${l.quantity}${l.overrideReservation ? '!' : ''}').join(','),
         todayCount,
         todayTotal,
         todaySales.length,
@@ -147,6 +176,7 @@ class PosState extends Equatable {
         isSubmitting,
         isLookingUp,
         receipt?.id,
+        cashReceived,
         notice?.id,
       ];
 }
@@ -156,16 +186,35 @@ class PosBloc extends Bloc<PosEvent, PosState> {
   final ApiService _api = ApiService();
   int _noticeId = 0;
 
-  PosBloc() : super(const PosState()) {
+  /// Live stock for a product (VendorProductBloc), to spot reservation conflicts before the server does
+  final ProductModel? Function(int productId)? productLookup;
+
+  PosBloc({this.productLookup}) : super(const PosState()) {
     on<PosStarted>(_onStarted);
     on<PosLoadToday>(_onLoadToday);
     on<PosAddProduct>(_onAdd);
     on<PosSetQuantity>(_onSetQuantity);
     on<PosClearSale>((_, emit) => emit(state.copyWith(lines: const [])));
     on<PosBarcodeSubmitted>(_onBarcode);
+    on<PosOverrideReservation>(_onOverride);
     on<PosCompleteSale>(_onComplete);
     on<PosReceiptDismissed>((_, emit) => emit(state.copyWith(clearReceipt: true)));
   }
+
+  /// Ringing up [quantity] would take units an online order has reserved
+  static bool _conflicts(ProductModel p, int quantity, PosLine? line) =>
+      p.reservedQuantity > 0 && quantity > p.sellableInStore && !(line?.overrideReservation ?? false);
+
+  PosNotice _conflictNotice(ProductModel p, int requested) => PosNotice(
+        id: ++_noticeId,
+        message: 'Only reserved units of ${p.name} remain on the shelf.',
+        isError: true,
+        code: 'RESERVATION_CONFLICT',
+        productId: p.id,
+        sellable: p.sellableInStore,
+        reserved: p.reservedQuantity,
+        requested: requested,
+      );
 
   PosNotice _notice(String message, {bool isError = false, Map<String, dynamic>? data}) => PosNotice(
         id: ++_noticeId,
@@ -200,7 +249,14 @@ class PosBloc extends Bloc<PosEvent, PosState> {
     }
   }
 
-  void _addLine(ProductModel p, Emitter<PosState> emit, {PosNotice? notice}) {
+  void _addLine(ProductModel scanned, Emitter<PosState> emit, {PosNotice? notice}) {
+    final p = productLookup?.call(scanned.id) ?? scanned;
+    final current = state.lineFor(p.id);
+    final requested = (current?.quantity ?? 0) + 1;
+    if (_conflicts(p, requested, current)) {
+      emit(state.copyWith(notice: _conflictNotice(p, requested)));
+      return;
+    }
     final lines = List<PosLine>.from(state.lines);
     final i = lines.indexWhere((l) => l.productId == p.id);
     if (i >= 0) {
@@ -221,9 +277,32 @@ class PosBloc extends Bloc<PosEvent, PosState> {
     if (event.quantity <= 0) {
       lines.removeAt(i);
     } else {
+      final p = productLookup?.call(event.productId);
+      if (event.quantity > lines[i].quantity && p != null && _conflicts(p, event.quantity, lines[i])) {
+        emit(state.copyWith(notice: _conflictNotice(p, event.quantity)));
+        return;
+      }
       lines[i] = lines[i].withQuantity(event.quantity);
     }
     emit(state.copyWith(lines: lines));
+  }
+
+  void _onOverride(PosOverrideReservation event, Emitter<PosState> emit) {
+    final p = event.product;
+    final lines = List<PosLine>.from(state.lines);
+    final i = lines.indexWhere((l) => l.productId == p.id);
+    if (i >= 0) {
+      lines[i] = lines[i].withQuantity(event.quantity, overrideReservation: true);
+    } else {
+      lines.add(PosLine(
+        productId: p.id,
+        name: p.name,
+        unitPrice: p.price,
+        quantity: event.quantity,
+        overrideReservation: true,
+      ));
+    }
+    emit(state.copyWith(lines: lines, clearReceipt: true));
   }
 
   Future<void> _onBarcode(PosBarcodeSubmitted event, Emitter<PosState> emit) async {
@@ -243,10 +322,16 @@ class PosBloc extends Bloc<PosEvent, PosState> {
 
   Future<void> _onComplete(PosCompleteSale event, Emitter<PosState> emit) async {
     if (state.lines.isEmpty || state.isSubmitting) return;
-    emit(state.copyWith(isSubmitting: true));
+    emit(state.copyWith(isSubmitting: true, cashReceived: event.cashReceived, clearCash: event.cashReceived == null));
     try {
       final res = await _api.post(ApiConfig.posSales, data: {
-        'items': state.lines.map((l) => {'productId': l.productId, 'quantity': l.quantity}).toList(),
+        'items': state.lines
+            .map((l) => {
+                  'productId': l.productId,
+                  'quantity': l.quantity,
+                  if (l.overrideReservation) 'overrideReservation': true,
+                })
+            .toList(),
       });
       final sale = PosSale.fromJson(Map<String, dynamic>.from(res.data['data'] as Map));
       emit(state.copyWith(

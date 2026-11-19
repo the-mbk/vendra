@@ -4,6 +4,7 @@ import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { login, saveToken, wasSessionExpired, clearSessionExpired, SESSION_EXPIRED_MESSAGE } from "./lib/api";
 import { usePublicConfig } from "./lib/hooks";
+import { ThemeToggle } from "./lib/ui";
 
 // The "session expired" flag lives in sessionStorage; read it without a hydration mismatch
 const noopSubscribe = () => () => {};
@@ -58,7 +59,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div className="relative min-h-screen bg-background flex items-center justify-center p-4">
+      <ThemeToggle className="absolute top-4 right-4" />
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
@@ -74,7 +76,7 @@ export default function LoginPage() {
         </div>
 
         {/* Login Card */}
-        <div className="bg-white rounded-2xl shadow-lg shadow-primary/5 p-8 border border-outline-variant/30">
+        <div className="bg-surface-container-lowest rounded-2xl shadow-lg shadow-primary/5 p-8 border border-outline-variant/30">
           <h2 className="text-xl font-bold text-on-surface mb-1">Welcome back</h2>
           <p className="text-on-surface-variant text-sm mb-6">Sign in to your admin account</p>
 

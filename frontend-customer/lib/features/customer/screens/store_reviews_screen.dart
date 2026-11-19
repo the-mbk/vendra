@@ -91,7 +91,7 @@ class _StoreReviewsViewState extends State<_StoreReviewsView> {
           }
 
           final header = Container(
-            color: Colors.white,
+            color: AppColors.surface,
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -143,7 +143,7 @@ class _StoreReviewsViewState extends State<_StoreReviewsView> {
               padding: const EdgeInsets.only(top: 48),
               child: Column(
                 children: [
-                  Icon(Icons.rate_review_outlined, size: 56, color: Colors.grey.shade300),
+                  Icon(Icons.rate_review_outlined, size: 56, color: AppColors.textLight),
                   const SizedBox(height: 12),
                   Text('No reviews yet', style: GoogleFonts.poppins(color: AppColors.textSecondary)),
                 ],
@@ -151,7 +151,7 @@ class _StoreReviewsViewState extends State<_StoreReviewsView> {
             );
           } else {
             body = Container(
-              color: Colors.white,
+              color: AppColors.surface,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Column(
                 children: [

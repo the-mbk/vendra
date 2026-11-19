@@ -55,5 +55,14 @@
             <action android:name="android.intent.action.DIAL"/>
             <data android:scheme="tel"/>
         </intent>
+        <!-- Directions to a store for self pickup (Google Maps / any maps app) -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="google.navigation"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="geo"/>
+        </intent>
     </queries>
 </manifest>

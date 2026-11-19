@@ -140,11 +140,96 @@ class _PakistanFlagPainter extends CustomPainter {
 
 enum HeaderIconStyle { top, inline, none }
 
+/// Which app's logo tile: the same V mark on each app's launcher-icon background
+/// (branding/README.md): customer orange, vendor navy, rider white with motion lines
+enum BrandVariant { customer, vendor, rider }
+
+/// The Vendra mark: a geometric V whose right arm stops under an orange "nearby"
+/// dot, on the app's tile. Drawn from the same geometry as branding/svg/*.svg.
+class VendraMark extends StatelessWidget {
+  final BrandVariant variant;
+  final double size;
+  final bool shadow;
+
+  const VendraMark({super.key, required this.variant, this.size = 64, this.shadow = true});
+
+  @override
+  Widget build(BuildContext context) {
+    final (Color tile, Color v, Color dot) = switch (variant) {
+      BrandVariant.customer => (AppColors.primary, Colors.white, AppColors.navy),
+      BrandVariant.vendor => (AppColors.navy, Colors.white, AppColors.primary),
+      BrandVariant.rider => (Colors.white, AppColors.navy, AppColors.primary),
+    };
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: tile,
+        borderRadius: BorderRadius.circular(size * 0.225),
+        border: variant == BrandVariant.rider ? Border.all(color: const Color(0xFFDADCEB), width: size * 0.012) : null,
+        boxShadow: shadow
+            ? [BoxShadow(color: tile.withValues(alpha: 0.30), blurRadius: size * 0.3, offset: Offset(0, size * 0.06))]
+            : null,
+      ),
+      child: CustomPaint(painter: _MarkPainter(v: v, dot: dot, trails: variant == BrandVariant.rider)),
+    );
+  }
+}
+
+class _MarkPainter extends CustomPainter {
+  final Color v;
+  final Color dot;
+  final bool trails;
+  _MarkPainter({required this.v, required this.dot, required this.trails});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // The mark sits in the middle 80 % of the tile, on a 100-unit grid
+    final unit = size.width * 0.8 / 100;
+    canvas.save();
+    canvas.translate(size.width * 0.1, size.height * 0.1 + 5.15 * unit);
+    canvas.scale(unit);
+    final vPath = Path()
+      ..moveTo(16, 20)
+      ..lineTo(35, 20)
+      ..lineTo(50, 56)
+      ..lineTo(59.17, 34)
+      ..lineTo(78.17, 34)
+      ..lineTo(59, 80)
+      ..lineTo(41, 80)
+      ..close();
+    canvas.drawPath(vPath, Paint()..color = v);
+    canvas.drawPath(
+      vPath,
+      Paint()
+        ..color = v
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3
+        ..strokeJoin = StrokeJoin.round,
+    );
+    canvas.drawCircle(const Offset(75.2, 18.3), 8.6, Paint()..color = dot);
+    if (trails) {
+      final line = Paint()
+        ..color = dot
+        ..strokeWidth = 4.2
+        ..strokeCap = StrokeCap.round;
+      canvas.drawLine(const Offset(44, 13.6), const Offset(61, 13.6), line);
+      canvas.drawLine(const Offset(50, 23), const Offset(61, 23), line);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_MarkPainter old) => old.v != v || old.dot != dot || old.trails != trails;
+}
+
 /// Unified Vendra Brand Header for Auth, Splash, and Landing screens
 class VendraBrandHeader extends StatelessWidget {
   final String title;
   final String subtitle;
-  final IconData? icon;
+
+  /// The logo tile shown with the wordmark (null: wordmark only)
+  final BrandVariant? variant;
   final HeaderIconStyle iconStyle;
   final bool isDark;
   final double titleSize;
@@ -154,7 +239,7 @@ class VendraBrandHeader extends StatelessWidget {
     super.key,
     this.title = 'Vendra',
     required this.subtitle,
-    this.icon,
+    this.variant,
     this.iconStyle = HeaderIconStyle.inline,
     this.isDark = false,
     this.titleSize = 34,
@@ -163,33 +248,8 @@ class VendraBrandHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final iconWidget = (icon != null)
-        ? Container(
-            width: iconStyle == HeaderIconStyle.top ? 64 : 42,
-            height: iconStyle == HeaderIconStyle.top ? 64 : 42,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: isDark
-                    ? const [AppColors.primary, Color(0xFFFF8543)]
-                    : const [AppColors.primary, Color(0xFFFA5716)],
-              ),
-              borderRadius: BorderRadius.circular(iconStyle == HeaderIconStyle.top ? 18 : 12),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.primary.withValues(alpha: isDark ? 0.35 : 0.25),
-                  blurRadius: iconStyle == HeaderIconStyle.top ? 20 : 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Icon(
-              icon,
-              color: Colors.white,
-              size: iconStyle == HeaderIconStyle.top ? 34 : 24,
-            ),
-          )
+    final iconWidget = variant != null && iconStyle != HeaderIconStyle.none
+        ? VendraMark(variant: variant!, size: iconStyle == HeaderIconStyle.top ? 72 : 44)
         : null;
 
     final wordmarkRow = Row(

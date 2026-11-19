@@ -194,7 +194,7 @@ class _WithdrawalHistoryListState extends State<WithdrawalHistoryList> {
       );
     }
     return Container(
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14)),
       child: Column(
         children: [
           for (var i = 0; i < _items.length; i++) ...[

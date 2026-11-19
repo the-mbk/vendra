@@ -22,6 +22,7 @@ import '../widgets/handover_code_card.dart';
 import '../widgets/order_review.dart';
 import '../widgets/order_status_widgets.dart';
 import '../widgets/reservation_countdown.dart';
+import 'order_receipt_screen.dart';
 import 'report_issue_screen.dart';
 
 class CustomerOrdersPanel extends StatefulWidget {
@@ -70,68 +71,6 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
 
   void _openReport(OrderModel order) =>
       Navigator.push(context, MaterialPageRoute(builder: (_) => ReportIssueScreen(order: order)));
-
-  void _showInvoice(BuildContext context, OrderModel order) {
-    Widget line(String label, String value, {bool bold = false}) => Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label, style: GoogleFonts.poppins(fontWeight: bold ? FontWeight.w600 : FontWeight.w400, fontSize: 13)),
-            Text(value,
-                style: GoogleFonts.poppins(
-                  fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
-                  color: bold ? AppColors.primary : AppColors.textPrimary,
-                  fontSize: bold ? 18 : 13,
-                )),
-          ],
-        );
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Invoice #VDR-${order.id.toString().padLeft(5, '0')}', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (order.storeName != null)
-                Text(order.storeName!, style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
-              const SizedBox(height: 8),
-              if (order.createdAt != null)
-                Text(DateFormat('MMM dd, yyyy • hh:mm a').format(DateTime.parse(order.createdAt!).toLocal()),
-                    style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textLight)),
-              const Divider(height: 20),
-              ...order.items.map((item) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      children: [
-                        Text('${item.quantity}×', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.secondary)),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(item.productName ?? 'Item', style: GoogleFonts.poppins(fontSize: 13))),
-                        Text(formatRupees(item.total), style: GoogleFonts.poppins(fontSize: 13)),
-                      ],
-                    ),
-                  )),
-              const Divider(height: 16),
-              line('Subtotal', formatRupees(order.subtotal)),
-              const SizedBox(height: 4),
-              line('Delivery fee', order.isDelivery ? formatRupees(order.deliveryFee) : 'Free'),
-              const Divider(height: 16),
-              line('Total', formatRupees(order.totalAmount), bold: true),
-              const SizedBox(height: 8),
-              Text(order.deliveryTypeText, style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
-              const SizedBox(height: 4),
-              EscrowStatusLine(order: order),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
-        ],
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -248,7 +187,7 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
         children: [
           Container(
             padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(color: AppColors.surfaceMuted, borderRadius: BorderRadius.circular(12)),
             child: Row(
               children: [
                 tab(OrderScope.active, state.activeCount > 0 ? 'Active (${state.activeCount})' : 'Active'),
@@ -275,7 +214,7 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
       padding: const EdgeInsets.only(top: 48),
       child: Column(
         children: [
-          Icon(active ? Icons.local_shipping_outlined : Icons.receipt_long_outlined, size: 64, color: Colors.grey.shade300),
+          Icon(active ? Icons.local_shipping_outlined : Icons.receipt_long_outlined, size: 64, color: AppColors.textLight),
           const SizedBox(height: 16),
           Text(active ? 'Nothing on its way right now' : 'No past orders yet',
               style: GoogleFonts.poppins(color: AppColors.textSecondary)),
@@ -338,7 +277,7 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
                     padding: const EdgeInsets.only(top: 2),
                     child: Row(
                       children: [
-                        const Icon(Icons.delivery_dining, size: 14, color: AppColors.secondary),
+                        Icon(Icons.delivery_dining, size: 14, color: AppColors.secondary),
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(
@@ -445,9 +384,9 @@ class _CustomerOrdersPanelState extends State<CustomerOrdersPanel> {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () => _showInvoice(context, order),
+                    onPressed: () => OrderReceiptScreen.open(context, order),
                     icon: const Icon(Icons.receipt_long_outlined, size: 18),
-                    label: const Text('Invoice'),
+                    label: const Text('Receipt'),
                   ),
                 ),
                 const SizedBox(width: 8),

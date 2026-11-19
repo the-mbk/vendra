@@ -10,7 +10,9 @@ class DisputeModel {
   final String issueType;
   final String description;
   final String status; // open | resolved
-  final String? resolution; // refund | release
+  final String? resolution; // refund | release | split
+  /// split: share of the item subtotal refunded to the customer
+  final double? refundPct;
   final String? adminNote;
   final String? raisedByName;
   final String? raisedByRole;
@@ -29,6 +31,7 @@ class DisputeModel {
     required this.description,
     required this.status,
     this.resolution,
+    this.refundPct,
     this.adminNote,
     this.raisedByName,
     this.raisedByRole,
@@ -51,6 +54,7 @@ class DisputeModel {
       description: json['description'] ?? '',
       status: json['status'] ?? 'open',
       resolution: json['resolution'],
+      refundPct: toDoubleOrNull(json['refundPct']),
       adminNote: json['adminNote'],
       raisedByName: raisedBy['name'],
       raisedByRole: raisedBy['role'],
@@ -75,6 +79,7 @@ class DisputeModel {
     'quality_issue': 'Quality not as described',
     'rider_issue': 'Problem with the rider',
     'customer_issue': 'Problem with the customer',
+    'customer_unavailable': 'Customer unavailable at handover',
     'other': 'Something else',
   };
 
@@ -83,6 +88,10 @@ class DisputeModel {
   String get outcomeText {
     if (status == 'open') return 'Under review — payment is on hold';
     if (resolution == 'refund') return 'Resolved — refunded to the customer';
+    if (resolution == 'split') {
+      final pct = refundPct == null ? '' : ' ${refundPct!.toStringAsFixed(0)}%';
+      return 'Resolved — split:$pct refunded, the rest released to the store';
+    }
     return 'Resolved — payment released to the store';
   }
 }

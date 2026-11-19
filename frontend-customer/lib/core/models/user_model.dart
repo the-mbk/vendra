@@ -7,6 +7,9 @@ class UserModel {
   final String fullName;
   final String email;
   final String? phone;
+
+  /// Profile photo (relative /uploads path); null when not set
+  final String? avatarUrl;
   final String role;
   final double walletBalance;
   final int? vendorId;
@@ -41,6 +44,7 @@ class UserModel {
     required this.fullName,
     required this.email,
     this.phone,
+    this.avatarUrl,
     required this.role,
     this.walletBalance = 0.0,
     this.vendorId,
@@ -70,6 +74,7 @@ class UserModel {
       fullName: json['fullName'] ?? json['full_name'] ?? '',
       email: json['email'] ?? '',
       phone: json['phone'],
+      avatarUrl: json['avatarUrl'],
       role: json['role'] ?? 'customer',
       walletBalance: _toDouble(json['walletBalance'] ?? json['wallet_balance']),
       vendorId: json['vendorId'] ?? json['vendor_id'],
@@ -132,6 +137,7 @@ class UserModel {
       fullName: fullName,
       email: email,
       phone: phone,
+      avatarUrl: avatarUrl,
       role: role,
       walletBalance: walletBalance ?? this.walletBalance,
       vendorId: vendorId,

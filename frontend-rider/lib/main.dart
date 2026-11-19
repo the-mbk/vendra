@@ -36,11 +36,13 @@ Future<void> main() async {
   // app starts on production-safe defaults (GPS only) and retries when needed
   await AppConfig.load(role: 'rider');
   AppConfig.startLiveUpdates(); // admin policy changes reach the app straight away
-  runApp(const VendraRiderApp());
+  runApp(VendraRiderApp(themeMode: await ThemeCubit.loadSaved()));
 }
 
 class VendraRiderApp extends StatefulWidget {
-  const VendraRiderApp({super.key});
+  /// The saved light / dark / system choice
+  final ThemeMode themeMode;
+  const VendraRiderApp({super.key, this.themeMode = ThemeMode.system});
 
   @override
   State<VendraRiderApp> createState() => _VendraRiderAppState();
@@ -51,6 +53,7 @@ class _VendraRiderAppState extends State<VendraRiderApp> {
   /// (home shell, active delivery, forced password change…)
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   final AuthBloc _authBloc = AuthBloc();
+  late final _themeCubit = ThemeCubit(widget.themeMode);
 
   /// Several requests can 401 at once; only the first one signs out
   bool _sessionExpiring = false;
@@ -70,6 +73,7 @@ class _VendraRiderAppState extends State<VendraRiderApp> {
     if (ApiService.onSessionExpired == _onSessionExpired) ApiService.onSessionExpired = null;
     _locationNotices?.cancel();
     _authBloc.close();
+    _themeCubit.close();
     super.dispose();
   }
 
@@ -114,52 +118,57 @@ class _VendraRiderAppState extends State<VendraRiderApp> {
     return MultiBlocProvider(
       providers: [
         BlocProvider<AuthBloc>.value(value: _authBloc),
+        BlocProvider<ThemeCubit>.value(value: _themeCubit),
       ],
-      child: MaterialApp(
-        title: 'Vendra Rider',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.lightTheme,
-        navigatorKey: _navigatorKey,
-        scaffoldMessengerKey: NotificationCenter.messengerKey,
-        // "DEVELOPMENT" badge while the backend runs in development mode
-        builder: (context, child) => DevBanner(
-          child: BlocListener<AuthBloc, AuthState>(
-            // Signed-in → signed-out only (splash's own "no session" result is handled there)
-            listenWhen: (prev, curr) => curr is Unauthenticated && (prev is Authenticated || prev is AuthLoading),
-            listener: _onSignedOut,
-            child: child ?? const SizedBox.shrink(),
-          ),
+      child: BlocBuilder<ThemeCubit, ThemeMode>(
+        builder: (context, themeMode) => MaterialApp(
+          title: 'Vendra Rider',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: themeMode,
+          navigatorKey: _navigatorKey,
+          scaffoldMessengerKey: NotificationCenter.messengerKey,
+          // "DEVELOPMENT" badge while the backend runs in development mode
+          builder: (context, child) => ThemeScope(child: DevBanner(
+            child: BlocListener<AuthBloc, AuthState>(
+              // Signed-in → signed-out only (splash's own "no session" result is handled there)
+              listenWhen: (prev, curr) => curr is Unauthenticated && (prev is Authenticated || prev is AuthLoading),
+              listener: _onSignedOut,
+              child: ConnectionBanner(child: child ?? const SizedBox.shrink()),
+            ),
+          )),
+
+          initialRoute: AppRoutes.splash,
+
+          routes: {
+            AppRoutes.splash: (context) => const SplashScreen(),
+            AppRoutes.login: (context) => const LoginScreen(),
+            AppRoutes.signup: (context) => const SignupScreen(),
+            // Home + earnings blocs live with the signed-in shell and are closed on logout
+            AppRoutes.riderHome: (context) => MultiBlocProvider(
+                  providers: [
+                    BlocProvider<RiderHomeBloc>(create: (_) => RiderHomeBloc()..add(RiderHomeStarted())),
+                    BlocProvider<EarningsBloc>(create: (_) => EarningsBloc()),
+                  ],
+                  child: const RiderHomeScreen(),
+                ),
+          },
+
+          onGenerateRoute: (settings) {
+            if (settings.name == AppRoutes.activeDelivery) {
+              final orderId = settings.arguments as int?;
+              return MaterialPageRoute<bool>(
+                settings: settings,
+                builder: (context) => BlocProvider<DeliveryBloc>(
+                  create: (_) => DeliveryBloc()..add(DeliveryLoadRequested(orderId: orderId)),
+                  child: const ActiveDeliveryScreen(),
+                ),
+              );
+            }
+            return null;
+          },
         ),
-
-        initialRoute: AppRoutes.splash,
-
-        routes: {
-          AppRoutes.splash: (context) => const SplashScreen(),
-          AppRoutes.login: (context) => const LoginScreen(),
-          AppRoutes.signup: (context) => const SignupScreen(),
-          // Home + earnings blocs live with the signed-in shell and are closed on logout
-          AppRoutes.riderHome: (context) => MultiBlocProvider(
-                providers: [
-                  BlocProvider<RiderHomeBloc>(create: (_) => RiderHomeBloc()..add(RiderHomeStarted())),
-                  BlocProvider<EarningsBloc>(create: (_) => EarningsBloc()),
-                ],
-                child: const RiderHomeScreen(),
-              ),
-        },
-
-        onGenerateRoute: (settings) {
-          if (settings.name == AppRoutes.activeDelivery) {
-            final orderId = settings.arguments as int?;
-            return MaterialPageRoute<bool>(
-              settings: settings,
-              builder: (context) => BlocProvider<DeliveryBloc>(
-                create: (_) => DeliveryBloc()..add(DeliveryLoadRequested(orderId: orderId)),
-                child: const ActiveDeliveryScreen(),
-              ),
-            );
-          }
-          return null;
-        },
       ),
     );
   }

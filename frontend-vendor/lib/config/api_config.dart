@@ -38,6 +38,10 @@ class ApiConfig {
   static const String vendorReviews = '/api/vendor/reviews'; // paged
   static String vendorProductByBarcode(String code) =>
       '/api/vendor/products/barcode/${Uri.encodeComponent(code)}';
+  /// Goods received: POST { quantity, note? } adds units to the shelf (FR01)
+  static String vendorProductStockIn(int id) => '/api/vendor/products/$id/stock-in';
+  /// Open online orders holding units of a product (POS walk-in conflict, FR02)
+  static String vendorProductReservations(int id) => '/api/vendor/products/$id/reservations';
 
   // ──────────────────────────────────────
   // Vendor Store Pictures (owner only)
@@ -52,6 +56,8 @@ class ApiConfig {
   // ──────────────────────────────────────
   static const String posSales = '/api/vendor/pos/sales';
   static String posSale(int id) => '/api/vendor/pos/sales/$id'; // the sale's receipt
+  /// Owner: walk-in POS vs online revenue, today and last 30 days
+  static const String vendorRevenue = '/api/vendor/revenue';
   static const String receiptSettings = '/api/vendor/receipt-settings';
 
   // ──────────────────────────────────────
@@ -73,6 +79,8 @@ class ApiConfig {
   static String scanPackOrder(int id) => '/api/vendor/orders/$id/scan'; // { barcode }
   static String prepareOrder(int id) => '/api/vendor/orders/$id/prepare';
   static String readyForPickupOrder(int id) => '/api/vendor/orders/$id/ready-for-pickup';
+  /// The rider checked in at the counter and the store handed the parcel over
+  static String handOverToRider(int id) => '/api/vendor/orders/$id/hand-over';
   static String deliverOrder(int id) => '/api/vendor/orders/$id/deliver';
 
   // ──────────────────────────────────────

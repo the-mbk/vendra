@@ -7,15 +7,18 @@
 const pool = require('../db');
 const { lockProducts, applyStockChange, releaseOrderLocks, consumeOrderLocks, computePublicStock } = require('../services/inventory.service');
 const { refundEscrow, scheduleEscrowRelease } = require('../services/orderSettlement.service');
-const { announceOrder, notify, notifyAdmins } = require('../services/notification.service');
+const { announceOrder, notifyAdmins } = require('../services/notification.service');
 const { getPolicies } = require('../services/policy.service');
-const { emitToRiders, emitStock, broadcast } = require('../realtime');
+const { emitStock, broadcast } = require('../realtime');
+const { broadcastTask } = require('../services/riderDispatch.service');
 const { httpError, asyncHandler, withTransaction, intParam, paging, pageOf } = require('../utils/http');
 const { productImageUrl, removeProductImage } = require('../services/storage.service');
 const { verifyHandoverOtp, withHandoverOtp } = require('../services/handoverOtp.service');
 const { formatReview } = require('../services/review.service');
+const { recordTrustEvent } = require('../services/trust.service');
 const { haversineKm, isValidCoordinate } = require('../utils/geo');
 const { toPaisa, paisaToString, paisaToNumber } = require('../utils/money');
+const { shortName, contactWhile } = require('../utils/privacy');
 
 const MAX_GALLERY_PHOTOS = 5; // besides the cover photo
 
@@ -30,6 +33,14 @@ const staffIdOf = (req) => req.user.staff?.id ?? null;
 function wholeNumber(value, field, { min = 0 } = {}) {
   const n = Number(value);
   if (!Number.isInteger(n) || n < min) throw httpError(400, `${field} must be a whole number of at least ${min}.`);
+  return n;
+}
+
+/** Optional parcel weight in grams: empty → null (unknown), otherwise a whole number ≥ 1 */
+function weightGrams(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > 1000000) throw httpError(400, 'weight_grams must be a whole number of grams (1 – 1,000,000).');
   return n;
 }
 
@@ -54,7 +65,7 @@ const PRODUCT_SELECT = `
 // PRODUCTS
 // ──────────────────────────────────────
 
-/** POST /api/vendor/products  Body: { name, description, price, private_stock, buffer?, barcode?, category_id? } */
+/** POST /api/vendor/products  Body: { name, description, price, private_stock, buffer?, barcode?, category_id?, weight_grams? } */
 const createProduct = asyncHandler(async (req, res) => {
   const vendorId = vendorIdOf(req);
   const { name, description, barcode } = req.body;
@@ -64,6 +75,7 @@ const createProduct = asyncHandler(async (req, res) => {
     throw httpError(400, 'Name, a valid price and private_stock are required.');
   }
   const privateStock = wholeNumber(req.body.private_stock, 'private_stock');
+  const weight = weightGrams(req.body.weight_grams);
 
   const product = await withTransaction(async (client, afterCommit) => {
     const policies = await getPolicies(client);
@@ -75,11 +87,11 @@ const createProduct = asyncHandler(async (req, res) => {
     const publicStock = computePublicStock({ private_stock: privateStock, buffer, reserved_quantity: 0 });
 
     const inserted = (await client.query(
-      `INSERT INTO products (vendor_id, name, description, price, private_stock, public_stock, buffer, barcode, category_id, is_approved)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO products (vendor_id, name, description, price, private_stock, public_stock, buffer, barcode, category_id, is_approved, weight_grams)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
       [vendorId, name, description || null, paisaToString(toPaisa(price)), privateStock, publicStock, buffer,
-        barcode || null, categoryId, isApproved]
+        barcode || null, categoryId, isApproved, weight]
     )).rows[0];
 
     await client.query(
@@ -123,7 +135,9 @@ const getProductByBarcode = asyncHandler(async (req, res) => {
     `${PRODUCT_SELECT} WHERE p.vendor_id = $1 AND p.barcode = $2 AND p.is_active = true LIMIT 1`,
     [vendorId, req.params.code]
   );
-  if (r.rows.length === 0) throw httpError(404, `No product with barcode ${req.params.code} in your store.`);
+  if (r.rows.length === 0) {
+    throw httpError(404, `No product with barcode ${req.params.code} in your store.`, { code: 'UNKNOWN_BARCODE' });
+  }
   res.json({ success: true, data: r.rows[0] });
 });
 
@@ -155,12 +169,14 @@ const updateProduct = asyncHandler(async (req, res) => {
       price = paisaToString(toPaisa(price));
     }
     const categoryId = req.body.category_id !== undefined ? await assertCategory(client, req.body.category_id) : current.category_id;
+    // Sent empty / null → weight cleared; not sent → unchanged
+    const weight = req.body.weight_grams !== undefined ? weightGrams(req.body.weight_grams) : current.weight_grams;
 
     await client.query(
       `UPDATE products SET name = COALESCE($1, name), description = COALESCE($2, description),
-              price = COALESCE($3, price), barcode = COALESCE($4, barcode), category_id = $5
-       WHERE id = $6`,
-      [name || null, description ?? null, price, barcode || null, categoryId, productId]
+              price = COALESCE($3, price), barcode = COALESCE($4, barcode), category_id = $5, weight_grams = $6
+       WHERE id = $7`,
+      [name || null, description ?? null, price, barcode || null, categoryId, weight, productId]
     );
 
     const change = privateStock - current.private_stock;
@@ -176,6 +192,36 @@ const updateProduct = asyncHandler(async (req, res) => {
   });
 
   res.json({ success: true, data: product });
+});
+
+/**
+ * POST /api/vendor/products/:id/stock-in  Body: { quantity, note? }
+ * Goods received (FR01): adds units to the shelf, usually after scanning the barcode.
+ * An increment, not a new total, so a sale or checkout at the same moment is never
+ * overwritten; logged as stock_in, and online stock follows (shelf − buffer − reserved).
+ */
+const stockIn = asyncHandler(async (req, res) => {
+  const vendorId = vendorIdOf(req);
+  const productId = intParam(req.params.id);
+  const quantity = wholeNumber(req.body.quantity, 'quantity', { min: 1 });
+  if (quantity > 100000) throw httpError(400, 'quantity can be at most 100,000 per delivery.');
+  const note = typeof req.body.note === 'string' ? req.body.note.trim().slice(0, 200) : '';
+
+  const product = await withTransaction(async (client, afterCommit) => {
+    const current = (await lockProducts(client, [productId])).get(productId);
+    if (!current || current.vendor_id !== vendorId || !current.is_active) throw httpError(404, 'Product not found');
+    await applyStockChange(client, afterCommit, current, {
+      privateStock: current.private_stock + quantity,
+      ledger: { type: 'stock_in', quantityChange: quantity, notes: note || 'Stock received' },
+    });
+    return (await client.query(`${PRODUCT_SELECT} WHERE p.id = $1`, [productId])).rows[0];
+  });
+
+  res.json({
+    success: true,
+    message: `${quantity} × ${product.name} added. Shelf ${product.private_stock}, online ${product.public_stock}.`,
+    data: product,
+  });
 });
 
 /** DELETE /api/vendor/products/:id — soft delete, refused while units are reserved */
@@ -363,10 +409,101 @@ const getVendorReviews = asyncHandler(async (req, res) => {
 // WALK-IN POS SALES (FR01 / FR02)
 // ──────────────────────────────────────
 
+/** Online orders whose reserved units are still on the shelf (not packed yet), so a walk-in sale may take them */
+const OVERRIDABLE_STATUSES = ['pending', 'confirmed'];
+
 /**
- * POST /api/vendor/pos/sales  Body: { items: [{ productId, quantity }] }
+ * GET /api/vendor/products/:id/reservations — the open online orders holding units of
+ * this product, so the POS can say which order a walk-in sale would cancel.
+ */
+const getProductReservations = asyncHandler(async (req, res) => {
+  const vendorId = vendorIdOf(req);
+  const productId = intParam(req.params.id);
+  const r = await pool.query(
+    `SELECT l.order_id, l.quantity, o.status, o.created_at, u.full_name AS customer_name
+     FROM inventory_locks l
+     JOIN orders o ON o.id = l.order_id
+     JOIN users u ON u.id = o.customer_id
+     WHERE l.product_id = $1 AND l.status = 'active' AND o.vendor_id = $2
+     ORDER BY o.created_at DESC, o.id DESC`,
+    [productId, vendorId]
+  );
+  res.json({
+    success: true,
+    data: r.rows.map((x) => ({
+      orderId: x.order_id,
+      quantity: x.quantity,
+      status: x.status,
+      customerName: shortName(x.customer_name),
+      createdAt: x.created_at,
+      overridable: OVERRIDABLE_STATUSES.includes(x.status),
+    })),
+  });
+});
+
+/**
+ * A walk-in customer is buying units that online orders have reserved (FR02 conflict).
+ * Cancels and refunds just enough of the newest not-yet-packed orders to free them.
+ * Must run before the products are locked (lock order: order rows → products).
+ * @param shortfall Map productId → units still needed for the walk-in sale
+ * @returns ids of the orders cancelled
+ */
+async function cancelOrdersForWalkIn(client, afterCommit, vendorId, shortfall, cashierUserId) {
+  if (shortfall.size === 0) return [];
+  const productIds = [...shortfall.keys()];
+  const candidates = (await client.query(
+    `SELECT id, created_at FROM orders
+     WHERE vendor_id = $1 AND status = ANY($2::order_status[])
+       AND EXISTS (SELECT 1 FROM inventory_locks l WHERE l.order_id = orders.id AND l.status = 'active' AND l.product_id = ANY($3::int[]))
+     ORDER BY id FOR UPDATE`,
+    [vendorId, OVERRIDABLE_STATUSES, productIds]
+  )).rows;
+  if (candidates.length === 0) return [];
+
+  const locks = (await client.query(
+    `SELECT order_id, product_id, quantity FROM inventory_locks
+     WHERE order_id = ANY($1::int[]) AND status = 'active' AND product_id = ANY($2::int[])`,
+    [candidates.map((o) => o.id), productIds]
+  )).rows;
+
+  // Newest orders first: the customer who ordered most recently loses the race
+  const newestFirst = [...candidates].sort((a, b) => b.created_at - a.created_at || b.id - a.id);
+  const needed = new Map(shortfall);
+  const cancel = [];
+  for (const order of newestFirst) {
+    if ([...needed.values()].every((n) => n <= 0)) break;
+    const held = locks.filter((l) => l.order_id === order.id);
+    if (!held.some((l) => (needed.get(l.product_id) || 0) > 0)) continue;
+    cancel.push(order.id);
+    for (const l of held) needed.set(l.product_id, (needed.get(l.product_id) || 0) - l.quantity);
+  }
+
+  const reason = 'Sold out at the store';
+  for (const orderId of cancel) {
+    await releaseOrderLocks(client, afterCommit, orderId, 'Reservation released for a walk-in sale');
+    await client.query(
+      `UPDATE orders SET status = 'cancelled', cancellation_reason = $2, updated_at = NOW() WHERE id = $1`,
+      [orderId, reason]
+    );
+    // Penalty audit: the admin sees how often a store drops online customers for walk-ins
+    await recordTrustEvent(client, { kind: 'walk_in_override', orderId, vendorId, userId: cashierUserId });
+    const { refund } = await refundEscrow(client, afterCommit, orderId, { note: `Escrow refund for Order #${orderId}: ${reason.toLowerCase()}` });
+    await announceOrder(client, afterCommit, orderId, 'order_cancelled', {
+      customer: {
+        title: `Order #${orderId} cancelled`,
+        body: `The store sold its last units at the counter. Rs. ${refund.toFixed(2)} refunded to your wallet.`,
+      },
+    });
+  }
+  return cancel;
+}
+
+/**
+ * POST /api/vendor/pos/sales  Body: { items: [{ productId, quantity, overrideReservation? }] }
  * A cashier may sell from the buffer, but never units reserved for online orders:
  *   sellable = private_stock − reserved_quantity
+ * unless the cashier chose to override: then the newest not-yet-packed online orders
+ * holding the missing units are cancelled and refunded first (FR02 conflict).
  */
 const createPosSale = asyncHandler(async (req, res) => {
   const vendorId = vendorIdOf(req);
@@ -374,12 +511,29 @@ const createPosSale = asyncHandler(async (req, res) => {
   if (!Array.isArray(items) || items.length === 0) throw httpError(400, 'Add at least one item to the sale.');
 
   const merged = new Map();
+  const overrides = new Set();
   for (const item of items) {
     const productId = intParam(item?.productId, 'productId');
     merged.set(productId, (merged.get(productId) || 0) + wholeNumber(item?.quantity, 'quantity', { min: 1 }));
+    if (item?.overrideReservation === true) overrides.add(productId);
   }
 
   const sale = await withTransaction(async (client, afterCommit) => {
+    let cancelledOrders = [];
+    if (overrides.size > 0) {
+      // Read (unlocked) how many units each overridden line is short; the orders are locked next
+      const current = (await client.query(
+        'SELECT id, vendor_id, private_stock, reserved_quantity FROM products WHERE id = ANY($1::int[])',
+        [[...overrides]]
+      )).rows;
+      const shortfall = new Map();
+      for (const p of current) {
+        const missing = merged.get(p.id) - (p.private_stock - p.reserved_quantity);
+        if (p.vendor_id === vendorId && missing > 0) shortfall.set(p.id, missing);
+      }
+      cancelledOrders = await cancelOrdersForWalkIn(client, afterCommit, vendorId, shortfall, req.user.userId);
+    }
+
     const products = await lockProducts(client, [...merged.keys()]);
     let total = 0;
     const lines = [];
@@ -426,11 +580,21 @@ const createPosSale = asyncHandler(async (req, res) => {
       });
     }
 
-    return { id: saleRow.id, total_amount: paisaToNumber(total), created_at: saleRow.created_at, items: soldItems };
+    return {
+      id: saleRow.id, total_amount: paisaToNumber(total), created_at: saleRow.created_at, items: soldItems,
+      cancelled_orders: cancelledOrders,
+    };
   });
 
   sale.receipt = await receiptFor(pool, vendorId, sale.id);
-  res.status(201).json({ success: true, message: `Sale #${sale.id} completed.`, data: sale });
+  const cancelled = sale.cancelled_orders.length;
+  res.status(201).json({
+    success: true,
+    message: cancelled
+      ? `Sale #${sale.id} completed. Online order${cancelled === 1 ? '' : 's'} ${sale.cancelled_orders.map((id) => `#${id}`).join(', ')} cancelled and refunded.`
+      : `Sale #${sale.id} completed.`,
+    data: sale,
+  });
 });
 
 const SALE_SELECT = `
@@ -504,6 +668,59 @@ const getPosSale = asyncHandler(async (req, res) => {
   res.json({ success: true, data: receipt });
 });
 
+/**
+ * GET /api/vendor/revenue — the store's two channels side by side (SRDS §2.1):
+ * walk-in POS sales vs online orders whose escrow has been released to the store
+ * (after commission), today and over the last 30 days, plus what is still in escrow.
+ */
+const getRevenueSplit = asyncHandler(async (req, res) => {
+  const vendorId = vendorIdOf(req);
+  const r = await pool.query(
+    `WITH pos AS (
+       SELECT COALESCE(SUM(total_amount) FILTER (WHERE created_at::date = CURRENT_DATE), 0) AS today,
+              COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE) AS today_count,
+              COALESCE(SUM(total_amount), 0) AS month,
+              COUNT(*) AS month_count
+       FROM pos_sales WHERE vendor_id = $1 AND created_at >= NOW() - INTERVAL '30 days'
+     ), online AS (
+       SELECT COALESCE(SUM(wl.amount) FILTER (WHERE wl.created_at::date = CURRENT_DATE), 0) AS today,
+              COUNT(*) FILTER (WHERE wl.created_at::date = CURRENT_DATE) AS today_count,
+              COALESCE(SUM(wl.amount), 0) AS month,
+              COUNT(*) AS month_count
+       FROM wallet_ledger wl JOIN orders o ON o.id = wl.order_id
+       WHERE o.vendor_id = $1 AND wl.transaction_type = 'escrow_release' AND wl.created_at >= NOW() - INTERVAL '30 days'
+     ), escrow AS (
+       SELECT COALESCE(SUM(subtotal), 0) AS amount, COUNT(*) AS orders,
+              MIN(escrow_release_due_at) FILTER (WHERE escrow_status = 'held') AS next_release_at
+       FROM orders WHERE vendor_id = $1 AND status <> 'cancelled' AND escrow_status IN ('held', 'disputed')
+     )
+     SELECT pos.today AS pos_today, pos.today_count AS pos_today_count, pos.month AS pos_month, pos.month_count AS pos_month_count,
+            online.today AS online_today, online.today_count AS online_today_count,
+            online.month AS online_month, online.month_count AS online_month_count,
+            escrow.amount AS escrow_amount, escrow.orders AS escrow_orders,
+            escrow.next_release_at AS escrow_next_release_at
+     FROM pos, online, escrow`,
+    [vendorId]
+  );
+  const x = r.rows[0];
+  const rs = (v) => paisaToNumber(toPaisa(v));
+  res.json({
+    success: true,
+    data: {
+      today: {
+        walkIn: rs(x.pos_today), walkInCount: Number(x.pos_today_count),
+        online: rs(x.online_today), onlineCount: Number(x.online_today_count),
+      },
+      last30Days: {
+        walkIn: rs(x.pos_month), walkInCount: Number(x.pos_month_count),
+        online: rs(x.online_month), onlineCount: Number(x.online_month_count),
+      },
+      // nextReleaseAt: the earliest delivered order whose dispute window ends (null while none is delivered yet)
+      inEscrow: { amount: rs(x.escrow_amount), orders: Number(x.escrow_orders), nextReleaseAt: x.escrow_next_release_at },
+    },
+  });
+});
+
 const RECEIPT_FIELDS = {
   receiptHeader: ['receipt_header', 200],
   receiptFooter: ['receipt_footer', 200],
@@ -569,11 +786,21 @@ const VENDOR_ORDER_SELECT = `
 
 const FINAL_STATUSES = ['delivered', 'cancelled'];
 
-/** The handover code is the customer's alone: never send it (or its counters) to the store */
+/**
+ * The handover code is the customer's alone: never send it (or its counters) to the store.
+ * The store sees the customer's short name, and phone numbers only while the order is open.
+ */
 function vendorOrderView(o) {
   if (!o) return o;
   const { delivery_otp: _otp, otp_failed_attempts: _tries, otp_locked_until: _lock, ...rest } = o;
-  return { ...rest, otp_required: Boolean(_otp) && !o.otp_verified_at };
+  return {
+    ...rest,
+    customer_name: shortName(o.customer_name),
+    customer_phone: contactWhile(o.status, o.customer_phone),
+    rider_name: shortName(o.rider_name),
+    rider_phone: contactWhile(o.status, o.rider_phone),
+    otp_required: Boolean(_otp) && !o.otp_verified_at,
+  };
 }
 
 /**
@@ -751,7 +978,8 @@ const markOrderPreparing = asyncHandler(async (req, res) => {
         code: 'PACKING_INCOMPLETE', missing,
       });
     }
-    const o = await transition(client, orderId, vendorId, 'confirmed', 'packed', `, packed_by_staff_id = ${staffIdOf(req) ?? 'NULL'}`);
+    const o = await transition(client, orderId, vendorId, 'confirmed', 'packed',
+      `, packed_by_staff_id = ${staffIdOf(req) ?? 'NULL'}, packed_at = NOW()`);
     await announceOrder(client, afterCommit, orderId, 'order_packed', {
       customer: { title: `Order #${orderId} packed`, body: 'Your items are packed.' },
     });
@@ -759,36 +987,6 @@ const markOrderPreparing = asyncHandler(async (req, res) => {
   });
   res.json({ success: true, message: 'Order marked as packed.', data: vendorOrderView(order) });
 });
-
-/**
- * Online riders within the policy radius of the store get a task notification.
- */
-async function broadcastTask(client, afterCommit, order) {
-  const policies = await getPolicies(client);
-  const store = (await client.query('SELECT store_name, latitude, longitude FROM vendors WHERE id = $1', [order.vendor_id])).rows[0];
-  const riders = await client.query(
-    `SELECT user_id, current_lat, current_lng FROM riders WHERE is_online = true AND current_lat IS NOT NULL`
-  );
-  const nearby = riders.rows.filter((r) =>
-    store.latitude == null ||
-    haversineKm(r.current_lat, r.current_lng, store.latitude, store.longitude) <= policies.task_radius_km
-  );
-  for (const r of nearby) {
-    await notify(client, afterCommit, r.user_id, {
-      type: 'task_available',
-      orderId: order.id,
-      title: 'New delivery nearby',
-      body: `Pickup from ${store.store_name}. Open Tasks to accept.`,
-    });
-  }
-  afterCommit.push(() => emitToRiders('task:new', {
-    orderId: order.id,
-    vendorId: order.vendor_id,
-    storeName: store.store_name,
-    storeLat: store.latitude,
-    storeLng: store.longitude,
-  }));
-}
 
 /** PUT /api/vendor/orders/:id/ready-for-pickup — packed → ready_for_pickup; delivery orders go to riders */
 const markOrderReadyForPickup = asyncHandler(async (req, res) => {
@@ -812,6 +1010,37 @@ const markOrderReadyForPickup = asyncHandler(async (req, res) => {
       : 'Order ready. The customer has been told to collect it.',
     data: vendorOrderView(order),
   });
+});
+
+/**
+ * PUT /api/vendor/orders/:id/hand-over — the store gave the parcel to the rider waiting at the
+ * counter: ready_for_pickup → picked. Only after the rider has checked in at the store
+ * (geofenced "Arrived"), so it can't skip the rider. Stops the waiting clock: a rider can't
+ * keep earning waiting pay once the store has handed the order over.
+ */
+const handOverToRider = asyncHandler(async (req, res) => {
+  const vendorId = vendorIdOf(req);
+  const orderId = intParam(req.params.id);
+  const order = await withTransaction(async (client, afterCommit) => {
+    const current = (await client.query(
+      'SELECT * FROM orders WHERE id = $1 AND vendor_id = $2 FOR UPDATE', [orderId, vendorId]
+    )).rows[0];
+    if (!current) throw httpError(404, 'Order not found.');
+    if (current.status !== 'ready_for_pickup' || current.delivery_type !== 'delivery') {
+      throw httpError(409, `Order is ${current.status}; only a delivery waiting for its rider can be handed over.`);
+    }
+    if (!current.rider_user_id || !current.rider_arrived_at) {
+      throw httpError(409, 'The rider has not checked in at your store yet.', { code: 'RIDER_NOT_ARRIVED' });
+    }
+    const o = await transition(client, orderId, vendorId, 'ready_for_pickup', 'picked',
+      ", picked_at = NOW(), pickup_confirmed_by = 'store'");
+    await announceOrder(client, afterCommit, orderId, 'order_picked', {
+      customer: { title: `Order #${orderId} picked up`, body: 'The rider has your order.' },
+      rider: { title: `Order #${orderId} handed over`, body: 'The store gave you the parcel. Head to the customer.' },
+    });
+    return o;
+  });
+  res.json({ success: true, message: 'Handed over. The rider is on the way to the customer.', data: vendorOrderView(order) });
 });
 
 /**
@@ -942,6 +1171,7 @@ module.exports = {
   getVendorProducts,
   getProductByBarcode,
   updateProduct,
+  stockIn,
   deleteProduct,
   uploadProductImage,
   uploadStorePhoto,
@@ -950,9 +1180,11 @@ module.exports = {
   addGalleryImage,
   deleteGalleryImage,
   getVendorReviews,
+  getProductReservations,
   createPosSale,
   getPosSales,
   getPosSale,
+  getRevenueSplit,
   getReceiptSettings,
   updateReceiptSettings,
   getVendorOrders,
@@ -964,6 +1196,7 @@ module.exports = {
   markOrderPreparing,
   markOrderReadyForPickup,
   markVendorOrderDelivered,
+  handOverToRider,
   updateVendorLocation,
   cancelLocationRequest,
   getInventoryLedger,

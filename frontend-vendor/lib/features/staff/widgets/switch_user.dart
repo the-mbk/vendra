@@ -292,7 +292,7 @@ class _OwnerPasswordDialogState extends State<_OwnerPasswordDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      icon: const Icon(Icons.storefront, color: AppColors.secondary, size: 32),
+      icon: Icon(Icons.storefront, color: AppColors.secondary, size: 32),
       title: Text('Back to owner', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
       content: SingleChildScrollView(
         child: Column(

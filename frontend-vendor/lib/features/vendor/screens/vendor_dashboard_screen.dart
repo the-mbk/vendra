@@ -33,6 +33,9 @@ import 'stock_ledger_screen.dart';
 import 'vendor_profile_screen.dart';
 import 'vendor_disputes_screen.dart';
 import 'wallet_screen.dart';
+import '../widgets/restock_card.dart';
+import '../widgets/revenue_split_card.dart';
+import '../widgets/stock_in_sheet.dart';
 import '../widgets/wallet_widgets.dart';
 
 import 'vendor_location_screen.dart';
@@ -164,7 +167,7 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
         VendorTab.home => _buildHomeTab(),
         VendorTab.pos => const PosScreen(),
         VendorTab.orders => const VendorOrdersScreen(),
-        VendorTab.ledger => const StockLedgerScreen(),
+        VendorTab.ledger => StockLedgerScreen(showMoney: _can(Perm.owner)),
         VendorTab.profile => const VendorProfileScreen(),
       };
 
@@ -201,9 +204,7 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
               Container(
                 padding: const EdgeInsets.fromLTRB(20, 28, 20, 20),
                 margin: const EdgeInsets.only(bottom: 8),
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(colors: [Color(0xFF0D2137), Color(0xFF1565C0)]),
-                ),
+                decoration: const BoxDecoration(gradient: AppColors.brandGradient),
                 child: Row(
                   children: [
                     if (user?.storeName != null)
@@ -242,7 +243,7 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
               if (tabs.contains(VendorTab.orders))
                 _drawerItem(Icons.receipt_long_outlined, 'Orders', () => _goToTab(VendorTab.orders), tab: VendorTab.orders),
               if (tabs.contains(VendorTab.ledger))
-                _drawerItem(Icons.inventory_2_outlined, 'Stock ledger', () => _goToTab(VendorTab.ledger), tab: VendorTab.ledger),
+                _drawerItem(Icons.inventory_2_outlined, 'Ledger', () => _goToTab(VendorTab.ledger), tab: VendorTab.ledger),
               _drawerItem(Icons.person_outline, 'Profile', () => _goToTab(VendorTab.profile), tab: VendorTab.profile),
               const Divider(indent: 16, endIndent: 16, height: 24),
               if (can(Perm.owner)) ...[
@@ -308,12 +309,12 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
           title = 'Location change pending approval';
           subtitle = 'Requested $when · customers still see your current location';
           icon = Icons.hourglass_top;
-          colors = const [Color(0xFF8A6D00), AppColors.reservedAmber];
+          colors = [AppColors.warningInk, AppColors.reservedAmber];
         } else {
           title = 'Set Store Location';
           subtitle = 'Pin your shop on the map for customers';
           icon = Icons.map;
-          colors = const [Color(0xFF0D2137), Color(0xFF1565C0)];
+          colors = AppColors.brandGradient.colors;
         }
 
         return GestureDetector(
@@ -391,9 +392,9 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
         // App bar
         SliverAppBar(
           floating: true,
-          backgroundColor: Colors.white,
+          backgroundColor: AppColors.surface,
           leading: IconButton(
-            icon: const Icon(Icons.menu, color: AppColors.textPrimary),
+            icon: Icon(Icons.menu, color: AppColors.textPrimary),
             onPressed: () => _scaffoldKey.currentState?.openDrawer(),
           ),
           automaticallyImplyLeading: false,
@@ -440,12 +441,13 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                   return IconButton(
                     tooltip: 'Wallet · Rs. ${_money.format(state.user.walletBalance)}',
                     onPressed: _openWallet,
-                    icon: Icon(Icons.account_balance_wallet_outlined, color: Colors.green.shade700),
+                    icon: const Icon(Icons.account_balance_wallet_outlined, color: AppColors.success),
                   );
                 }
                 return const SizedBox.shrink();
               },
             ),
+            ThemeToggleButton(color: AppColors.textPrimary),
             // FR09: live inbox; order notifications open the Orders tab
             NotificationBell(
               color: AppColors.textPrimary,
@@ -474,15 +476,19 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                 final pendingCount = activeOrders.where((o) => o.status == 'pending').length;
                 final reservedUnits = products.fold<int>(0, (sum, p) => sum + p.reservedQuantity);
                 final awaitingApproval = products.where((p) => !p.isApproved).length;
+                final toRestock = _can(Perm.productsView) || _can(Perm.productsManage)
+                    ? productsToRestock(products, AppConfig.current.lowStockUnits)
+                    : const <ProductModel>[];
 
                 final stats = <Widget>[
                   if (_can(Perm.ordersView)) ...[
                     _statCard('Active Orders', '$activeCount', Icons.shopping_bag_outlined, AppColors.secondary,
                         onTap: () => _goToTab(VendorTab.orders)),
-                    _statCard('Pending', '$pendingCount', Icons.hourglass_top, Colors.orange,
+                    _statCard('Pending', '$pendingCount', Icons.hourglass_top, AppColors.warning,
                         onTap: () => _goToTab(VendorTab.orders)),
                   ],
-                  if (_can(Perm.pos))
+                  // The owner sees both channels in the revenue card below instead
+                  if (_can(Perm.pos) && !_can(Perm.owner))
                     _statCard(
                       'Walk-in Today',
                       'Rs. ${_money.format(pos.todayTotal)}',
@@ -510,7 +516,16 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                     ],
                     if (_can(Perm.owner)) ...[
                       const SizedBox(height: 12),
+                      RevenueSplitCard(
+                        refreshKey: pos.todayCount,
+                        onOpenPos: () => _goToTab(VendorTab.pos),
+                      ),
+                      const SizedBox(height: 12),
                       _walletCard(),
+                    ],
+                    if (toRestock.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      RestockCard(products: toRestock, canRestock: _can(Perm.productsManage)),
                     ],
                     if (awaitingApproval > 0) ...[
                       const SizedBox(height: 12),
@@ -524,14 +539,14 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.hourglass_top, size: 18, color: Color(0xFF8A6D00)),
+                            Icon(Icons.hourglass_top, size: 18, color: AppColors.warningInk),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 '$awaitingApproval product${awaitingApproval == 1 ? ' is' : 's are'} awaiting admin approval '
                                 '— hidden from customers until approved.',
                                 style: GoogleFonts.poppins(
-                                    fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF8A6D00)),
+                                    fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.warningInk),
                               ),
                             ),
                           ],
@@ -559,10 +574,22 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
               children: [
                 Text('My Products',
                     style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                TextButton.icon(
-                  onPressed: () => context.read<VendorProductBloc>().add(const FetchVendorProducts(silent: true)),
-                  icon: const Icon(Icons.refresh, size: 18),
-                  label: const Text('Refresh'),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Goods received: scan the barcode, enter the quantity (FR01)
+                    if (_can(Perm.productsManage))
+                      TextButton.icon(
+                        onPressed: () => startStockIn(context),
+                        icon: const Icon(Icons.qr_code_scanner, size: 18),
+                        label: const Text('Stock in'),
+                      ),
+                    TextButton.icon(
+                      onPressed: () => context.read<VendorProductBloc>().add(const FetchVendorProducts(silent: true)),
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('Refresh'),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -601,7 +628,7 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.inventory_2_outlined, size: 64, color: Colors.grey.shade300),
+                      Icon(Icons.inventory_2_outlined, size: 64, color: AppColors.textLight),
                       const SizedBox(height: 16),
                       Text('No products yet', style: GoogleFonts.poppins(color: AppColors.textSecondary)),
                       const SizedBox(height: 8),
@@ -662,7 +689,7 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
         final balance = state.user.walletBalance;
         return Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(14),
             boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
           ),
@@ -678,8 +705,8 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                     Container(
                       width: 40,
                       height: 40,
-                      decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(10)),
-                      child: Icon(Icons.account_balance_wallet, color: Colors.green.shade700, size: 22),
+                      decoration: BoxDecoration(color: AppColors.successSurface, borderRadius: BorderRadius.circular(10)),
+                      child: const Icon(Icons.account_balance_wallet, color: AppColors.success, size: 22),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -700,7 +727,7 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                     OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.secondary,
-                        side: const BorderSide(color: AppColors.secondary),
+                        side: BorderSide(color: AppColors.secondary),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
                       icon: const Icon(Icons.north_east, size: 18),
@@ -760,7 +787,7 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
                   _detailChip('Private', '${p.privateStock}', AppColors.secondary),
                   _detailChip('Reserved', '${p.reservedQuantity}', AppColors.reservedAmber),
                   _detailChip('Sellable', '${p.sellableInStore}', AppColors.stockGreen),
-                  _detailChip('Online', '${p.publicStock}', Colors.blueGrey),
+                  _detailChip('Online', '${p.publicStock}', AppColors.info),
                 ],
               ),
               const SizedBox(height: 12),
@@ -807,7 +834,7 @@ class _VendorDashboardScreenState extends State<VendorDashboardScreen> {
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(14),
             boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
           ),
@@ -864,10 +891,10 @@ class _AwaitingApprovalBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.hourglass_top, size: 12, color: Color(0xFF5C4800)),
+          Icon(Icons.hourglass_top, size: 12, color: AppColors.warningInk),
           const SizedBox(width: 4),
           Text('Awaiting approval',
-              style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w700, color: const Color(0xFF5C4800))),
+              style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.warningInk)),
         ],
       ),
     );

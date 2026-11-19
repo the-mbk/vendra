@@ -139,7 +139,7 @@ class _AmountSheetState extends State<_AmountSheet> {
                 child: Container(
                   width: 40,
                   height: 4,
-                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(color: AppColors.hairline, borderRadius: BorderRadius.circular(2)),
                 ),
               ),
               const SizedBox(height: 16),
@@ -161,7 +161,7 @@ class _AmountSheetState extends State<_AmountSheet> {
                   hintText: '0',
                   helperText: '${formatRupees(widget.min)} – ${formatRupees(widget.max)}',
                   filled: true,
-                  fillColor: Colors.grey.shade50,
+                  fillColor: AppColors.surfaceMuted,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 validator: (v) => validateAmount(v ?? '', min: widget.min, max: widget.max),
@@ -170,7 +170,7 @@ class _AmountSheetState extends State<_AmountSheet> {
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    const Icon(Icons.currency_exchange, size: 16, color: AppColors.secondary),
+                    Icon(Icons.currency_exchange, size: 16, color: AppColors.secondary),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(_noteText!,

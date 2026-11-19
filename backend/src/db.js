@@ -12,8 +12,11 @@ if (!/^[A-Za-z_]+(\/[A-Za-z_+-]+)*$/.test(APP_TIMEZONE)) {
   throw new Error(`Invalid APP_TIMEZONE "${APP_TIMEZONE}"`);
 }
 
+const isLocalhost = !process.env.DATABASE_URL || process.env.DATABASE_URL.includes('localhost') || process.env.DATABASE_URL.includes('127.0.0.1');
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  ssl: isLocalhost ? false : { rejectUnauthorized: false },
   options: `-c timezone=${APP_TIMEZONE}`,
   // Connection pool settings for optimal performance
   max: 20,                  // Maximum number of clients in the pool

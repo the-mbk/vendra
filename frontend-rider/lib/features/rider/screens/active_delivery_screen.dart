@@ -1,12 +1,18 @@
 // ══════════════════════════════════════════════════════════════
 // Vendra Rider App - Active Delivery
 // Map (store, customer pin + 200 m geofence, live rider position),
-// store/customer details (tap a phone number to call), and one primary button that walks the
-// delivery: Arrived at store → Picked up → On the way → Confirm delivery
-// (with the customer's 4-digit handover code, entered in a dialog).
+// store/customer details with one-tap Navigate (Google Maps) and Call,
+// the pickup deadline (reach the store in time or the task goes to
+// another rider), a live store-waiting clock with the compensated wait pay (FR04), and one
+// primary button that walks the delivery: Arrived at store → Picked up →
+// On the way → Confirm delivery (with the customer's 4-digit handover
+// code, entered in a dialog; "Customer unavailable" files a GPS-tagged
+// photo report instead).
 // In development (`features.manualLocation`) a "Simulate drive" card moves
 // the simulated position to the store / customer, one ping every 10 s.
 // ══════════════════════════════════════════════════════════════
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -19,9 +25,14 @@ import '../bloc/delivery_bloc.dart';
 import '../models/rider_models.dart';
 import '../services/rider_location_service.dart';
 import '../services/simulated_drive.dart';
+import '../services/voice_cues.dart';
+import '../widgets/delivery_voice_cues.dart';
 import '../widgets/handover_code_dialog.dart';
+import '../widgets/handover_issue_sheet.dart';
 import '../widgets/location_settings_sheet.dart';
 import '../widgets/payout_summary_dialog.dart';
+import '../widgets/pickup_deadline_card.dart';
+import '../widgets/slide_to_confirm.dart';
 
 class ActiveDeliveryScreen extends StatefulWidget {
   const ActiveDeliveryScreen({super.key});
@@ -36,6 +47,9 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
 
   /// The handover code dialog is on top of this screen
   bool _codeDialogOpen = false;
+
+  /// The rider chose "Customer unavailable": open the report once the code dialog is gone
+  bool _reportAfterDialog = false;
 
   @override
   void dispose() {
@@ -67,11 +81,30 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
     if (state.awaitingCode && !_codeDialogOpen) {
       // Only this method closes it (no barrier dismiss; Back just cancels in the bloc)
       _codeDialogOpen = true;
-      showHandoverCodeDialog(context, context.read<DeliveryBloc>());
+      showHandoverCodeDialog(context, context.read<DeliveryBloc>(), onUnavailable: () => _reportAfterDialog = true);
     } else if (!state.awaitingCode && _codeDialogOpen) {
       _codeDialogOpen = false;
       Navigator.of(context).pop();
+      final order = state.order;
+      if (_reportAfterDialog && order != null) {
+        _reportAfterDialog = false;
+        WidgetsBinding.instance.addPostFrameCallback((_) => _reportUnavailable(order));
+      }
     }
+  }
+
+  Future<void> _reportUnavailable(RiderOrder order) async {
+    if (!mounted) return;
+    final filed = await showHandoverIssueSheet(context, order);
+    if (!filed || !mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(
+        content: Text('Report sent. Payment stays frozen while an admin reviews it — keep the parcel safe.'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 6),
+      ));
+    context.read<DeliveryBloc>().add(DeliveryLoadRequested(orderId: order.id));
   }
 
   Future<void> _onState(BuildContext context, DeliveryState state) async {
@@ -108,6 +141,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
           appBar: AppBar(
             title: Text(order != null ? 'Delivery #${order.id}' : 'Delivery'),
             actions: [
+              const _VoiceToggle(),
               IconButton(
                 tooltip: 'Location settings',
                 icon: const Icon(Icons.my_location),
@@ -152,50 +186,132 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
       );
     }
 
-    return Column(
-      children: [
-        LocationStatusBanner(order: order),
-        Expanded(flex: 5, child: _DeliveryMap(order: order, geofenceMeters: state.geofenceMeters)),
-        Expanded(
-          flex: 6,
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            children: [
-              _StepProgress(step: order.step),
-              const SizedBox(height: 12),
-              _ProximityHint(order: order, geofenceMeters: state.geofenceMeters),
-              const SizedBox(height: 12),
-              _SimulatedDriveCard(order: order),
-              _PartyCard(
-                icon: Icons.storefront,
-                color: AppColors.secondary,
-                label: 'PICKUP',
-                name: order.storeName ?? 'Store',
-                address: order.storeAddress,
-                phone: order.storePhone,
-              ),
-              _PartyCard(
-                icon: Icons.home,
-                color: AppColors.success,
-                label: 'DROP-OFF',
-                name: order.customerName ?? 'Customer',
-                address: order.deliveryAddress,
-                phone: order.customerPhone,
-              ),
-              Card(
-                child: ListTile(
-                  leading: const Icon(Icons.shopping_bag_outlined, color: AppColors.primary),
-                  title: Text('${order.itemCount} item${order.itemCount == 1 ? '' : 's'}',
-                      style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                  subtitle: Text('Order total ${rs(order.totalAmount)} · paid online (escrow)',
-                      style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+    final active = order.step != DeliveryStep.delivered && order.step != DeliveryStep.closed;
+    return DeliveryVoiceCues(
+      order: order,
+      geofenceMeters: state.geofenceMeters,
+      child: Column(
+        children: [
+          LocationStatusBanner(order: order),
+          Expanded(flex: 5, child: _DeliveryMap(order: order, geofenceMeters: state.geofenceMeters)),
+          Expanded(
+            flex: 6,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              children: [
+                _StepProgress(step: order.step),
+                const SizedBox(height: 12),
+                _ProximityHint(order: order, geofenceMeters: state.geofenceMeters),
+                const SizedBox(height: 12),
+                if (pickupDeadline(order, AppConfig.current.riderPickupTimeoutMinutes) case final deadline?) ...[
+                  PickupDeadlineCard(deadline: deadline),
+                  const SizedBox(height: 12),
+                ],
+                if (order.step == DeliveryStep.atStore && order.arrivedAt != null) ...[
+                  _StoreWaitClock(arrivedAt: order.arrivedAt!),
+                  const SizedBox(height: 12),
+                ],
+                _SimulatedDriveCard(order: order),
+                _PartyCard(
+                  icon: AppIcons.store,
+                  color: AppColors.secondary,
+                  label: 'PICKUP',
+                  name: order.storeName ?? 'Store',
+                  address: order.storeAddress,
+                  phone: order.storePhone,
+                  callLabel: 'Call store',
+                  lat: order.storeLat,
+                  lng: order.storeLng,
+                  isNext: order.step == DeliveryStep.headingToStore || order.step == DeliveryStep.atStore,
                 ),
-              ),
-            ],
+                _PartyCard(
+                  icon: AppIcons.customer,
+                  color: AppColors.success,
+                  label: 'DROP-OFF',
+                  name: order.customerName ?? 'Customer',
+                  address: order.deliveryAddress,
+                  phone: order.customerPhone,
+                  callLabel: 'Call customer',
+                  lat: order.customerLat,
+                  lng: order.customerLng,
+                  isNext: order.step == DeliveryStep.pickedUp || order.step == DeliveryStep.onTheWay,
+                ),
+                if (order.deliveryNote != null) ...[
+                  _DeliveryNote(note: order.deliveryNote!),
+                  const SizedBox(height: 10),
+                ],
+                if (active) ...[
+                  OrderChatButton(orderId: order.id, myRole: 'rider', otherLabel: 'the customer'),
+                  const SizedBox(height: 10),
+                ],
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.shopping_bag_outlined, color: AppColors.primary),
+                    title: Text('${order.itemCount} item${order.itemCount == 1 ? '' : 's'}',
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    subtitle: Text('Order total ${rs(order.totalAmount)} · paid online (escrow)',
+                        style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        _PrimaryAction(order: order, busy: state.busy),
-      ],
+          _PrimaryAction(order: order, busy: state.busy),
+        ],
+      ),
+    );
+  }
+}
+
+/// Speaker button in the app bar: voice cues on / off (only where the device can speak)
+class _VoiceToggle extends StatelessWidget {
+  const _VoiceToggle();
+
+  @override
+  Widget build(BuildContext context) {
+    final voice = VoiceCues();
+    if (!voice.supported) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: voice,
+      builder: (context, _) => IconButton(
+        tooltip: voice.enabled ? 'Voice cues on' : 'Voice cues off',
+        icon: Icon(voice.enabled ? Icons.volume_up_outlined : Icons.volume_off_outlined),
+        onPressed: () => voice.setEnabled(!voice.enabled),
+      ),
+    );
+  }
+}
+
+/// What the customer wrote for the rider at checkout ("gate code 402")
+class _DeliveryNote extends StatelessWidget {
+  final String note;
+  const _DeliveryNote({required this.note});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.warningSurface,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.sticky_note_2_outlined, size: 20, color: AppColors.warningInk),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Note from the customer',
+                    style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.warningInk)),
+                Text(note, style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textPrimary)),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -253,10 +369,7 @@ class _DeliveryMapState extends State<_DeliveryMap> {
                 initialZoom: 14,
               ),
               children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.vendra.rider',
-                ),
+                MapTiles.layer(),
                 if (order.customerPoint != null)
                   CircleLayer(circles: [
                     CircleMarker(
@@ -270,7 +383,12 @@ class _DeliveryMapState extends State<_DeliveryMap> {
                   ]),
                 if (rider != null && target != null)
                   PolylineLayer(polylines: [
-                    Polyline(points: [rider, target], strokeWidth: 3, color: AppColors.primary.withValues(alpha: 0.6)),
+                    Polyline(
+                      points:
+                          (_location.drive?.waypoints.length ?? 0) > 2 ? _location.drive!.waypoints : [rider, target],
+                      strokeWidth: 4,
+                      color: AppColors.primary.withValues(alpha: 0.8),
+                    ),
                   ]),
                 MarkerLayer(markers: [
                   if (order.storePoint != null)
@@ -278,14 +396,14 @@ class _DeliveryMapState extends State<_DeliveryMap> {
                       point: order.storePoint!,
                       width: 44,
                       height: 44,
-                      child: const _Pin(icon: Icons.storefront, color: AppColors.secondary),
+                      child: _Pin(icon: AppIcons.store, color: AppColors.secondary),
                     ),
                   if (order.customerPoint != null)
                     Marker(
                       point: order.customerPoint!,
                       width: 44,
                       height: 44,
-                      child: const _Pin(icon: Icons.home, color: AppColors.success),
+                      child: const _Pin(icon: AppIcons.customer, color: AppColors.success),
                     ),
                   if (rider != null)
                     Marker(
@@ -293,7 +411,7 @@ class _DeliveryMapState extends State<_DeliveryMap> {
                       width: 44,
                       height: 44,
                       child: _Pin(
-                        icon: Icons.two_wheeler,
+                        icon: AppIcons.rider,
                         color: _location.simulate ? AppColors.reservedAmber : AppColors.primary,
                       ),
                     ),
@@ -348,7 +466,8 @@ class _MapLegend extends StatelessWidget {
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Container(width: 8, height: 8, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
             const SizedBox(width: 4),
-            Text(t, style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
+            Text(t,
+                style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
           ]),
         );
     return Container(
@@ -379,10 +498,10 @@ class _StepProgress extends StatelessWidget {
   Widget build(BuildContext context) {
     // headingToStore=0 → "Accepted" done; atStore=1; pickedUp=2; onTheWay=3; delivered=4
     final current = step == DeliveryStep.closed ? 0 : step.index;
-    Color lineColor(int i) => i <= current ? AppColors.primary : Colors.grey.shade300;
+    Color lineColor(int i) => i <= current ? AppColors.primary : AppColors.hairline;
     return Container(
       padding: const EdgeInsets.fromLTRB(4, 14, 4, 12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16)),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -395,8 +514,7 @@ class _StepProgress extends StatelessWidget {
                     child: Row(
                       children: [
                         // Connector into this step (none before the first)
-                        Expanded(
-                            child: Container(height: 3, color: i == 0 ? Colors.transparent : lineColor(i))),
+                        Expanded(child: Container(height: 3, color: i == 0 ? Colors.transparent : lineColor(i))),
                         Container(
                           width: 26,
                           height: 26,
@@ -404,7 +522,7 @@ class _StepProgress extends StatelessWidget {
                             color: i <= current ? AppColors.primary : Colors.white,
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: i <= current ? AppColors.primary : Colors.grey.shade300,
+                              color: i <= current ? AppColors.primary : AppColors.hairline,
                               width: 2,
                             ),
                             boxShadow: i == current
@@ -528,8 +646,8 @@ class _SimulatedDriveCard extends StatelessWidget {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(
-          content: Text(location.driveBlocker ??
-              'You are already at the ${kind == DriveTarget.store ? 'store' : 'customer'}.'),
+          content: Text(
+              location.driveBlocker ?? 'You are already at the ${kind == DriveTarget.store ? 'store' : 'customer'}.'),
           behavior: SnackBarBehavior.floating,
         ));
     }
@@ -574,10 +692,7 @@ class _SimulatedDriveCard extends StatelessWidget {
                   ),
                   Text('DEV',
                       style: GoogleFonts.poppins(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1,
-                          color: AppColors.reservedAmber)),
+                          fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1, color: AppColors.reservedAmber)),
                 ],
               ),
               const SizedBox(height: 6),
@@ -678,72 +793,207 @@ class _PartyCard extends StatelessWidget {
   final String name;
   final String? address;
   final String? phone;
+  final String callLabel;
+  final double? lat;
+  final double? lng;
+
+  /// This is where the rider is heading now: its Navigate button is the filled one
+  final bool isNext;
 
   const _PartyCard({
     required this.icon,
     required this.color,
     required this.label,
     required this.name,
+    required this.callLabel,
     this.address,
     this.phone,
+    this.lat,
+    this.lng,
+    this.isNext = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final hasPhone = phone != null && phone!.trim().isNotEmpty;
+    final canNavigate = lat != null && lng != null;
+    final buttonShape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(12));
+    const buttonPadding = EdgeInsets.symmetric(vertical: 14);
+
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
         padding: const EdgeInsets.all(14),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            CircleAvatar(backgroundColor: color.withValues(alpha: 0.12), child: Icon(icon, color: color, size: 20)),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(backgroundColor: color.withValues(alpha: 0.12), child: Icon(icon, color: color, size: 20)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label,
+                          style: GoogleFonts.poppins(
+                              fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8, color: color)),
+                      Text(name,
+                          style: GoogleFonts.poppins(
+                              fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                      if (address != null)
+                        Text(address!, style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
+                      if (hasPhone)
+                        Text(maskPhone(phone)!,
+                            style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (canNavigate || hasPhone) ...[
+              const SizedBox(height: 12),
+              Row(
                 children: [
-                  Text(label,
-                      style: GoogleFonts.poppins(
-                          fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8, color: color)),
-                  Text(name,
-                      style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                  if (address != null)
-                    Text(address!, style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
-                  if (hasPhone) ...[
-                    const SizedBox(height: 4),
-                    // Tap the number to call (copied instead where calling isn't available)
-                    InkWell(
-                      onTap: () => ContactLauncher.call(context, phone),
-                      borderRadius: BorderRadius.circular(6),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.phone, size: 14, color: AppColors.secondary),
-                            const SizedBox(width: 4),
-                            Text(phone!,
-                                style: GoogleFonts.poppins(
-                                    fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.secondary)),
-                          ],
-                        ),
+                  if (canNavigate)
+                    Expanded(
+                      child: isNext
+                          ? ElevatedButton.icon(
+                              onPressed: () =>
+                                  MapsLauncher.navigate(context, lat!, lng!, label: name, twoWheeler: true),
+                              style: ElevatedButton.styleFrom(padding: buttonPadding, shape: buttonShape),
+                              icon: const Icon(Icons.navigation_outlined, size: 20),
+                              label: const Text('Navigate'),
+                            )
+                          : OutlinedButton.icon(
+                              onPressed: () =>
+                                  MapsLauncher.navigate(context, lat!, lng!, label: name, twoWheeler: true),
+                              style: OutlinedButton.styleFrom(padding: buttonPadding, shape: buttonShape),
+                              icon: const Icon(Icons.navigation_outlined, size: 20),
+                              label: const Text('Navigate'),
+                            ),
+                    ),
+                  if (canNavigate && hasPhone) const SizedBox(width: 10),
+                  if (hasPhone)
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => ContactLauncher.call(context, phone),
+                        style: OutlinedButton.styleFrom(padding: buttonPadding, shape: buttonShape),
+                        icon: const Icon(Icons.call_outlined, size: 20),
+                        label: Text(callLabel),
                       ),
                     ),
-                  ],
                 ],
               ),
-            ),
-            if (hasPhone)
-              IconButton.filledTonal(
-                tooltip: 'Call $name',
-                icon: const Icon(Icons.call, size: 20),
-                color: color,
-                onPressed: () => ContactLauncher.call(context, phone),
-              ),
+            ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Live clock from "Arrived at store" until pickup: the free allowance, then
+/// the waiting pay the payout formula will add (FR04 / PR 06)
+class _StoreWaitClock extends StatefulWidget {
+  final DateTime arrivedAt;
+  const _StoreWaitClock({required this.arrivedAt});
+
+  @override
+  State<_StoreWaitClock> createState() => _StoreWaitClockState();
+}
+
+class _StoreWaitClockState extends State<_StoreWaitClock> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  static String _mmss(Duration d) {
+    final m = d.inMinutes;
+    final s = d.inSeconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final config = AppConfig.current;
+    final waited = DateTime.now().difference(widget.arrivedAt);
+    final elapsed = waited.isNegative ? Duration.zero : waited;
+    final grace = Duration(seconds: (config.riderFreeWaitMinutes * 60).round());
+    final graceLeft = grace - elapsed;
+    final inGrace = graceLeft > Duration.zero;
+    final paidMinutes = inGrace ? 0.0 : (elapsed - grace).inSeconds / 60;
+    final pay = paidMinutes * config.riderPerWaitMin;
+    final color = inGrace ? AppColors.secondary : AppColors.success;
+    final graceLabel = config.riderFreeWaitMinutes == config.riderFreeWaitMinutes.roundToDouble()
+        ? config.riderFreeWaitMinutes.toStringAsFixed(0)
+        : config.riderFreeWaitMinutes.toStringAsFixed(1);
+    // Past the store wait limit the delivery goes back to other riders, unpaid
+    final limit = storeWaitLeft(widget.arrivedAt, config.riderStoreWaitMaxMinutes, DateTime.now());
+    final limitUrgent = limit != null && limit < const Duration(minutes: 3);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.timer_outlined, size: 28, color: color),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Store wait timer', style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                Text(
+                  '${_mmss(elapsed)} min',
+                  style: GoogleFonts.poppins(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                Text(
+                  inGrace
+                      ? 'Grace period ($graceLabel min): ${_mmss(graceLeft)} left · then ${rs(config.riderPerWaitMin)}/min'
+                      : 'Grace period ($graceLabel min): passed · Compensated waiting: +${rs(pay)}',
+                  style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: inGrace ? AppColors.textSecondary : AppColors.successInk),
+                ),
+                if (limit != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Collect within ${_mmss(limit)}, or the delivery goes to another rider and no waiting is paid.',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: limitUrgent ? FontWeight.w600 : FontWeight.w400,
+                      color: limitUrgent ? AppColors.error : AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -758,7 +1008,11 @@ class _PrimaryAction extends StatelessWidget {
   Widget build(BuildContext context) {
     final (String label, IconData icon, String hint) = switch (order.step) {
       DeliveryStep.headingToStore => ('Arrived at store', Icons.storefront, 'Tap when you reach the store.'),
-      DeliveryStep.atStore => ('Picked up', Icons.inventory_2, 'Collect the order, then tap Picked up.'),
+      DeliveryStep.atStore => (
+          'Picked up',
+          Icons.inventory_2,
+          'Collect the order, then tap Picked up. The store can also confirm the handover.'
+        ),
       DeliveryStep.pickedUp => ('On the way', Icons.delivery_dining, 'Start the trip to the customer.'),
       DeliveryStep.onTheWay => (
           'Confirm delivery',
@@ -774,8 +1028,10 @@ class _PrimaryAction extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 12, offset: const Offset(0, -2))],
+        color: AppColors.surface,
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 12, offset: const Offset(0, -2))
+        ],
       ),
       child: SafeArea(
         top: false,
@@ -786,14 +1042,23 @@ class _PrimaryAction extends StatelessWidget {
             children: [
               Text(hint,
                   textAlign: TextAlign.center,
-                  style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textSecondary)),
+                  style:
+                      GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textSecondary)),
               const SizedBox(height: 8),
-              VendraButton(
-                text: label,
-                icon: icon,
-                isLoading: busy,
-                onPressed: enabled ? () => context.read<DeliveryBloc>().add(DeliveryAdvanceRequested()) : null,
-              ),
+              // The handover is a slide, so a phone in a pocket can't confirm it
+              if (order.step == DeliveryStep.onTheWay)
+                SlideToConfirm(
+                  label: 'Slide to confirm delivery',
+                  busy: busy,
+                  onConfirmed: () => context.read<DeliveryBloc>().add(DeliveryAdvanceRequested()),
+                )
+              else
+                VendraButton(
+                  text: label,
+                  icon: icon,
+                  isLoading: busy,
+                  onPressed: enabled ? () => context.read<DeliveryBloc>().add(DeliveryAdvanceRequested()) : null,
+                ),
             ],
           ),
         ),

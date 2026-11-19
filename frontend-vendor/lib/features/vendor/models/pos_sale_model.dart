@@ -16,9 +16,25 @@ class PosLine {
   final double unitPrice;
   final int quantity;
 
-  const PosLine({required this.productId, required this.name, required this.unitPrice, required this.quantity});
+  /// The cashier chose to sell units reserved for online orders: the server
+  /// cancels and refunds the newest not-yet-packed orders holding them (FR02)
+  final bool overrideReservation;
 
-  PosLine withQuantity(int q) => PosLine(productId: productId, name: name, unitPrice: unitPrice, quantity: q);
+  const PosLine({
+    required this.productId,
+    required this.name,
+    required this.unitPrice,
+    required this.quantity,
+    this.overrideReservation = false,
+  });
+
+  PosLine withQuantity(int q, {bool? overrideReservation}) => PosLine(
+        productId: productId,
+        name: name,
+        unitPrice: unitPrice,
+        quantity: q,
+        overrideReservation: overrideReservation ?? this.overrideReservation,
+      );
 
   double get total => unitPrice * quantity;
 }

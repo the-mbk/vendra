@@ -115,11 +115,11 @@ class _StripeCardSheetState extends State<StripeCardSheet> {
     return CardField(
       enablePostalCode: false,
       disabled: _submitting,
-      style: const TextStyle(fontSize: 16, color: AppColors.textPrimary),
+      style: TextStyle(fontSize: 16, color: AppColors.textPrimary),
       decoration: InputDecoration(
         labelText: 'Card details',
         filled: true,
-        fillColor: Colors.grey.shade50,
+        fillColor: AppColors.surfaceMuted,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       ),
       onCardChanged: (details) => _onComplete(details?.complete ?? false),
@@ -144,7 +144,7 @@ class _StripeCardSheetState extends State<StripeCardSheet> {
               child: Container(
                 width: 40,
                 height: 4,
-                decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                decoration: BoxDecoration(color: AppColors.hairline, borderRadius: BorderRadius.circular(2)),
               ),
             ),
             const SizedBox(height: 16),
@@ -171,7 +171,7 @@ class _StripeCardSheetState extends State<StripeCardSheet> {
             const SizedBox(height: 12),
             Row(
               children: [
-                const Icon(Icons.lock_outline, size: 14, color: AppColors.textLight),
+                Icon(Icons.lock_outline, size: 14, color: AppColors.textLight),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -200,7 +200,7 @@ class _StripeCardSheetState extends State<StripeCardSheet> {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF8E1),
+        color: AppColors.warningSurface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.amber.shade200),
       ),

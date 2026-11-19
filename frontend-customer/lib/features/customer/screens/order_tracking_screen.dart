@@ -24,10 +24,13 @@ import 'package:vendra_customer/vendra_core.dart';
 import '../../../config/app_routes.dart';
 import '../bloc/order_bloc.dart';
 import '../bloc/order_tracking_bloc.dart';
+import '../widgets/cancel_order.dart';
+import '../widgets/dispute_window_badge.dart';
 import '../widgets/handover_code_card.dart';
 import '../widgets/order_review.dart';
 import '../widgets/order_status_widgets.dart';
 import '../widgets/reservation_countdown.dart';
+import 'order_receipt_screen.dart';
 import 'report_issue_screen.dart';
 
 class OrderTrackingScreen extends StatelessWidget {
@@ -213,6 +216,13 @@ class _OrderTrackingView extends StatelessWidget {
                   _ActiveOrderSwitcher(currentId: order.id),
                   _header(order),
                   const SizedBox(height: 16),
+                  // Top status section: where the money is (FR03), then the timers that matter now
+                  EscrowStatusCard(order: order),
+                  const SizedBox(height: 16),
+                  if (disputeWindowEnd(order) != null) ...[
+                    DisputeWindowBadge(order: order),
+                    const SizedBox(height: 16),
+                  ],
                   if (reservationDeadline(order) != null) ...[
                     ReservationCountdown(
                       order: order,
@@ -234,15 +244,25 @@ class _OrderTrackingView extends StatelessWidget {
                       storeName: order.storeName,
                       enRoute: order.status == 'picked' || order.status == 'on_the_way',
                     ),
+                    if (_goingToStore(order)) ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: () => MapsLauncher.navigate(context, order.vendorLat!, order.vendorLng!, label: order.storeName),
+                        icon: const Icon(Icons.directions_outlined, size: 18),
+                        label: const Text('Directions to the store'),
+                        style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(44)),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                   ],
                   if (order.isDelivery && order.rider != null && order.status != 'cancelled') ...[
                     RiderInfoCard(rider: order.rider!, lastSeen: _showRider(order) ? state.riderSeenAt : null),
+                    const SizedBox(height: 8),
+                    // Talk to the rider without sharing numbers (read-only once delivered)
+                    OrderChatButton(orderId: order.id, myRole: 'customer', otherLabel: 'your rider'),
                     const SizedBox(height: 16),
                   ],
-                  EscrowStatusCard(order: order),
-                  const SizedBox(height: 16),
-                  _timeline(order),
+                  _timeline(order, riderAtDoor: riderAtDoor(order, state.riderPosition, AppConfig.current.geofenceMeters)),
                   const SizedBox(height: 16),
                   if (order.status == 'delivered' && (order.canReview || order.reviewedAt != null)) ...[
                     OrderReviewSection(
@@ -255,6 +275,10 @@ class _OrderTrackingView extends StatelessWidget {
                     const SizedBox(height: 16),
                   ],
                   _customerActions(context, order),
+                  CancelOrderSection(
+                    order: order,
+                    onCancelled: () => context.read<OrderTrackingBloc>().add(const LoadOrderTracking(silent: true)),
+                  ),
                   OrderDisputeSection(
                     order: order,
                     onReport: () => Navigator.push(
@@ -268,7 +292,7 @@ class _OrderTrackingView extends StatelessWidget {
                     onViewDisputes: () => Navigator.pushNamed(context, AppRoutes.myDisputes),
                   ),
                   const SizedBox(height: 16),
-                  _summary(order),
+                  _summary(context, order),
                   const SizedBox(height: 24),
                 ],
               ),
@@ -283,6 +307,10 @@ class _OrderTrackingView extends StatelessWidget {
 
   static bool _hasMap(OrderModel o) =>
       o.status != 'cancelled' && (o.vendorLat != null || (o.isDelivery && o.customerLat != null));
+
+  /// Self pickup the customer still has to collect
+  static bool _goingToStore(OrderModel o) =>
+      !o.isDelivery && o.vendorLat != null && o.vendorLng != null && o.status != 'delivered' && o.status != 'cancelled';
 
   /// The rider's live position matters from assignment until delivery
   static bool _showRider(OrderModel o) =>
@@ -312,11 +340,7 @@ class _OrderTrackingView extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [AppColors.secondary, Color(0xFF1A6DB5)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        gradient: AppColors.brandGradient,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -374,7 +398,8 @@ class _OrderTrackingView extends StatelessWidget {
     );
   }
 
-  Widget _timeline(OrderModel order) {
+  /// [riderAtDoor]: the rider's live position is inside the delivery geofence
+  Widget _timeline(OrderModel order, {bool riderAtDoor = false}) {
     if (order.status == 'cancelled') {
       return Container(
         padding: const EdgeInsets.all(20),
@@ -397,26 +422,32 @@ class _OrderTrackingView extends StatelessWidget {
     if (order.isDelivery) {
       final riderName = order.rider?.name ?? 'Your rider';
       steps = [
-        _TimelineStep('Order placed', at(placedAt) ?? 'Payment held in escrow.'),
-        const _TimelineStep('Confirmed by store', 'The store accepted your order.'),
-        const _TimelineStep('Packed', 'Your items are packed.'),
+        _TimelineStep('Order placed', at(placedAt) ?? 'Payment held in escrow.', Icons.receipt_long_outlined),
+        const _TimelineStep('Confirmed by store', 'The store accepted your order.', Icons.storefront_outlined),
+        const _TimelineStep('Packed', 'Your items are packed.', Icons.inventory_2_outlined),
         order.rider == null
-            ? const _TimelineStep('Finding a rider', 'Ready at the store — nearby riders have been notified.')
-            : _TimelineStep('Rider assigned', '$riderName is heading to the store${order.assignedAt != null ? ' · ${at(order.assignedAt)}' : ''}.'),
-        _TimelineStep('Picked up', at(order.pickedAt) ?? 'Rider collects your order from the store.'),
-        const _TimelineStep('On the way', 'Rider is heading to your pin.'),
-        _TimelineStep('Delivered', at(order.deliveredAt) ?? 'Rider confirms at your location.'),
+            ? const _TimelineStep('Finding a rider', 'Ready at the store — nearby riders have been notified.', Icons.radar)
+            : _TimelineStep('Rider assigned',
+                '$riderName is heading to the store${order.assignedAt != null ? ' · ${at(order.assignedAt)}' : ''}.',
+                AppIcons.rider),
+        _TimelineStep('Picked up', at(order.pickedAt) ?? 'Rider collects your order from the store.', Icons.shopping_bag_outlined),
+        const _TimelineStep('On the way', 'Rider is heading to your pin.', Icons.near_me_outlined),
+        const _TimelineStep('At your door', 'Your rider is here. Share your handover code once you have your items.',
+            Icons.where_to_vote_outlined),
+        _TimelineStep('Delivered', at(order.deliveredAt) ?? 'Rider confirms at your location.', Icons.check_circle_outline),
       ];
       const index = {'pending': 0, 'confirmed': 1, 'packed': 2, 'ready_for_pickup': 3, 'picked': 4, 'on_the_way': 5};
-      current = order.status == 'delivered' ? steps.length : (index[order.status] ?? 0);
+      current = order.status == 'delivered'
+          ? steps.length
+          : (order.status == 'on_the_way' && riderAtDoor ? 6 : (index[order.status] ?? 0));
     } else {
       steps = [
-        _TimelineStep('Order placed', at(placedAt) ?? 'Payment held in escrow.'),
-        const _TimelineStep('Confirmed by store', 'The store accepted your order.'),
-        const _TimelineStep('Packed', 'Your items are packed.'),
-        const _TimelineStep('Ready for pickup', 'Head to the store to collect your order.'),
-        _TimelineStep('Collected', at(order.pickedAt) ?? 'Mark it once you have your bags.'),
-        _TimelineStep('Received', at(order.deliveredAt) ?? 'Confirm you received everything.'),
+        _TimelineStep('Order placed', at(placedAt) ?? 'Payment held in escrow.', Icons.receipt_long_outlined),
+        const _TimelineStep('Confirmed by store', 'The store accepted your order.', Icons.storefront_outlined),
+        const _TimelineStep('Packed', 'Your items are packed.', Icons.inventory_2_outlined),
+        const _TimelineStep('Ready for pickup', 'Head to the store to collect your order.', Icons.store_mall_directory_outlined),
+        _TimelineStep('Collected', at(order.pickedAt) ?? 'Mark it once you have your bags.', Icons.shopping_bag_outlined),
+        _TimelineStep('Received', at(order.deliveredAt) ?? 'Confirm you received everything.', Icons.check_circle_outline),
       ];
       const index = {'pending': 0, 'confirmed': 1, 'packed': 2, 'ready_for_pickup': 3, 'picked': 5};
       current = order.status == 'delivered' ? steps.length : (index[order.status] ?? 0);
@@ -450,21 +481,18 @@ class _OrderTrackingView extends StatelessWidget {
                   width: 24,
                   height: 24,
                   decoration: BoxDecoration(
-                    color: done ? AppColors.secondary : (active ? AppColors.primary : Colors.grey.shade200),
+                    color: done ? AppColors.secondary : (active ? AppColors.primary : AppColors.surfaceMuted),
                     shape: BoxShape.circle,
                   ),
                   child: done
                       ? const Icon(Icons.check, color: Colors.white, size: 14)
                       : active
-                          ? Container(
-                              margin: const EdgeInsets.all(6),
-                              decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                            )
+                          ? _PulsingStepIcon(icon: step.icon)
                           : null,
                 ),
                 if (!isLast)
                   Expanded(
-                    child: Container(width: 2, color: done ? AppColors.secondary : Colors.grey.shade200),
+                    child: Container(width: 2, color: done ? AppColors.secondary : AppColors.surfaceMuted),
                   ),
               ],
             ),
@@ -530,7 +558,7 @@ class _OrderTrackingView extends StatelessWidget {
     );
   }
 
-  Widget _summary(OrderModel order) {
+  Widget _summary(BuildContext context, OrderModel order) {
     Widget row(String label, String value, {bool bold = false}) => Padding(
           padding: const EdgeInsets.only(top: 6),
           child: Row(
@@ -556,8 +584,18 @@ class _OrderTrackingView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Order summary', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(child: Text('Order summary', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600))),
+              TextButton.icon(
+                onPressed: () => OrderReceiptScreen.open(context, order),
+                icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                label: const Text('Receipt'),
+                style: TextButton.styleFrom(foregroundColor: AppColors.secondary, visualDensity: VisualDensity.compact),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           ...order.items.map((item) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Row(
@@ -589,10 +627,24 @@ class _OrderTrackingView extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.place_outlined, size: 16, color: AppColors.textSecondary),
+                Icon(Icons.place_outlined, size: 16, color: AppColors.textSecondary),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(order.deliveryAddress!,
+                      style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
+                ),
+              ],
+            ),
+          ],
+          if (order.isDelivery && order.deliveryNote != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.sticky_note_2_outlined, size: 16, color: AppColors.textSecondary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text('Note for the rider: ${order.deliveryNote}',
                       style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
                 ),
               ],
@@ -607,7 +659,45 @@ class _OrderTrackingView extends StatelessWidget {
 class _TimelineStep {
   final String title;
   final String subtitle;
-  const _TimelineStep(this.title, this.subtitle);
+  final IconData icon;
+  const _TimelineStep(this.title, this.subtitle, this.icon);
+}
+
+/// Whether the rider's live position is inside the delivery geofence around the pin
+bool riderAtDoor(OrderModel order, LatLng? rider, int geofenceMeters) {
+  if (order.status != 'on_the_way' || rider == null || order.customerLat == null || order.customerLng == null) {
+    return false;
+  }
+  final meters = const Distance().as(LengthUnit.Meter, rider, LatLng(order.customerLat!, order.customerLng!));
+  return meters <= geofenceMeters;
+}
+
+/// The current step: its icon with a soft pulse, so it reads as "happening now"
+class _PulsingStepIcon extends StatefulWidget {
+  final IconData icon;
+  const _PulsingStepIcon({required this.icon});
+
+  @override
+  State<_PulsingStepIcon> createState() => _PulsingStepIconState();
+}
+
+class _PulsingStepIconState extends State<_PulsingStepIcon> with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: Tween<double>(begin: 0.85, end: 1.1).animate(CurvedAnimation(parent: _pulse, curve: Curves.easeInOut)),
+      child: Icon(widget.icon, color: Colors.white, size: 14),
+    );
+  }
 }
 
 // ══════════════════════════════════════
@@ -688,10 +778,7 @@ class _TrackingMapState extends State<_TrackingMap> {
                       onMapReady: () => _mapReady = true,
                     ),
                     children: [
-                      TileLayer(
-                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName: 'com.vendra.app',
-                      ),
+                      MapTiles.layer(),
                       PolylineLayer(
                         polylines: [
                           // Planned / remaining leg to the customer's pin
@@ -710,11 +797,11 @@ class _TrackingMapState extends State<_TrackingMap> {
                       MarkerLayer(
                         markers: [
                           if (widget.store != null)
-                            _marker(widget.store!, Icons.storefront, AppColors.secondary, widget.storeName ?? 'Store'),
+                            _marker(widget.store!, AppIcons.store, AppColors.secondary, widget.storeName ?? 'Store'),
                           if (widget.customer != null)
-                            _marker(widget.customer!, Icons.home_rounded, AppColors.pakistanGreen, 'Your drop-off pin'),
+                            _marker(widget.customer!, AppIcons.customer, AppColors.success, 'Your drop-off pin'),
                           if (widget.rider != null)
-                            _marker(widget.rider!, Icons.delivery_dining, AppColors.primary, 'Rider', large: true),
+                            _marker(widget.rider!, AppIcons.rider, AppColors.primary, 'Rider', large: true),
                         ],
                       ),
                     ],
@@ -724,7 +811,7 @@ class _TrackingMapState extends State<_TrackingMap> {
                     top: 8,
                     child: IconButton.filled(
                       tooltip: 'Show everything',
-                      style: IconButton.styleFrom(backgroundColor: Colors.white, foregroundColor: AppColors.textPrimary),
+                      style: IconButton.styleFrom(backgroundColor: AppColors.surface, foregroundColor: AppColors.textPrimary),
                       onPressed: () {
                         if (_points.length > 1) {
                           _controller.fitCamera(_fit);
@@ -745,9 +832,9 @@ class _TrackingMapState extends State<_TrackingMap> {
             runSpacing: 4,
             alignment: WrapAlignment.center,
             children: [
-              if (widget.store != null) _legend(Icons.storefront, AppColors.secondary, 'Store'),
-              if (widget.customer != null) _legend(Icons.home_rounded, AppColors.pakistanGreen, 'You'),
-              if (widget.rider != null) _legend(Icons.delivery_dining, AppColors.primary, 'Rider (live)'),
+              if (widget.store != null) _legend(AppIcons.store, AppColors.secondary, 'Store'),
+              if (widget.customer != null) _legend(AppIcons.customer, AppColors.success, 'You'),
+              if (widget.rider != null) _legend(AppIcons.rider, AppColors.primary, 'Rider (live)'),
               if (widget.path.length > 1) _legend(Icons.timeline, AppColors.primary, 'Trip so far'),
             ],
           ),

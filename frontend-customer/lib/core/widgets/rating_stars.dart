@@ -94,7 +94,7 @@ class RatingInput extends StatelessWidget {
           }),
         ),
         if (value > 0)
-          Text(_labels[value], style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          Text(_labels[value], style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
       ],
     );
   }

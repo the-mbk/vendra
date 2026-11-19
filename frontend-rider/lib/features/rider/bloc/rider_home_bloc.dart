@@ -467,6 +467,7 @@ class RiderHomeBloc extends Bloc<RiderHomeEvent, RiderHomeState> {
     emit(state.copyWith(acceptingId: event.orderId));
     try {
       final res = await _api.post(ApiConfig.acceptTask(event.orderId));
+      _location.deliveryStarted(); // 10 s location updates from now on (PR 03)
       emit(state.copyWith(
         clearAccepting: true,
         activeOrderId: event.orderId,

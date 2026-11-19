@@ -3,6 +3,8 @@
 //   payout = base fee
 //          + rate per km × GPS distance from pickup to drop-off
 //          + rate per min × waiting minutes beyond the free allowance
+//            (waiting never counts past rider_store_wait_max_min: by then the
+//             delivery has gone back to other riders)
 // Distance comes from the rider's location pings for this order. With fewer
 // than two pings (GPS lost) it falls back to the straight line store → customer.
 // ══════════════════════════════════════════════════════════════
@@ -89,7 +91,8 @@ async function computeTrip(client, order, policies, finalPoint) {
     source = 'straight_line';
   }
 
-  const waitMin = waitingMinutes(order);
+  const cap = Number(policies.rider_store_wait_max_min);
+  const waitMin = cap > 0 ? Math.min(waitingMinutes(order), cap) : waitingMinutes(order);
   return {
     distanceKm: Math.round(distanceKm * 1000) / 1000,
     waitMinutes: Math.round(waitMin * 100) / 100,

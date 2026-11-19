@@ -123,17 +123,17 @@ class _ReservationCountdownState extends State<ReservationCountdown> {
     final left = deadline.difference(_now());
     final expired = left <= Duration.zero;
     const color = AppColors.reservedAmber;
-    const ink = Color(0xFF8A5A00);
+    final ink = AppColors.warningInk;
 
     final message = expired
         ? const TextSpan(text: 'Reservation time is up — checking with the store…')
         : TextSpan(children: [
-            const TextSpan(text: 'Items reserved for '),
+            const TextSpan(text: 'The store has '),
             TextSpan(
               text: formatCountdown(left),
               style: const TextStyle(fontWeight: FontWeight.w700, fontFeatures: [FontFeature.tabularFigures()]),
             ),
-            const TextSpan(text: ' while the store confirms'),
+            const TextSpan(text: ' to accept and pack this order'),
           ]);
 
     if (widget.compact) {
@@ -142,7 +142,7 @@ class _ReservationCountdownState extends State<ReservationCountdown> {
           Icon(expired ? Icons.hourglass_bottom_rounded : Icons.timer_outlined, size: 15, color: color),
           const SizedBox(width: 6),
           Expanded(
-            child: Text.rich(message, style: const TextStyle(fontSize: 12, color: ink)),
+            child: Text.rich(message, style: TextStyle(fontSize: 12, color: ink)),
           ),
         ],
       );
@@ -155,9 +155,9 @@ class _ReservationCountdownState extends State<ReservationCountdown> {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF8E1),
+        color: AppColors.warningSurface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.amber.shade200),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -170,7 +170,7 @@ class _ReservationCountdownState extends State<ReservationCountdown> {
               Expanded(
                 child: Text.rich(
                   message,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: ink),
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: ink),
                 ),
               ),
             ],
@@ -183,15 +183,16 @@ class _ReservationCountdownState extends State<ReservationCountdown> {
                 value: fraction,
                 minHeight: 5,
                 color: color,
-                backgroundColor: Colors.amber.shade100,
+                backgroundColor: color.withValues(alpha: 0.2),
               ),
             ),
           ],
           const SizedBox(height: 8),
-          const Text(
-            'Your units are held for you and can\'t be sold to walk-in customers. If the store '
-            'doesn\'t accept in time, they\'re released and you\'re refunded in full.',
-            style: TextStyle(fontSize: 11, height: 1.4, color: Color(0xFF6D4C00)),
+          Text(
+            "Your units are reserved and can't be sold to walk-in customers. If the store doesn't "
+            'accept in time, the reservation expires and your payment is automatically refunded '
+            '100% to your Vendra Wallet.',
+            style: TextStyle(fontSize: 11, height: 1.4, color: ink),
           ),
         ],
       ),

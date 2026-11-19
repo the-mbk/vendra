@@ -4,6 +4,7 @@
 
 export 'config/api_config.dart';
 export 'config/app_theme.dart';
+export 'config/theme_cubit.dart';
 
 export 'core/models/json_utils.dart';
 export 'core/models/product_model.dart';
@@ -18,6 +19,7 @@ export 'core/models/page_meta.dart';
 export 'core/models/payment_model.dart';
 export 'core/models/app_config_model.dart';
 export 'core/models/review_model.dart';
+export 'core/models/chat_message.dart';
 
 export 'core/utils/card_utils.dart';
 
@@ -30,12 +32,14 @@ export 'core/services/storage_service.dart';
 export 'core/services/realtime_service.dart';
 export 'core/services/notification_center.dart';
 export 'core/services/contact_launcher.dart';
+export 'core/services/maps_launcher.dart';
 
 export 'core/widgets/vendra_button.dart';
 export 'core/widgets/vendra_text_field.dart';
 export 'core/widgets/loading_shimmer.dart';
 export 'core/widgets/product_card.dart';
 export 'core/widgets/map_picker_widget.dart';
+export 'core/widgets/map_tiles.dart';
 export 'core/widgets/notification_bell.dart';
 export 'core/widgets/product_image.dart';
 export 'core/widgets/account_screens.dart';
@@ -52,3 +56,7 @@ export 'core/widgets/dev_banner.dart';
 export 'core/widgets/vendra_brand_header.dart';
 export 'core/widgets/rating_stars.dart';
 export 'core/widgets/store_logo.dart';
+export 'core/widgets/order_chat.dart';
+export 'core/widgets/user_avatar.dart';
+export 'core/widgets/profile_editor.dart';
+export 'core/widgets/connection_banner.dart';

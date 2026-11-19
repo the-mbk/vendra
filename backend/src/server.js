@@ -15,12 +15,13 @@ try {
 
 const { createServer } = require('./app');
 const { releaseDueEscrows } = require('./services/orderSettlement.service');
-const { cancelStaleOrders } = require('./services/orderTimeouts.service');
+const { cancelStaleOrders, releaseIdleRiders } = require('./services/orderTimeouts.service');
 const { reconcileOpen, fundOpeningBalances } = require('./services/payments.service');
 const { initStorage } = require('./services/storage.service');
+const { recordSweep, SWEEP_SECONDS } = require('./services/sweepStatus');
 
 const PORT = process.env.PORT || 3000;
-const SWEEP_MS = 30 * 1000;
+const SWEEP_MS = SWEEP_SECONDS * 1000;
 
 const { server } = createServer();
 
@@ -53,13 +54,16 @@ initStorage()
   });
 
 // Background work, every 30 seconds:
-//   release escrow whose dispute window has passed, cancel and refund stalled orders,
+//   release escrow whose dispute window has passed, take deliveries back from riders
+//   who never reached the store, cancel and refund stalled orders,
 //   catch up on payments/payouts whose webhooks went missing, and (development only)
 //   back the demo data's opening balances with funds at the gateway
 let openingFunded = !isDevelopment;
 async function sweep() {
   const released = await releaseDueEscrows();
   if (released) console.log(`💸 Released escrow for ${released} order(s)`);
+  const reassigned = await releaseIdleRiders();
+  if (reassigned) console.log(`🛵 Put ${reassigned} delivery(ies) back in the rider pool (rider never reached the store)`);
   const cancelled = await cancelStaleOrders();
   if (cancelled) console.log(`⏱  Cancelled and refunded ${cancelled} stalled order(s)`);
   const fixed = await reconcileOpen();
@@ -72,7 +76,15 @@ async function sweep() {
     }
   }
 }
-setTimeout(() => sweep().catch((err) => console.error('Sweep failed:', err.message)), 2000).unref();
-setInterval(() => sweep().catch((err) => console.error('Sweep failed:', err.message)), SWEEP_MS).unref();
+
+/** Runs one sweep and records the outcome for the admin's platform health panel */
+function runSweep() {
+  return sweep().then(() => recordSweep(null), (err) => {
+    recordSweep(err);
+    console.error('Sweep failed:', err.message);
+  });
+}
+setTimeout(runSweep, 2000).unref();
+setInterval(runSweep, SWEEP_MS).unref();
 
 module.exports = server;

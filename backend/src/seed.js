@@ -29,7 +29,7 @@ const { fillStoreCovers } = require('./backfillImages');
 const { haversineKm } = require('./utils/geo');
 const { deliveryFeePaisa } = require('./services/deliveryFee');
 const { payoutBreakdown } = require('./services/riderPayout.service');
-const { toPaisa, paisaToString, percentOf } = require('./utils/money');
+const { toPaisa, paisaToString, percentOf, commissionBreakdown } = require('./utils/money');
 
 const PASSWORD_HASH = '$2b$10$wxA3oAhNajZeHYp3m8a.YeMXgbOYx0QlSIDZlgWPJtW2le7OWS2se'; // password123
 const MIN = 60 * 1000;
@@ -294,7 +294,7 @@ function buildDataset({ users: totalUsers }, catalog, policy, now) {
         // Escrow released after the dispute window
         o.settledAt = o.dueAt;
         const commission = percentOf(subtotal, policy.commission_pct);
-        events.push({ user: v.user, at: o.settledAt, type: 'escrow_release', amount: subtotal - commission, orderId: id, description: `Escrow released for Order #${id} (after ${policy.commission_pct}% commission)` });
+        events.push({ user: v.user, at: o.settledAt, type: 'escrow_release', amount: subtotal - commission, orderId: id, description: `Escrow released for Order #${id}: ${commissionBreakdown(subtotal, policy.commission_pct, commission)}` });
         if (commission) platform.push({ orderId: id, type: 'commission', amount: commission, at: o.settledAt });
         if (fee - o.payout) platform.push({ orderId: id, type: 'delivery_margin', amount: fee - o.payout, at: o.settledAt });
       } else {
@@ -458,10 +458,10 @@ async function writeDataset(client, d) {
       rd.cnic, rd.license, rd.plate, rd.approval, rd.rejection, rd.reviewedAt]));
   await bulkInsert(client, 'products',
     ['id', 'vendor_id', 'name', 'description', 'price', 'private_stock', 'buffer', 'reserved_quantity', 'public_stock', 'barcode', 'image_url', 'category_id', 'is_approved', 'is_active', 'created_at', 'updated_at',
-      'rating_sum', 'rating_count'],
+      'rating_sum', 'rating_count', 'weight_grams'],
     d.products.map((p) => [p.id, p.vendor.id, p.name, p.description, money(p.pricePaisa), p.finalStock, p.buffer, 0,
       Math.max(0, p.finalStock - p.buffer), p.barcode, p.item.imageFile ? `/uploads/products/catalog-${p.item.key}.webp` : null,
-      p.item.categoryId, p.approved, true, p.created, p.created, p.ratingSum || 0, p.ratingCount || 0]));
+      p.item.categoryId, p.approved, true, p.created, p.created, p.ratingSum || 0, p.ratingCount || 0, p.item.weightGrams]));
   await bulkInsert(client, 'product_images', ['product_id', 'url', 'position'],
     d.products.flatMap((p) => p.item.extraImageFiles.map((file, n) => [p.id, `/uploads/products/catalog-${p.item.key}-${n + 2}.webp`, n])));
   await bulkInsert(client, 'orders',
