@@ -17,7 +17,8 @@ function allowedOrigins() {
 function isOriginAllowed(origin) {
   // Mobile apps and server-to-server calls send no Origin header
   if (!origin) return true;
-  if (allowedOrigins().includes(origin)) return true;
+  const origins = allowedOrigins();
+  if (origins.includes('*') || origins.includes(origin)) return true;
   return isDevelopment && LOCALHOST_ORIGIN.test(origin);
 }
 
